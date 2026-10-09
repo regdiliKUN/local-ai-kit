@@ -183,6 +183,7 @@ html, body {
   background: var(--surface); color: var(--text);
 }
 .custom-row input[type=text]:disabled { opacity: .5; }
+.custom-err { margin: 8px 0 0; font-size: 12.5px; color: var(--err); }
 .hint-link { font-size: 12.5px; color: var(--accent); text-decoration: none; }
 .hint-link:hover { text-decoration: underline; }
 

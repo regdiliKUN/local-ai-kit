@@ -5,11 +5,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 
 import { modelsForVram, recommendModel, pickContextWindow, modelInfo, DEFAULT_MODEL } from './models.mjs';
-
-const OLLAMA_BASE = 'http://127.0.0.1:11434';
+import { OLLAMA_BASE, findOllama, hasModel } from './ollama.mjs';
 
 function run(cmd, timeout = 8000) {
   try {
@@ -41,15 +40,43 @@ export function detectNode() {
 
 export function detectGpu() {
   const out = run('nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader');
-  if (!out) return { found: false, name: null, vramGB: 0, driver: null };
-  const first = out.split(/\r?\n/)[0];
-  const [name, mem, driver] = first.split(',').map((s) => s.trim());
-  return {
-    found: true,
-    name,
-    vramGB: Math.round(parseInt(mem, 10) / 1024),
-    driver,
-  };
+  if (out) {
+    // 多卡时取显存最大的那张
+    const gpus = out.split(/\r?\n/).filter(Boolean).map((line) => {
+      const [name, mem, driver] = line.split(',').map((s) => s.trim());
+      return { found: true, vendor: 'nvidia', name, vramGB: Math.round(parseInt(mem, 10) / 1024) || 0, driver };
+    });
+    gpus.sort((a, b) => b.vramGB - a.vramGB);
+    if (gpus[0]) return gpus[0];
+  }
+  return detectOtherGpu() || { found: false, vendor: null, name: null, vramGB: 0, driver: null };
+}
+
+/**
+ * 非 NVIDIA 显卡：从显卡驱动的注册表项读显存（WMI 的 AdapterRAM 最多只能报 4GB，不可靠）。
+ * Ollama 只支持部分 AMD 显卡加速，不支持时会退回 CPU。
+ */
+export function detectOtherGpu() {
+  const ps = [
+    "$k='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*'",
+    'Get-ItemProperty $k -ErrorAction SilentlyContinue | ForEach-Object {',
+    "  $m=$_.'HardwareInformation.qwMemorySize'",
+    "  if(-not $m){$m=$_.'HardwareInformation.MemorySize'; if($m -is [byte[]]){$m=[BitConverter]::ToUInt32($m,0)}}",
+    "  '{0}|{1}' -f $_.DriverDesc,[uint64]$m }",
+  ].join('\n');
+  const r = spawnSync('powershell', ['-NoProfile', '-Command', ps], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  if (r.status !== 0 || !r.stdout) return null;
+  const gpus = r.stdout.split(/\r?\n/).map((line) => {
+    const [name, bytes] = line.split('|');
+    return { name: (name || '').trim(), vramGB: Math.round(Number(bytes || 0) / 1024 ** 3) };
+  }).filter((g) => g.name && !/Microsoft|Basic|Virtual|Remote|Parsec|Meta/i.test(g.name));
+  if (!gpus.length) return null;
+  gpus.sort((a, b) => b.vramGB - a.vramGB);
+  const g = gpus[0];
+  const vendor = /AMD|Radeon/i.test(g.name) ? 'amd' : /Intel/i.test(g.name) ? 'intel' : 'other';
+  // 集成显卡 / 识别不出显存时按无独显处理
+  if (vendor === 'intel' || g.vramGB < 2) return { found: false, vendor, name: g.name, vramGB: 0, driver: null };
+  return { found: true, vendor, name: g.name, vramGB: g.vramGB, driver: null };
 }
 
 export function detectDisks() {
@@ -67,18 +94,8 @@ export function detectDisks() {
   return out;
 }
 
-export function findOllamaExe() {
-  const probes = [
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Ollama', 'ollama.exe'),
-    'C:\\Program Files\\Ollama\\ollama.exe',
-  ];
-  for (const p of probes) if (p && fs.existsSync(p)) return p;
-  const w = run('where ollama');
-  return w ? w.split(/\r?\n/)[0].trim() : null;
-}
-
 export async function detectOllama() {
-  const exe = findOllamaExe();
+  const exe = findOllama();
   const ver = await fetchJson(`${OLLAMA_BASE}/api/version`);
   const tags = ver ? await fetchJson(`${OLLAMA_BASE}/api/tags`) : null;
   return {
@@ -106,14 +123,6 @@ export function findModelDir(model, disks) {
     if (hasModel(c, model)) return c;
   }
   return null;
-}
-
-export function hasModel(dir, model) {
-  if (!dir) return false;
-  const [name, tag = 'latest'] = model.split(':');
-  try {
-    return fs.existsSync(path.join(dir, 'manifests', 'registry.ollama.ai', 'library', name, tag));
-  } catch { return false; }
 }
 
 export function pickInstallRoot() {
@@ -166,7 +175,8 @@ export async function detectAll() {
 
   const issues = [];
   if (!node.ok) issues.push({ level: 'error', text: `Node.js 版本偏低（${node.version}），请升级到 20 以上` });
-  if (!gpu.found) issues.push({ level: 'warn', text: '未检测到 NVIDIA 显卡 —— 只能用很小的模型，速度会很慢' });
+  if (!gpu.found) issues.push({ level: 'warn', text: '未检测到可用的独立显卡 —— 只能用很小的模型，速度会很慢' });
+  else if (gpu.vendor === 'amd') issues.push({ level: 'warn', text: 'AMD 显卡：Ollama 只支持部分型号加速，不支持时会退回 CPU 运行（很慢）' });
   if (!ollama.installed) issues.push({ level: 'warn', text: '未检测到 Ollama，需要先安装（会请求管理员权限）' });
   if (!root) issues.push({ level: 'error', text: '找不到可写的安装目录（需要纯英文路径）' });
   if (!elevated) issues.push({ level: 'info', text: '当前非管理员权限 —— 安装到用户目录不需要管理员，安装 Ollama 时需要' });

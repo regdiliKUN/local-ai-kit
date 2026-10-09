@@ -60,6 +60,11 @@
       <h1>模型存放在哪里</h1>
       <p class="lead" id="locLead">模型约需 <b id="needSpace">20</b> GB。建议放在空间充足的盘上。</p>
       <div class="disks" id="diskList"></div>
+      <div class="custom-row">
+        <span class="check">或者自己指定文件夹</span>
+        <input type="text" id="customDir" placeholder="例如 D:\AI\ollama\models" spellcheck="false">
+      </div>
+      <p class="custom-err" id="customDirErr" hidden>请输入完整路径，以盘符开头，例如 D:\AI\models</p>
       <div class="tip">
         <b>建议避开叠瓦盘（SMR）</b> —— 这类硬盘持续写入会掉速、寿命也差。
         拿不准就选 SSD，或选那块较新的机械硬盘。

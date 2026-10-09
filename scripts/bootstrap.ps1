@@ -99,12 +99,27 @@ Write-Host '  按回车开始自动安装（Ctrl+C 取消）... ' -NoNewline -Fo
 Read-Host | Out-Null
 Say ''
 
-# ---- 查询最新 LTS 版本 ----
+# ---- 判断 CPU 架构（ARM 电脑要装 arm64 版，新版 Node 已不提供 32 位） ----
+$cpu = $env:PROCESSOR_ARCHITEW6432
+if (-not $cpu) { $cpu = $env:PROCESSOR_ARCHITECTURE }
+switch ($cpu) {
+    'ARM64' { $arch = 'arm64' }
+    'AMD64' { $arch = 'x64' }
+    default { $arch = 'x86' }
+}
+
+# 让旧版 Windows 的 PowerShell 也能用 TLS 1.2 连 nodejs.org
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+
+# ---- 查询最新的、提供本机安装包的 LTS 版本 ----
 Say '  [1/3] 正在查询最新版本...' 'Cyan'
 $lts = $null
 try {
     $idx = Invoke-RestMethod -Uri 'https://nodejs.org/dist/index.json' -TimeoutSec 30 -UseBasicParsing
-    $lts = $idx | Where-Object { $_.lts } | Select-Object -First 1
+    # index.json 里 arm64 只登记了 zip，但 msi 同样存在（下面会用 SHASUMS256.txt 确认）
+    $lts = $idx | Where-Object {
+        $_.lts -and ($_.files -contains "win-$arch-zip") -and ([int](($_.version -replace '^v', '') -split '\.')[0] -ge 20)
+    } | Select-Object -First 1
 } catch {
     $lts = $null
 }
@@ -124,7 +139,6 @@ if (-not $lts) {
 }
 
 $ver = $lts.version
-if ([Environment]::Is64BitOperatingSystem) { $arch = 'x64' } else { $arch = 'x86' }
 $file = "node-$ver-$arch.msi"
 $url = "https://nodejs.org/dist/$ver/$file"
 $out = Join-Path $env:TEMP $file
@@ -150,6 +164,25 @@ if (-not $ok -or -not (Test-Path $out)) {
 }
 $mb = [math]::Round((Get-Item $out).Length / 1MB, 1)
 Say "        下载完成（$mb MB）"
+
+# ---- 校验 SHA256：和 nodejs.org 公布的校验值对不上就不安装 ----
+$expected = $null
+try {
+    $sums = Invoke-RestMethod -Uri "https://nodejs.org/dist/$ver/SHASUMS256.txt" -TimeoutSec 30 -UseBasicParsing
+    foreach ($line in ($sums -split "`n")) {
+        $parts = $line.Trim() -split '\s+'
+        if ($parts.Count -eq 2 -and $parts[1] -eq $file) { $expected = $parts[0].ToLower() }
+    }
+} catch { $expected = $null }
+$actual = (Get-FileHash -LiteralPath $out -Algorithm SHA256).Hash.ToLower()
+if (-not $expected -or $expected -ne $actual) {
+    Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+    Say ''
+    Say '  安装包校验失败（文件可能损坏或被篡改），已删除，没有安装。' 'Red'
+    Say '  请重试，或手动到 https://nodejs.org/zh-cn/download 下载 LTS 版本。'
+    exit 1
+}
+Say '        校验通过'
 
 # ---- 安装 ----
 Say '  [3/3] 正在安装 —— 请在弹出窗口点「是」授权' 'Cyan'

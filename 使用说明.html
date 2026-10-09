@@ -122,13 +122,17 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p><strong>Q：想换一个模型？</strong></p>
 <p>重新双击「① 双击这里开始安装.cmd」，在选模型那一步选别的即可。</p>
 <p><strong>Q：想换模型存放的盘？</strong></p>
-<p>改 <code>配置.json</code> 里的 <code>modelDir</code>（比如 <code>"E:\\ollama\\models"</code>），然后重新运行安装向导。</p>
+<p>重新运行安装向导，在「存放位置」那一步点另一块盘，或者在下面的输入框里填完整路径（比如 <code>E:\AI\ollama\models</code>）。</p>
 <p>注意这会在新位置<strong>重新下载</strong>一份模型；旧的可以手动删掉释放空间。</p>
 <p><strong>Q：桌面图标显示成旧的 / 白的？</strong></p>
 <p>在桌面空白处按 <code>F5</code> 刷新。</p>
 <p><strong>Q：可以装到别的电脑吗？</strong></p>
 <p>可以。把这个文件夹整个复制过去，在新电脑上双击「① 双击这里开始安装.cmd」即可。</p>
 <p>（模型文件在另一台机器上会重新下载）</p>
+<p><strong>Q：用的是 AMD 显卡？</strong></p>
+<p>向导会识别 AMD 显卡的显存并推荐模型。但 Ollama 只支持部分 AMD 型号加速，不支持的会退回 CPU 运行，速度很慢。</p>
+<p><strong>Q：启动时提示「运行中的 Ollama 用的不是配置的模型目录」？</strong></p>
+<p>正常现象。开机自启的 Ollama 可能用的是别的目录，启动器会自动用正确的目录重启它。</p>
 <p><strong>Q：喜欢黑窗口 / 要写脚本自动化？</strong></p>
 <p>双击 <code>备用-命令行安装.cmd</code>，功能一样，但没有图形界面。</p>
 <hr>
@@ -154,10 +158,11 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <table><thead><tr><th>内容</th><th>位置</th><th>大小</th></tr></thead><tbody><tr><td>程序本体</td><td><code>C:\Users\你\AppData\Local\Programs\LocalAI</code></td><td>约 520 MB</td></tr><tr><td>模型文件</td><td>你在向导里选的盘，如 <code>I:\ollama\models</code></td><td>约 17 GB</td></tr></tbody></table>
 <p>安装目录里还有：</p>
 <ul><li><code>配置.json</code> — 模型、模型目录、上下文长度，可以直接改</li><li><code>重建桌面图标.cmd</code> — 快捷方式被误删时双击它恢复</li></ul>
+<p>安装向导还会写入几个<strong>用户环境变量</strong>（<code>OLLAMA_MODELS</code>、<code>OLLAMA_CONTEXT_LENGTH</code>、<code>OLLAMA_FLASH_ATTENTION</code>、<code>OLLAMA_KV_CACHE_TYPE</code>、<code>OLLAMA_KEEP_ALIVE</code>），让开机自启的 Ollama 也用同一个模型目录和参数。</p>
 <hr>
 <h2>卸载</h2>
-<ol><li>双击桌面「停止本地AI」停止服务</li><li>删除桌面上的两个快捷方式</li><li>删除 <code>C:\Users\你\AppData\Local\Programs\LocalAI</code></li><li>删除模型目录（如 <code>I:\ollama\models</code>，约 17GB）</li><li>可选：在「设置 → 应用」里卸载 Ollama 和 Node.js</li></ol>
+<ol><li>双击桌面「停止本地AI」停止服务</li><li>删除桌面上的两个快捷方式</li><li>删除 <code>C:\Users\你\AppData\Local\Programs\LocalAI</code></li><li>删除模型目录（如 <code>I:\ollama\models</code>，约 17GB）</li><li>删除环境变量：在开始菜单搜「编辑账户的环境变量」，删掉以 <code>OLLAMA_</code> 开头的几项</li><li>可选：在「设置 → 应用」里卸载 Ollama 和 Node.js</li></ol>
 <hr>
 <h2>安全提醒</h2>
-<ul><li><strong>不要把 Ollama（11434 端口）或工作台（3080 端口）映射到公网</strong></li><li>让 AI 首次操作时，先用一个<strong>可以随便丢的文件夹</strong>试，确认没问题再指向重要项目</li><li>本地模型不会把你的内容发到网上 —— 这正是本地部署的意义</li></ul></div>
+<ul><li><strong>不要把 Ollama（11434 端口）或工作台（3080 端口）映射到公网</strong></li><li>让 AI 首次操作时，先用一个<strong>可以随便丢的文件夹</strong>试，确认没问题再指向重要项目</li><li>本地模型不会把你的内容发到网上 —— 这正是本地部署的意义</li><li>安装向导只接受来自它自己页面的操作，其他网页无法借它安装程序；下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</li></ul></div>
 </body></html>

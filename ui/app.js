@@ -2,6 +2,19 @@
 
 const $ = (id) => document.getElementById(id);
 
+/** POST 到安装服务；必须带服务端注入的令牌，否则会被拒绝 */
+async function post(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-LocalAI-Token': window.__TOKEN__ || '' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  let data = {};
+  try { data = await r.json(); } catch { /* 无内容 */ }
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
 const state = {
   detect: null,
   step: 'detect',
@@ -98,8 +111,13 @@ function renderDetect(d) {
   });
 
   cards.push(d.gpu.found
-    ? { k: '显卡', v: d.gpu.name, s: `${d.gpu.vramGB} GB 显存 · 驱动 ${d.gpu.driver}`, cls: 'ok' }
-    : { k: '显卡', v: '未检测到 NVIDIA 显卡', s: '只能用很小的模型，速度会很慢', cls: 'warn' });
+    ? {
+      k: '显卡',
+      v: d.gpu.name,
+      s: `${d.gpu.vramGB} GB 显存` + (d.gpu.driver ? ` · 驱动 ${d.gpu.driver}` : ''),
+      cls: d.gpu.vendor === 'nvidia' ? 'ok' : 'warn',
+    }
+    : { k: '显卡', v: d.gpu.name || '未检测到独立显卡', s: '只能用很小的模型，速度会很慢', cls: 'warn' });
 
   cards.push(d.ollama.installed
     ? { k: 'Ollama', v: d.ollama.running ? '已安装并运行中' : '已安装', s: d.ollama.version ? `版本 ${d.ollama.version}` : '', cls: 'ok' }
@@ -135,7 +153,7 @@ function renderDetect(d) {
 
 function renderEnvBadge(d) {
   $('envBadge').innerHTML = d.gpu.found
-    ? `<b>${esc(d.gpu.name.replace('NVIDIA GeForce ', ''))}</b><br>${d.gpu.vramGB} GB 显存`
+    ? `<b>${esc(d.gpu.name.replace(/^(NVIDIA GeForce|AMD Radeon) /, ''))}</b><br>${d.gpu.vramGB} GB 显存`
     : '<b>未检测到独显</b>';
 }
 
@@ -144,7 +162,7 @@ function renderEnvBadge(d) {
 function renderModels(d) {
   const gpuText = d.gpu.found
     ? `检测到 <b>${esc(d.gpu.name)}</b>（${d.gpu.vramGB} GB 显存），下面只列出跑得动的模型。`
-    : '未检测到 NVIDIA 显卡，只列出最小的几个模型。';
+    : '未检测到可用的独立显卡，只列出最小的几个模型。';
   $('modelLead').innerHTML = gpuText;
 
   $('modelCards').innerHTML = d.models.map((m) => `
@@ -197,10 +215,14 @@ function selectModelCard(tag) {
 function updateContext() {
   const d = state.detect;
   const info = d && d.models.find((m) => m.tag === state.model);
-  const gb = info ? info.gb : 0;
   const vram = d ? d.gpu.vramGB : 0;
-  const spare = vram - gb;
-  state.contextWindow = spare >= 7 ? 32768 : spare >= 3.5 ? 16384 : spare >= 1.5 ? 8192 : 4096;
+  if (info) {
+    const spare = vram - info.gb;
+    state.contextWindow = spare >= 7 ? 32768 : spare >= 3.5 ? 16384 : spare >= 1.5 ? 8192 : 4096;
+  } else {
+    // 手动输入的模型不知道体积，保守取 8K，装好后可在 配置.json 里调大
+    state.contextWindow = 8192;
+  }
   footerMsg(state.model ? `已选择：${state.model}　上下文 ${state.contextWindow}` : '请选择或输入一个模型');
   updateNext();
 }
@@ -225,16 +247,38 @@ function renderDisks(d) {
   for (const el of document.querySelectorAll('#diskList .disk')) {
     el.addEventListener('click', () => {
       state.modelDir = el.dataset.root + 'ollama\\models';
+      $('customDir').value = '';
       selectDisk(state.modelDir);
     });
   }
 }
 
-function selectDisk(dir) {
-  for (const el of document.querySelectorAll('#diskList .disk')) {
-    el.classList.toggle('selected', dir && dir.startsWith(el.dataset.root));
+/** 自定义模型目录：必须是 X:\ 开头的完整路径 */
+function isValidDir(s) {
+  return /^[A-Za-z]:\\/.test(s) && !/[<>"|?*]/.test(s.slice(2));
+}
+
+$('customDir').addEventListener('input', (e) => {
+  const v = e.target.value.trim().replace(/\//g, '\\');
+  $('customDirErr').hidden = !v || isValidDir(v);
+  if (v && isValidDir(v)) {
+    state.modelDir = v;
+    selectDisk(v);
+  } else if (!v) {
+    state.modelDir = state.detect ? state.detect.suggested.modelDir : '';
+    selectDisk(state.modelDir);
+  } else {
+    state.modelDir = '';
+    selectDisk('');
   }
-  $('dirPreview').textContent = dir || '（请选择一个磁盘）';
+});
+
+function selectDisk(dir) {
+  const custom = $('customDir').value.trim() !== '';
+  for (const el of document.querySelectorAll('#diskList .disk')) {
+    el.classList.toggle('selected', !custom && !!dir && dir.startsWith(el.dataset.root));
+  }
+  $('dirPreview').textContent = dir || '（请选择一个磁盘，或输入完整路径）';
   const info = state.detect && state.detect.models.find((m) => m.tag === state.model);
   $('needSpace').textContent = info ? Math.ceil(info.gb * 1.3) : 20;
   updateNext();
@@ -267,17 +311,16 @@ async function startInstall() {
   state.finished = false;
   updateNext();
 
-  await fetch('/api/install', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      root: state.detect.install.root,
+  // 安装目录和 Ollama 路径由服务端自己检测，这里只传用户的选择
+  try {
+    await post('/api/install', {
       model: state.model,
       modelDir: state.modelDir,
       contextWindow: state.contextWindow,
-      ollamaExe: state.detect.ollama.exe,
-    }),
-  });
+    });
+  } catch (e) {
+    onEvent({ type: 'error', text: e.message });
+  }
 }
 
 function onEvent(ev) {
@@ -372,7 +415,7 @@ $('modalOk').addEventListener('click', async () => {
   hideModal();
   if (action === 'install-ollama') {
     footerMsg('正在安装 Ollama...');
-    await fetch('/api/install-ollama', { method: 'POST' });
+    try { await post('/api/install-ollama'); } catch (e) { footerMsg(e.message); }
   } else {
     footerMsg('请关闭安装向导，右键「① 双击这里开始安装.cmd」选择「以管理员身份运行」。');
   }
@@ -390,7 +433,7 @@ $('btnNext').addEventListener('click', async () => {
   else if (state.step === 'location') startInstall();
   else if (state.step === 'done' || state.step === 'install') {
     if (state.finished) {
-      await fetch('/api/quit', { method: 'POST' });
+      try { await post('/api/quit'); } catch { /* 服务可能已退出 */ }
       document.body.innerHTML =
         '<div style="display:grid;place-items:center;height:100vh;font:15px system-ui;color:#6b7280">' +
         '安装向导已关闭，可以关闭这个页面了。</div>';

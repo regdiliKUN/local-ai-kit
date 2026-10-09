@@ -1,0 +1,11 @@
+# 默认按文本处理，仓库里统一存 LF
+* text=auto
+
+# Windows 批处理和 PowerShell 必须是 CRLF：
+# LF 结尾的 .cmd 在 cmd.exe 里 goto / 标签会出错（GitHub「Download ZIP」也按这里转换）
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.ico binary
+*.png binary

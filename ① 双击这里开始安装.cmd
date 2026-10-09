@@ -3,10 +3,17 @@ setlocal
 set NODE_OPTIONS=
 title Local AI Setup
 
-rem ---- 1. locate Node.js (PATH first, then common install dirs) ----
+rem ---- 1. locate Node.js (bundled node\ first, then PATH, then common install dirs) ----
 set "FOUND="
-where node >nul 2>nul
-if not errorlevel 1 set "FOUND=1"
+if exist "%~dp0node\node.exe" (
+    set "PATH=%~dp0node;%PATH%"
+    set "FOUND=1"
+)
+
+if not defined FOUND (
+    where node >nul 2>nul
+    if not errorlevel 1 set "FOUND=1"
+)
 
 if not defined FOUND if exist "%ProgramFiles%\nodejs\node.exe" (
     set "PATH=%ProgramFiles%\nodejs;%PATH%"
@@ -22,8 +29,8 @@ if not defined FOUND goto :bootstrap
 rem ---- 2. check major version (need >= 20) ----
 set "MAJOR="
 for /f "tokens=1 delims=." %%v in ('node -v 2^>nul') do set "MAJOR=%%v"
-set "MAJOR=%MAJOR:v=%"
 if not defined MAJOR goto :bootstrap
+set "MAJOR=%MAJOR:v=%"
 if %MAJOR% LSS 20 goto :bootstrap
 
 rem ---- 3. normal path: launch the graphical installer ----
