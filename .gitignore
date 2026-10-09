@@ -7,3 +7,6 @@ ui/index.html.bak
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 打包的 Node.js 运行时（避免 90MB 进 git 历史）
+node/
