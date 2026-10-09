@@ -50,10 +50,14 @@
 ### 方式二：克隆仓库
 
 ```bash
-git clone https://github.com/<你的用户名>/<仓库名>.git
+git clone https://github.com/regdiliKUN/local-ai-kit.git
 ```
 
 然后双击 `① 双击这里开始安装.cmd`。
+
+### 方式三：从 Releases 下载
+
+到 [Releases](https://github.com/regdiliKUN/local-ai-kit/releases) 页面下载打包好的 zip。
 
 ## 硬件要求
 
