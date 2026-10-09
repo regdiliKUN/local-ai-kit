@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>本地 AI 使用说明</title><style>
+:root{--bg:#fff;--text:#1f2328;--dim:#656d76;--border:#d8dee4;--accent:#2f6fed;
+--accent-soft:#f0f5ff;--warn-soft:#fff8e6;--warn-border:#f0d9a8;--warn-text:#8a5a00;--code-bg:#f6f8fa;}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--text:#e6edf3;--dim:#8b949e;--border:#30363d;
+--accent:#6c9bff;--accent-soft:#141c2e;--warn-soft:#241f10;--warn-border:#4d3d16;--warn-text:#e3b341;--code-bg:#161b22;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+font:16px/1.75 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
+.wrap{max-width:800px;margin:0 auto;padding:56px 28px 120px;}
+h1{font-size:26px;font-weight:700;margin:52px 0 16px;padding-bottom:10px;border-bottom:2px solid var(--border);}
+h1:first-child{margin-top:0;border:0;}
+h2{font-size:19px;font-weight:600;margin:34px 0 12px;}
+h3{font-size:16.5px;font-weight:600;margin:26px 0 10px;color:var(--dim);}
+p{margin:12px 0;}
+ul,ol{margin:12px 0;padding-left:26px;}
+li{margin:6px 0;}
+a{color:var(--accent);}
+hr{border:0;border-top:1px solid var(--border);margin:40px 0;}
+code{background:var(--code-bg);border:1px solid var(--border);border-radius:5px;
+padding:1.5px 6px;font:13.5px/1.5 ui-monospace,Consolas,monospace;}
+pre{background:var(--code-bg);border:1px solid var(--border);border-radius:10px;
+padding:16px;overflow:auto;}
+pre code{background:0;border:0;padding:0;}
+blockquote{margin:16px 0;padding:12px 18px;border-left:3px solid var(--border);
+background:var(--code-bg);border-radius:0 8px 8px 0;color:var(--dim);}
+blockquote p{margin:5px 0;}
+table{border-collapse:collapse;width:100%;margin:18px 0;font-size:14.5px;}
+th,td{border:1px solid var(--border);padding:9px 13px;text-align:left;}
+th{background:var(--code-bg);font-weight:600;}
+.callout{background:var(--accent-soft);border:2px solid var(--accent);border-radius:16px;
+padding:28px 30px;margin:26px 0 34px;}
+.callout h2{margin-top:0;font-size:17px;color:var(--dim);font-weight:500;}
+.file-chip{display:block;background:var(--accent);color:#fff;font-weight:700;
+font-size:23px;text-align:center;padding:20px;border-radius:12px;margin:18px 0;
+font-family:ui-monospace,Consolas,monospace;word-break:break-all;}
+.tip{background:var(--warn-soft);border:1px solid var(--warn-border);color:var(--warn-text);
+border-radius:10px;padding:13px 17px;margin:18px 0;font-size:14.5px;}
+.tip p{margin:4px 0;}
+.topbar{background:var(--code-bg);border-bottom:1px solid var(--border);
+padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdrop-filter:blur(8px);}
+.topbar b{color:var(--text);}
+</style></head><body>
+<div class="topbar">本地 AI 部署包 · 使用说明 &nbsp;|&nbsp; <b>你只需要双击文件夹里的「① 双击这里开始安装.cmd」</b></div>
+<div class="wrap"><h1>本地 AI 使用说明</h1>
+<p>把大模型跑在<strong>你自己的显卡</strong>上，不联网、不花钱、不限次数。</p>
+<hr>
+<div class="callout">
+<h2>👉 你要做的只有一件事</h2>
+<h2>双击这个文件</h2>
+<div class="file-chip"><code>① 双击这里开始安装.cmd</code></div>
+<p>就在这个文件夹里，<strong>名字最长的那个</strong>。</p>
+<p>双击后会打开一个图形化安装向导，跟着点「继续」就行，全程不需要输入命令。</p>
+<blockquote><p><strong>就这一步。</strong> 下面的内容都是解释和备用信息，不看也能装好。</p></blockquote>
+</div>
+<h2>双击之后会发生什么</h2>
+<h3>1. 浏览器自动打开一个安装向导</h3>
+<p>左边是步骤，右边是内容。第一步会<strong>自动检测你的电脑</strong>，把结果显示成卡片：</p>
+<p>显卡型号和显存、磁盘空间、已经装了哪些组件。</p>
+<h3>2. 选择要部署的模型</h3>
+<p>向导会<strong>读你的显存，只列出跑得动的模型</strong>，最适合的那个标着「推荐」徽标。</p>
+<p>每张卡片都写了<strong>下载体积</strong>和<strong>需要多少显存</strong>，直接点一张就行。</p>
+<blockquote><p>如果之前装过模型，向导会自动找到并复用，不会重复下载。</p></blockquote>
+<h3>3. 选择模型存放在哪个盘</h3>
+<p>列出你所有分区，按空闲空间排序。<strong>点一下选中</strong>，然后点「开始安装」。</p>
+<blockquote><p>建议避开叠瓦盘（SMR）—— 这种盘持续写入会掉速、寿命也差。<br>拿不准就选 SSD，或者选那块较新的机械硬盘。</p></blockquote>
+<h3>4. 等待安装</h3>
+<p>会显示每一步的进度和实时日志。<strong>下载模型这一步最慢</strong>（十几 GB，取决于网速），</p>
+<p>其余步骤很快。中途关掉也没关系，重新双击那个文件会接着下。</p>
+<h3>5. 完成</h3>
+<p>装好后<strong>桌面上会出现两个图标</strong>，以后就用它们。</p>
+<hr>
+<h2>装好之后怎么用</h2>
+<table><thead><tr><th>桌面图标</th><th>作用</th></tr></thead><tbody><tr><td><strong>启动本地AI</strong></td><td>双击它，自动启动服务并打开浏览器工作台</td></tr><tr><td><strong>停止本地AI</strong></td><td>双击它，停止服务、把显存还给你</td></tr></tbody></table>
+<h3>日常使用就两条</h3>
+<ol><li><strong>想用 AI</strong> → 双击「启动本地AI」，浏览器会自动打开工作台</li><li><strong>不想用了 / 要玩游戏</strong> → 双击「停止本地AI」腾出显存</li></ol>
+<blockquote><p>启动后会弹出一个黑色窗口，<strong>保持它开着</strong>，它就是服务控制台。<br>关掉黑窗口等于停止服务。<br>模型运行时会占约 16GB 显存。玩大型游戏、跑渲染前建议先「停止本地AI」。</p></blockquote>
+<h3>关机</h3>
+<p><strong>随时可以关机，没有任何风险。</strong> 不会丢东西，也不会中断任何任务。</p>
+<p>重启后双击「启动本地AI」即可。</p>
+<hr>
+<h2>需要提前准备什么</h2>
+<p><strong>其实什么都不用准备</strong> —— 缺什么，安装程序会自己检测并处理。</p>
+<table><thead><tr><th>软件</th><th>没装会怎样</th></tr></thead><tbody><tr><td><strong>Node.js</strong></td><td>双击后<strong>自动下载并安装</strong>（约 30 MB），装完自动继续</td></tr><tr><td><strong>Ollama</strong></td><td>安装向导会弹窗问你，点「以管理员身份继续」就自动装</td></tr></tbody></table>
+<p>两者都会弹出一个 Windows 授权窗口，<strong>点「是」即可</strong>。</p>
+<blockquote><p>如果网络连不上官网，程序会提示你手动下载，并自动帮你打开下载页面。</p></blockquote>
+<hr>
+<h2>双击后出现英文报错怎么办</h2>
+<p>如果看到类似这样的英文：</p>
+<pre><code>&#x27;node&#x27; is not recognized as an internal or external command</code></pre>
+<p>说明电脑上没装 Node.js。</p>
+<ul><li><strong>新版已经处理了这个问题</strong> —— 双击后会显示中文提示，并自动帮你装好 Node.js。</li><li>如果你用的是旧版（2026-10-09 之前下载的），请重新下载最新版部署包，</li></ul>
+<p>  或手动到 https://nodejs.org 下载 <strong>LTS 版本</strong>装好，再双击本文件。</p>
+<hr>
+<h2>它是怎么工作的</h2>
+<p>理解这三层，用起来就不会迷糊：</p>
+<table><thead><tr><th>层</th><th>是什么</th><th>有没有界面</th></tr></thead><tbody><tr><td><strong>Ollama</strong></td><td>推理引擎，把模型跑在显卡上</td><td>没有界面，纯后台服务</td></tr><tr><td><strong>DeepSeek Harness</strong></td><td>驾驶舱，让你跟模型对话、派活</td><td>有，是浏览器里的网页</td></tr><tr><td><strong>启动器</strong></td><td>一键点火</td><td>一个黑窗口</td></tr></tbody></table>
+<p>所以你要"打开"的从来不是某个 AI 软件，而是<strong>让后台服务跑起来，然后开浏览器</strong>。</p>
+<p>桌面那两个快捷方式把这件事合成了一步。</p>
+<p>装了 DeepSeek Harness 之后，模型就不只是"会聊天的 API"了 ——</p>
+<p>它能<strong>读文件、写代码、执行命令、连续完成多步任务</strong>。</p>
+<hr>
+<h2>常见问题</h2>
+<p><strong>Q：双击后弹出一句英文报错，一闪而过？</strong></p>
+<p>那是缺 Node.js（<code>'node' is not recognized...</code>）。新版会自动帮你装 ——</p>
+<p>双击后按回车，在授权窗口点「是」即可。</p>
+<p>如果还是不行，手动到 https://nodejs.org 装 <strong>LTS 版本</strong>再重试。</p>
+<p><strong>Q：提示"没有检测到 Ollama"？</strong></p>
+<p>在向导弹出的窗口里点「以管理员身份继续」，它会自动下载安装。</p>
+<p>或者自己到 https://ollama.com/download 装好再重新运行。</p>
+<p><strong>Q：下载中断了怎么办？</strong></p>
+<p>重新双击「① 双击这里开始安装.cmd」，会接着下，不用重头来。</p>
+<p><strong>Q：浏览器打开后要求登录？</strong></p>
+<p>用控制台窗口里打印的那条<strong>带 <code>?token=</code> 的完整地址</strong>。</p>
+<p><strong>Q：回复很慢？</strong></p>
+<ul><li>第一次提问慢是正常的（模型要加载进显存，约 1 分钟）</li><li>之后应该每秒几十个字</li><li>如果一直很慢，可能是显存不够，选个小一点的模型</li></ul>
+<p><strong>Q：显存不够 / 加载失败？</strong></p>
+<p>重新运行安装向导，在选模型那一步选个更小的（向导只列跑得动的）。</p>
+<p>也可以打开安装目录的 <code>配置.json</code>，把 <code>contextWindow</code> 改小（比如 <code>16384</code>），重启。</p>
+<p><strong>Q：想换一个模型？</strong></p>
+<p>重新双击「① 双击这里开始安装.cmd」，在选模型那一步选别的即可。</p>
+<p><strong>Q：想换模型存放的盘？</strong></p>
+<p>改 <code>配置.json</code> 里的 <code>modelDir</code>（比如 <code>"E:\\ollama\\models"</code>），然后重新运行安装向导。</p>
+<p>注意这会在新位置<strong>重新下载</strong>一份模型；旧的可以手动删掉释放空间。</p>
+<p><strong>Q：桌面图标显示成旧的 / 白的？</strong></p>
+<p>在桌面空白处按 <code>F5</code> 刷新。</p>
+<p><strong>Q：可以装到别的电脑吗？</strong></p>
+<p>可以。把这个文件夹整个复制过去，在新电脑上双击「① 双击这里开始安装.cmd」即可。</p>
+<p>（模型文件在另一台机器上会重新下载）</p>
+<p><strong>Q：喜欢黑窗口 / 要写脚本自动化？</strong></p>
+<p>双击 <code>备用-命令行安装.cmd</code>，功能一样，但没有图形界面。</p>
+<hr>
+<h2>可选模型一览</h2>
+<p>安装向导会按你的显存只列出跑得动的，下表是完整参考：</p>
+<table><thead><tr><th>模型</th><th>下载体积</th><th>需要显存</th><th>适合</th></tr></thead><tbody><tr><td><code>qwen3.8:27b</code></td><td>16.8 GB</td><td>21 GB+</td><td>24GB 显存，质量最强</td></tr><tr><td><code>qwen3.6:27b</code></td><td>16.8 GB</td><td>21 GB+</td><td>24GB 显存，偏编码</td></tr><tr><td><code>qwen3:14b</code></td><td>9.3 GB</td><td>13 GB+</td><td>16GB 显存，推理强</td></tr><tr><td><code>qwen2.5:14b</code></td><td>9.0 GB</td><td>13 GB+</td><td>16GB 显存，稳</td></tr><tr><td><code>qwen3:8b</code></td><td>5.2 GB</td><td>8 GB+</td><td>8GB 显存</td></tr><tr><td><code>qwen2.5:7b</code></td><td>4.7 GB</td><td>7 GB+</td><td>轻量</td></tr><tr><td><code>qwen2.5:3b</code></td><td>1.9 GB</td><td>4 GB+</td><td>小显存 / 纯 CPU</td></tr><tr><td><code>llama3.2:3b</code></td><td>2.0 GB</td><td>4 GB+</td><td>很轻</td></tr></tbody></table>
+<p>「需要显存」已包含 KV cache 和开销余量。想用别的模型，选「手动输入其他模型」即可。</p>
+<p><strong>上下文长度</strong>由向导按「显存 − 模型体积」自动计算。</p>
+<p><strong>实测参考</strong>（RTX 4090 + Qwen3.8-27B）：显存占用约 16GB，生成速度约 70 字/秒。</p>
+<hr>
+<h2>这个文件夹里都有什么</h2>
+<pre><code>本地AI部署包\
+├── ① 双击这里开始安装.cmd   ← 你只需要双击这个（名字最长的那个）
+├── 使用说明.html            ← 本文档的网页版，双击用浏览器打开更好读
+├── 使用说明（纯文本版）.md  ← 就是你现在看的这份
+├── 备用-命令行安装.cmd      ← 高级用法，一般不用管
+├── ui\                      ← 安装向导的界面文件
+├── icons\                   ← 桌面快捷方式的图标
+└── scripts\                 ← 安装脚本</code></pre>
+<p><strong>除了第一个，其他都不用管。</strong></p>
+<hr>
+<h2>安装完成后，程序装在哪</h2>
+<table><thead><tr><th>内容</th><th>位置</th><th>大小</th></tr></thead><tbody><tr><td>程序本体</td><td><code>C:\Users\你\AppData\Local\Programs\LocalAI</code></td><td>约 520 MB</td></tr><tr><td>模型文件</td><td>你在向导里选的盘，如 <code>I:\ollama\models</code></td><td>约 17 GB</td></tr></tbody></table>
+<p>安装目录里还有：</p>
+<ul><li><code>配置.json</code> — 模型、模型目录、上下文长度，可以直接改</li><li><code>重建桌面图标.cmd</code> — 快捷方式被误删时双击它恢复</li></ul>
+<hr>
+<h2>卸载</h2>
+<ol><li>双击桌面「停止本地AI」停止服务</li><li>删除桌面上的两个快捷方式</li><li>删除 <code>C:\Users\你\AppData\Local\Programs\LocalAI</code></li><li>删除模型目录（如 <code>I:\ollama\models</code>，约 17GB）</li><li>可选：在「设置 → 应用」里卸载 Ollama 和 Node.js</li></ol>
+<hr>
+<h2>安全提醒</h2>
+<ul><li><strong>不要把 Ollama（11434 端口）或工作台（3080 端口）映射到公网</strong></li><li>让 AI 首次操作时，先用一个<strong>可以随便丢的文件夹</strong>试，确认没问题再指向重要项目</li><li>本地模型不会把你的内容发到网上 —— 这正是本地部署的意义</li></ul></div>
+</body></html>

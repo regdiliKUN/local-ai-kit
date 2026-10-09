@@ -1,0 +1,9 @@
+# 运行期生成的文件（不应提交）
+配置.json
+dsh-runtime/
+ui/index.html.bak
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store

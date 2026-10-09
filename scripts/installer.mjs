@@ -1,0 +1,237 @@
+/**
+ * 本地 AI 安装向导 —— 图形界面服务。
+ *
+ * 启动一个本地 HTTP 服务器，把界面送到浏览器，并对外提供：
+ *   GET  /api/detect          环境检测结果
+ *   GET  /api/events          SSE 安装进度流
+ *   POST /api/install         开始安装（body: {model, modelDir, contextWindow}）
+ *   POST /api/install-ollama  下载并以管理员权限安装 Ollama
+ *   POST /api/open-workbench  打开工作台
+ *   POST /api/quit            关闭安装向导
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import http from 'node:http';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+import { detectAll } from './detect.mjs';
+import { runInstall } from './install.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const KIT = path.dirname(HERE);
+const UI = path.join(KIT, 'ui');
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.png': 'image/png',
+};
+
+const clients = new Set();
+let installing = false;
+let eventLog = [];
+
+// 检测结果缓存：避免每次刷新都重跑 nvidia-smi / whoami（也避免并发重复检测）
+let detectCache = null;
+let detectAt = 0;
+async function detectCached(force = false) {
+  if (!force && detectCache && Date.now() - detectAt < 15000) return detectCache;
+  detectCache = await detectAll();
+  detectAt = Date.now();
+  return detectCache;
+}
+
+function broadcast(event) {
+  // 记入历史：新连上的客户端（含刷新后的页面）会先回放一遍，
+  // 这样安装到一半刷新不会丢进度、也不会退回向导开头。
+  eventLog.push(event);
+  if (eventLog.length > 800) eventLog.shift();
+
+  const payload = `data: ${JSON.stringify(event)}\n\n`;
+  for (const res of clients) {
+    try { res.write(payload); } catch { /* 客户端已断开 */ }
+  }
+}
+
+function json(res, code, body) {
+  const s = JSON.stringify(body);
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(s);
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let b = '';
+    req.on('data', (c) => { b += c; });
+    req.on('end', () => {
+      try { resolve(b ? JSON.parse(b) : {}); } catch { resolve({}); }
+    });
+  });
+}
+
+/* --------------------------------------------------------- 管理员权限相关 */
+
+/** 用 PowerShell 的 Start-Process -Verb RunAs 触发 UAC 授权 */
+function runElevated(file, args) {
+  const argList = args.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(',');
+  const ps = `Start-Process -FilePath '${file.replace(/'/g, "''")}' -ArgumentList ${argList} -Verb RunAs -Wait`;
+  const r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const ok = r.status === 0;
+  return { ok, detail: ok ? '' : ((r.stderr || '') + (r.stdout || '')).trim() };
+}
+
+const OLLAMA_SETUP_URL = 'https://ollama.com/download/OllamaSetup.exe';
+
+async function installOllama(emit) {
+  const tmp = path.join(os.tmpdir(), 'OllamaSetup.exe');
+  emit({ type: 'log', text: '正在下载 Ollama 安装包...' });
+
+  try {
+    const r = await fetch(OLLAMA_SETUP_URL, { redirect: 'follow' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const total = Number(r.headers.get('content-length') || 0);
+    const chunks = [];
+    let got = 0;
+    for await (const chunk of r.body) {
+      chunks.push(chunk);
+      got += chunk.length;
+      if (total) {
+        emit({ type: 'progress', percent: Math.round((got / total) * 100), text: `${(got / 1e6).toFixed(0)} MB / ${(total / 1e6).toFixed(0)} MB` });
+      }
+    }
+    fs.writeFileSync(tmp, Buffer.concat(chunks));
+    emit({ type: 'log', text: '下载完成，正在启动安装程序（请在弹出的窗口中确认）...' });
+  } catch (e) {
+    emit({ type: 'error', text: `下载 Ollama 失败：${e.message}。可手动到 https://ollama.com/download 下载安装后重试。` });
+    return false;
+  }
+
+  const r = runElevated(tmp, ['/VERYSILENT', '/NORESTART']);
+  if (!r.ok && /canceled|取消|1223/i.test(r.detail)) {
+    emit({ type: 'error', text: '你取消了管理员授权，Ollama 未安装。' });
+    return false;
+  }
+  emit({ type: 'log', text: '安装程序已结束，正在重新检测...' });
+  return true;
+}
+
+/* ------------------------------------------------------------------ 路由 */
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://127.0.0.1');
+  const p = url.pathname;
+
+  if (p === '/api/detect') {
+    return json(res, 200, await detectCached());
+  }
+
+  if (p === '/api/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(': connected\n\n');
+    for (const e of eventLog) res.write(`data: ${JSON.stringify(e)}\n\n`);
+    clients.add(res);
+    req.on('close', () => clients.delete(res));
+    return;
+  }
+
+  if (p === '/api/install' && req.method === 'POST') {
+    if (installing) return json(res, 409, { error: '安装已在进行中' });
+    const body = await readBody(req);
+    installing = true;
+    eventLog = [];
+    json(res, 202, { started: true });
+
+    const kitDir = KIT;
+    runInstall(
+      {
+        root: body.root,
+        model: body.model,
+        modelDir: body.modelDir,
+        contextWindow: body.contextWindow,
+        ollamaExe: body.ollamaExe,
+        kitDir,
+      },
+      broadcast,
+    ).catch((e) => broadcast({ type: 'error', text: String(e.message || e) }))
+      .finally(() => { installing = false; });
+    return;
+  }
+
+  if (p === '/api/install-ollama' && req.method === 'POST') {
+    json(res, 202, { started: true });
+    installOllama(broadcast).then(async (ok) => {
+      if (ok) broadcast({ type: "detect-refresh", data: await detectCached(true) });
+    });
+    return;
+  }
+
+  if (p === '/api/open-workbench' && req.method === 'POST') {
+    spawn('cmd', ['/c', 'start', '', 'http://127.0.0.1:3080'], { detached: true, stdio: 'ignore' }).unref();
+    return json(res, 200, { ok: true });
+  }
+
+  if (p === '/api/quit' && req.method === 'POST') {
+    json(res, 200, { ok: true });
+    setTimeout(() => process.exit(0), 300);
+    return;
+  }
+
+  // 静态文件
+  let file = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
+  const full = path.join(UI, file);
+  if (!full.startsWith(UI) || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('404');
+  }
+
+  // 首页把检测结果直接注入，省掉一次往返（首屏立刻可见，不闪「检测中」）
+  if (file === 'index.html') {
+    const data = await detectCached();
+    const inject = `<script>window.__DETECT__=${JSON.stringify(data).replace(/</g, '\\u003c')};</script>`;
+    const html = fs.readFileSync(full, 'utf8').replace('<script src="app.js"></script>', `${inject}\n<script src="app.js"></script>`);
+    res.writeHead(200, { 'Content-Type': MIME['.html'] });
+    return res.end(html);
+  }
+
+  res.writeHead(200, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream' });
+  fs.createReadStream(full).pipe(res);
+});
+
+/* ------------------------------------------------------------------ 启动 */
+
+function listen(port) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve(port));
+  });
+}
+
+(async () => {
+  let port = 7788;
+  for (; port < 7800; port++) {
+    try { await listen(port); break; } catch { /* 端口占用，换一个 */ }
+  }
+  const url = `http://127.0.0.1:${port}/`;
+  console.log('==================================================');
+  console.log('   本地 AI 安装向导');
+  console.log('==================================================');
+  console.log();
+  console.log(`   已在浏览器中打开：${url}`);
+  console.log('   如果没自动打开，请手动复制上面的地址。');
+  console.log();
+  console.log('   安装过程中请保持本窗口开启。');
+  console.log();
+  spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' }).unref();
+})();
