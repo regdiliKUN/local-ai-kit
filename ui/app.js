@@ -286,16 +286,149 @@ function selectDisk(dir) {
 
 /* ---------------------------------------------------------------- 安装 */
 
+/* ---------------------------------------------------------------- 安装 */
+
+/** 哪些步骤耗时较长但拿不到确切百分比 —— 用滚动条 + 计时告诉用户「还在动」 */
+const OPAQUE_STEPS = new Set(['ollama', 'dsh']);
+
+const STEP_TITLES = {
+  prepare: '准备安装目录',
+  ollama: '准备 Ollama 推理服务',
+  model: '下载模型',
+  dsh: '安装 DeepSeek Harness',
+  config: '写入配置',
+  shortcuts: '创建桌面快捷方式',
+};
+
+const PHASE_TITLES = {
+  model: '下载模型',
+  'ollama-setup': '下载 Ollama 安装包',
+};
+
+/** 每一步的运行时状态：status / 明细文字 / 起止时间 / 内部百分比 */
+const taskState = {};
+
+/** 当前是否处于「不确定进度」状态（启动服务、装依赖这种） */
+let pending = null;
+
+function fmtBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)} KB`;
+  return `${Math.round(n)} B`;
+}
+
+function fmtEta(sec) {
+  const s = Math.round(sec);
+  if (!Number.isFinite(s) || s <= 0) return '';
+  if (s < 60) return `约 ${s} 秒`;
+  if (s < 3600) return `约 ${Math.round(s / 60)} 分`;
+  return `约 ${Math.floor(s / 3600)} 小时 ${Math.round((s % 3600) / 60)} 分`;
+}
+
+/** 这一步已经跑了多久 */
+function elapsedText(t) {
+  if (!t || !t.startedAt) return '';
+  const sec = Math.max(0, Math.round(((t.endedAt || Date.now()) - t.startedAt) / 1000));
+  if (sec < 1) return '';
+  return sec < 60 ? `${sec} 秒` : `${Math.floor(sec / 60)} 分 ${String(sec % 60).padStart(2, '0')} 秒`;
+}
+
 function renderTasks() {
   $('taskList').innerHTML = TASKS.map(([id, label]) => `
-    <li data-task="${id}"><span class="ico"></span><span>${label}</span><span class="st"></span></li>`).join('');
+    <li data-task="${id}"><span class="ico"></span><span class="name">${label}</span><span class="tm"></span><span class="st"></span></li>`).join('');
+  for (const [id] of TASKS) paintTask(id);
+}
+
+function paintTask(id) {
+  const li = document.querySelector(`#taskList li[data-task="${id}"]`);
+  if (!li) return;
+  const t = taskState[id] || {};
+  li.className = t.status || '';
+  li.querySelector('.st').textContent = t.text || '';
+  li.querySelector('.tm').textContent = elapsedText(t);
 }
 
 function setTask(id, status, text) {
-  const li = document.querySelector(`#taskList li[data-task="${id}"]`);
-  if (!li) return;
-  li.className = status;
-  li.querySelector('.st').textContent = text || '';
+  const t = taskState[id] || (taskState[id] = {});
+  if (status === 'running') {
+    if (t.status !== 'running') { t.startedAt = Date.now(); t.endedAt = 0; }
+  } else if (t.startedAt && !t.endedAt) {
+    t.endedAt = Date.now();
+  }
+  t.status = status;
+  t.text = text || '';
+  paintTask(id);
+  updateOverall();
+}
+
+/** 当前步骤内部走到哪儿了（0~1）。拿不到百分比时按用时缓慢推进 */
+function stepFraction(t) {
+  if (typeof t.percent === 'number') return t.percent / 100;
+  if (!t.startedAt) return 0.1;
+  return Math.min(0.9, 0.1 + (Date.now() - t.startedAt) / 1000 / 150);
+}
+
+/** 整体进度：已完成步骤数 + 当前步骤的内部进度 */
+function updateOverall() {
+  const total = TASKS.length;
+  let done = 0;
+  let frac = 0;
+  for (const [id] of TASKS) {
+    const t = taskState[id] || {};
+    if (t.status === 'done' || t.status === 'skipped') { done++; continue; }
+    if (t.status === 'running') frac = stepFraction(t);
+    break;
+  }
+  const pct = Math.min(100, Math.round(((done + frac) / total) * 100));
+
+  $('overallWrap').hidden = false;
+  $('overallBar').style.width = `${pct}%`;
+  $('overallPct').textContent = `${pct}%`;
+  const cur = TASKS[Math.min(done, total - 1)][1];
+  $('overallLabel').textContent = done >= total ? '安装完成' : `第 ${done + 1} / ${total} 步 · ${cur}`;
+}
+
+/**
+ * 渲染当前步骤的详细进度。
+ * ev: { phase, title, percent, got, total, speed, eta, parts, text, indeterminate }
+ */
+function renderProgress(ev) {
+  const track = $('progressTrack');
+  $('progressWrap').hidden = false;
+  $('progressTitle').textContent = ev.title || PHASE_TITLES[ev.phase] || '安装进度';
+
+  if (ev.indeterminate) {
+    track.classList.add('indeterminate');
+    $('progressPct').textContent = '';
+    $('progressStats').innerHTML = `<div class="stat"><span class="v">${esc(ev.text || '正在处理…')}</span></div>`;
+    return;
+  }
+
+  pending = null;
+  track.classList.remove('indeterminate');
+
+  const pct = Math.max(0, Math.min(100, Math.round(ev.percent || 0)));
+  $('progressPct').textContent = `${pct}%`;
+  $('progressBar').style.width = `${pct}%`;
+
+  const stats = [];
+  if (ev.total > 0) stats.push(['已下载', `${fmtBytes(ev.got)} / ${fmtBytes(ev.total)}`]);
+  if (ev.speed > 0) stats.push(['速度', `${fmtBytes(ev.speed)}/s`]);
+  if (ev.eta > 0) stats.push(['剩余', fmtEta(ev.eta)]);
+  if (ev.parts) stats.push(['分片', `${ev.parts.done} / ${ev.parts.total}`]);
+  if (!stats.length && ev.text) stats.push(['', ev.text]);
+
+  $('progressStats').innerHTML = stats
+    .map(([k, v]) => `<div class="stat">${k ? `<span class="k">${k}</span>` : ''}<span class="v">${esc(v)}</span></div>`)
+    .join('');
+}
+
+/** 耗时较长、又没有百分比的步骤：滚动条 + 已用时 */
+function showPending(title, note) {
+  pending = { title, note, startedAt: Date.now() };
+  renderProgress({ title, indeterminate: true, text: `${note} 已用时 0 秒` });
 }
 
 function appendLog(text) {
@@ -305,8 +438,10 @@ function appendLog(text) {
 }
 
 async function startInstall() {
+  for (const k of Object.keys(taskState)) delete taskState[k];
+  pending = null;
   renderTasks();
-  $('progressWrap').hidden = false;
+  updateOverall();
   go('install');
   state.finished = false;
   updateNext();
@@ -338,20 +473,28 @@ function onEvent(ev) {
     setTask(ev.id, ev.status, ev.text);
     if (ev.status === 'running') {
       footerMsg(ev.text);
-      // 只有「下载模型」有百分比进度，其他步骤隐藏进度条，避免一直停在 100%
       if (ev.id === 'model') {
-        $('progressWrap').hidden = false;
-        $('progressBar').style.width = '0%';
-        $('progressText').textContent = '准备中...';
+        // 模型下载：先显示「正在获取模型信息」，拿到数据后换成真实进度
+        renderProgress({ phase: 'model', indeterminate: true, text: '正在连接模型仓库，获取模型信息…' });
+      } else if (OPAQUE_STEPS.has(ev.id)) {
+        showPending(STEP_TITLES[ev.id], ev.id === 'dsh' ? '正在安装依赖（约 1–3 分钟）' : '正在启动服务');
       } else {
+        // 其它步骤很快，没必要占一块面板
         $('progressWrap').hidden = true;
       }
+    } else if (ev.status === 'error') {
+      // 出错时保留面板，让用户看得到停在哪
+    } else if (ev.id === 'model' || OPAQUE_STEPS.has(ev.id)) {
+      pending = null;
+      $('progressWrap').hidden = true;
     }
   } else if (ev.type === 'log') {
     appendLog(ev.text);
   } else if (ev.type === 'progress') {
-    $('progressBar').style.width = `${ev.percent}%`;
-    $('progressText').textContent = `${ev.percent}%　${ev.text || ''}`;
+    const t = taskState[ev.phase];
+    if (t && typeof ev.percent === 'number' && !ev.indeterminate) t.percent = ev.percent;
+    renderProgress(ev);
+    updateOverall();
   } else if (ev.type === 'needs-elevation') {
     showModal(ev.reason, ev.hint, ev.action);
   } else if (ev.type === 'error') {
@@ -359,20 +502,27 @@ function onEvent(ev) {
     footerMsg(ev.text);
     $('installTitle').textContent = '安装未完成';
     $('installLead').textContent = '可以修正问题后重新运行安装向导。';
+    pending = null; // 停掉计时，面板停在出错那一刻
     state.finished = true;
     updateNext();
   } else if (ev.type === 'done') {
     state.finished = true;
+    pending = null;
     $('installTitle').textContent = '安装完成';
     $('installLead').textContent = '全部步骤已完成。';
-    $('progressBar').style.width = '100%';
-    $('progressText').textContent = '100%　完成';
+    $('progressWrap').hidden = true;
+    $('overallWrap').hidden = false;
+    $('overallBar').style.width = '100%';
+    $('overallPct').textContent = '100%';
+    $('overallLabel').textContent = '安装完成';
     renderSummary(ev.summary);
     footerMsg('安装完成，点击「完成」');
     updateNext();
     setTimeout(() => go('done'), 700);
   } else if (ev.type === 'detect-refresh') {
     state.detect = ev.data;
+    pending = null;
+    $('progressWrap').hidden = true;
     renderDetect(ev.data);
     renderModels(ev.data);
     renderDisks(ev.data);
@@ -447,6 +597,20 @@ function esc(s) {
 }
 
 /* ---------------------------------------------------------------- 启动 */
+
+// 每秒刷新「已用时」和整体进度：长步骤（下模型、装依赖）看起来才是「活的」
+setInterval(() => {
+  if (state.step !== 'install') return;
+  for (const [id] of TASKS) {
+    const t = taskState[id];
+    if (t && t.status === 'running') paintTask(id);
+  }
+  if (pending) {
+    const sec = Math.max(0, Math.round((Date.now() - pending.startedAt) / 1000));
+    renderProgress({ title: pending.title, indeterminate: true, text: `${pending.note} · 已用时 ${sec} 秒` });
+  }
+  updateOverall();
+}, 1000);
 
 connectSSE();
 renderTasks();

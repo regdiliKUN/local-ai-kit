@@ -77,9 +77,23 @@
       <h1 id="installTitle">正在安装</h1>
       <p class="lead" id="installLead">请保持这个页面和那个黑色窗口开着。</p>
 
+      <!-- 整体进度：第几步 / 共几步 -->
+      <div class="overall" id="overallWrap" hidden>
+        <div class="overall-head">
+          <span id="overallLabel">安装进度</span>
+          <span id="overallPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="overallBar"></div></div>
+      </div>
+
+      <!-- 当前步骤的详细进度：下载模型时显示已下载量、速度、剩余时间 -->
       <div class="progress-wrap" id="progressWrap" hidden>
-        <div class="progress"><div class="bar" id="progressBar"></div></div>
-        <div class="progress-text" id="progressText"></div>
+        <div class="progress-head">
+          <span class="progress-title" id="progressTitle">下载模型</span>
+          <span class="progress-pct" id="progressPct">0%</span>
+        </div>
+        <div class="progress" id="progressTrack"><div class="bar" id="progressBar"></div></div>
+        <div class="progress-stats" id="progressStats"></div>
       </div>
 
       <ul class="tasklist" id="taskList"></ul>

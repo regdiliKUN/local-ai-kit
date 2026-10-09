@@ -4,7 +4,13 @@
  * 通过 emit(event) 上报：
  *   { type:'step',   id, status:'running'|'done'|'skipped'|'error'|'waiting', text }
  *   { type:'log',    text }
- *   { type:'progress', percent, text }
+ *   { type:'progress', phase, percent, got, total, speed, eta, parts, text }
+ *       phase  当前属于哪一步（model / ollama-setup），界面据此显示标题
+ *       got    已下载字节数（仅模型下载有）
+ *       total  总字节数（仅模型下载有）
+ *       speed  字节/秒（仅模型下载有）
+ *       eta    预计剩余秒数（仅模型下载有）
+ *       parts  分片进度 { done, total }（仅模型下载有）
  *   { type:'needs-elevation', reason, hint }
  *   { type:'done',   summary }
  *   { type:'error',  text }
@@ -13,16 +19,192 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn, spawnSync, execSync } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { createShortcuts, findDesktop } from './make-shortcuts.mjs';
 import { saveConfig } from './config.mjs';
 import {
   isUp, servesDir, killOllama, spawnServe, waitUp, ollamaEnv, persistOllamaVars, modelCapabilities,
+  OLLAMA_BASE,
 } from './ollama.mjs';
+import { modelInfo } from './models.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ------------------------------------------------------------ 进度辅助 */
+
+const BYTE_UNITS = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 };
+
+/** 人类可读体积。用十进制单位，和 Ollama 自己的显示口径保持一致 */
+function fmtBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)} KB`;
+  return `${Math.round(n)} B`;
+}
+
+/** 把 "1.2" + "GB" 解析成字节数 */
+function parseHumanBytes(num, unit) {
+  return Number(num) * (BYTE_UNITS[String(unit).toUpperCase()] || 1);
+}
+
+/**
+ * 汇总 Ollama 的分片下载进度。
+ *
+ * 模型是分片（layer）下载的，一次可能同时下好几个分片，每个分片各有各的百分比。
+ * 只上报「某一个分片」的百分比，进度条就会来回跳，用户根本看不出到底下了多少 ——
+ * 所以这里按分片分别记账，再汇总成一个整体进度，顺带算出实时速度和剩余时间。
+ */
+export function createPullTracker(emit, expectedBytes = 0) {
+  const parts = new Map(); // 分片 id -> { got, total }
+  let firstAt = 0; // 第一个分片事件到达的时间
+  let lastAt = 0;
+  let lastGot = 0;
+  let speed = 0; // 字节/秒，指数滑动平均，避免数字乱跳
+  let lastFlush = 0;
+
+  function snapshot() {
+    let got = 0;
+    let total = 0;
+    let done = 0;
+    for (const p of parts.values()) {
+      got += p.got;
+      total += p.total;
+      if (p.total > 0 && p.got >= p.total) done++;
+    }
+    return { got, total, done, all: parts.size };
+  }
+
+  return {
+    /** 记一个分片的进度（字节） */
+    layer(id, got, total) {
+      if (!id) return;
+      if (!firstAt) firstAt = Date.now();
+      const cur = parts.get(id) || { got: 0, total: 0 };
+      if (total > 0) cur.total = total;
+      const cap = cur.total || got;
+      cur.got = Math.max(cur.got, Math.min(got, cap)); // 分片进度只增不减
+      parts.set(id, cur);
+    },
+
+    /** 刷新一次进度；默认 250ms 节流，避免刷爆 SSE */
+    flush({ force = false } = {}) {
+      const now = Date.now();
+      if (!force && now - lastFlush < 250) return;
+      lastFlush = now;
+
+      // 不知道模型标称体积时，分母只能靠「已知分片之和」，而分片是陆续出现的 ——
+      // 太早报百分比就会出现「98% 突然掉回 10%」的跳变。
+      // 所以先等分片信息稳定下来（约 1.2 秒），这期间只显示「正在获取模型信息」。
+      if (expectedBytes <= 0 && (!firstAt || now - firstAt < 1200)) {
+        emit({ type: 'progress', phase: 'model', indeterminate: true, percent: 0, text: '正在获取模型信息…' });
+        return;
+      }
+
+      const { got, total, done, all } = snapshot();
+      if (lastAt) {
+        const dt = (now - lastAt) / 1000;
+        if (dt > 0.2 && got >= lastGot) {
+          const inst = (got - lastGot) / dt;
+          speed = speed ? speed * 0.6 + inst * 0.4 : inst;
+        }
+      }
+      lastAt = now;
+      lastGot = got;
+
+      // 分母取「已知总量」和「模型标称体积」里更大的那个：
+      // 刚开始只知道少数分片，用标称体积可以避免进度虚高，也不会中途回退。
+      const denom = Math.max(total, expectedBytes);
+      const percent = denom > 0 ? Math.min(99, Math.floor((got / denom) * 100)) : 0;
+
+      emit({
+        type: 'progress',
+        phase: 'model',
+        percent,
+        got,
+        total: denom,
+        speed,
+        eta: speed > 0 && denom > got ? (denom - got) / speed : 0,
+        parts: all > 1 ? { done, total: all } : null,
+        text: `${fmtBytes(got)} / ${fmtBytes(denom)}`,
+      });
+    },
+  };
+}
+
+/**
+ * 走 Ollama 的 HTTP 接口拉模型。
+ *
+ * /api/pull 会流式返回结构化 JSON（每个分片带 digest / total / completed），
+ * 比解析命令行那根进度条可靠得多。
+ */
+async function pullViaApi(model, emit, tracker) {
+  const r = await fetch(`${OLLAMA_BASE}/api/pull`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, stream: true }),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  if (!r.body) throw new Error('响应没有数据流');
+
+  const decoder = new TextDecoder();
+  let buf = '';
+  const handle = (line) => {
+    const s = line.trim();
+    if (!s) return;
+    let j;
+    try { j = JSON.parse(s); } catch { return; }
+    if (j.error) throw new Error(j.error);
+    if (j.total) {
+      tracker.layer(j.digest || j.status, j.completed || 0, j.total);
+      tracker.flush();
+    } else if (j.status && j.status !== 'success') {
+      emit({ type: 'log', text: j.status });
+    }
+  };
+
+  for await (const chunk of r.body) {
+    buf += decoder.decode(chunk, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      handle(line);
+    }
+  }
+  if (buf.trim()) handle(buf);
+}
+
+/** 兜底：老版本 Ollama 没有结构化接口时，解析命令行进度条（精度略低） */
+function pullViaCli(exe, model, modelDir, emit, tracker) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, ['pull', model], { env: ollamaEnv({ modelDir }), windowsHide: true });
+
+    let buf = '';
+    const handle = (chunk) => {
+      buf += chunk.toString();
+      const lines = buf.split(/[\r\n]/);
+      buf = lines.pop();
+      for (const line of lines) {
+        const id = (line.match(/pulling\s+([0-9a-f]{6,})/i) || [])[1];
+        const size = line.match(/([\d.]+)\s*(GB|MB|KB|B)\s*\/\s*([\d.]+)\s*(GB|MB|KB|B)/i);
+        if (id && size) {
+          tracker.layer(id, parseHumanBytes(size[1], size[2]), parseHumanBytes(size[3], size[4]));
+          tracker.flush();
+        } else if (/verifying|writing manifest|removing|success/i.test(line)) {
+          emit({ type: 'log', text: line.trim() });
+        }
+      }
+    };
+
+    child.stdout.on('data', handle);
+    child.stderr.on('data', handle);
+    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ollama pull 退出码 ${code}`))));
+    child.on('error', reject);
+  });
+}
 
 /** 固定 DeepSeek Harness 版本：它的 latest 还是 RC，配置格式变了会导致装完用不了 */
 export const DSH_PACKAGE = '@deepseek-ai/dsh@0.2.0-rc.2';
@@ -172,48 +354,36 @@ async function stepOllama(opts, emit) {
   return false;
 }
 
-/** 拉取模型，并把 ollama 的进度条解析成百分比 */
-function stepPullModel(opts, emit) {
+/**
+ * 拉取模型。
+ *
+ * 关键点：进度是「所有分片合起来」的，不是某一个分片的 —— 否则进度条会来回跳。
+ * 优先用 HTTP 接口拿结构化数据；拿不到再退回命令行解析。
+ */
+async function stepPullModel(opts, emit) {
   const { model, modelDir, ollamaExe } = opts;
   emit({ type: 'step', id: 'model', status: 'running', text: `下载模型 ${model}` });
 
-  return new Promise((resolve) => {
-    const child = spawn(ollamaExe, ['pull', model], { env: ollamaEnv({ modelDir }), windowsHide: true });
+  const expected = Math.round((modelInfo(model)?.gb || 0) * 1e9);
+  const tracker = createPullTracker(emit, expected);
+  tracker.flush({ force: true });
 
-    let buf = '';
-    const handle = (chunk) => {
-      buf += chunk.toString();
-      const parts = buf.split(/[\r\n]/);
-      buf = parts.pop();
-      for (const line of parts) {
-        const pct = line.match(/(\d+)%/);
-        const size = line.match(/([\d.]+)\s*(GB|MB)\s*\/\s*([\d.]+)\s*(GB|MB)/);
-        if (pct) {
-          const text = size ? `${size[1]} ${size[2]} / ${size[3]} ${size[4]}` : line.trim();
-          emit({ type: 'progress', percent: Number(pct[1]), text });
-        } else if (/verifying|writing manifest|success|error|not found/i.test(line)) {
-          emit({ type: 'log', text: line.trim() });
-        }
-      }
-    };
+  try {
+    await pullViaApi(model, emit, tracker);
+  } catch (e) {
+    emit({ type: 'log', text: `! 结构化进度不可用（${e.message}），改用命令行进度` });
+    try {
+      await pullViaCli(ollamaExe, model, modelDir, emit, tracker);
+    } catch (e2) {
+      emit({ type: 'log', text: String(e2.message || e2) });
+      emit({ type: 'step', id: 'model', status: 'error', text: '下载未完成，可重新运行继续' });
+      return false;
+    }
+  }
 
-    child.stdout.on('data', handle);
-    child.stderr.on('data', handle);
-    child.on('exit', (code) => {
-      if (code === 0) {
-        emit({ type: 'progress', percent: 100, text: '完成' });
-        emit({ type: 'step', id: 'model', status: 'done', text: '模型已就绪' });
-        resolve(true);
-      } else {
-        emit({ type: 'step', id: 'model', status: 'error', text: '下载未完成，可重新运行继续' });
-        resolve(false);
-      }
-    });
-    child.on('error', (e) => {
-      emit({ type: 'step', id: 'model', status: 'error', text: String(e.message) });
-      resolve(false);
-    });
-  });
+  emit({ type: 'progress', phase: 'model', percent: 100, text: '完成' });
+  emit({ type: 'step', id: 'model', status: 'done', text: '模型已就绪' });
+  return true;
 }
 
 function stepDsh(opts, emit) {
@@ -226,7 +396,7 @@ function stepDsh(opts, emit) {
   if (fs.existsSync(bin)) {
     emit({ type: 'log', text: 'DeepSeek Harness 已安装，跳过。' });
     emit({ type: 'step', id: 'dsh', status: 'skipped', text: '已安装' });
-    return true;
+    return Promise.resolve(true);
   }
 
   try {
@@ -238,33 +408,58 @@ function stepDsh(opts, emit) {
       emit({ type: 'needs-elevation', reason: `无法写入 ${dshDir}`, hint: '该位置需要管理员权限。' });
     }
     emit({ type: 'step', id: 'dsh', status: 'error', text: String(e.message) });
-    return false;
+    return Promise.resolve(false);
   }
 
   emit({ type: 'log', text: `正在安装 ${DSH_PACKAGE}（约 1–3 分钟，请勿关闭）...` });
-  // 必须 --ignore-scripts：koffi 的 postinstall 缺 CMake 会失败并让 npm 回滚整个安装
-  // PATH 里加上当前 node 所在目录：用便携 Node 时 npm 就在它旁边
-  const r = spawnSync('npm',
-    ['install', DSH_PACKAGE, '--ignore-scripts', '--no-audit', '--no-fund'],
-    {
-      cwd: dshDir,
-      encoding: 'utf8',
-      shell: true,
-      windowsHide: true,
-      env: { ...process.env, PATH: `${path.dirname(process.execPath)};${process.env.PATH || ''}` },
-    });
 
-  if (fs.existsSync(bin)) {
-    emit({ type: 'step', id: 'dsh', status: 'done', text: 'DeepSeek Harness 已就绪' });
-    return true;
-  }
-  const tail = ((r.stderr || '') + (r.stdout || '')).split(/\r?\n/).slice(-6).join('\n');
-  if (/EACCES|EPERM|denied/i.test(tail)) {
-    emit({ type: 'needs-elevation', reason: '安装 DeepSeek Harness 时权限不足', hint: '尝试以管理员身份重新运行。' });
-  }
-  emit({ type: 'log', text: tail });
-  emit({ type: 'step', id: 'dsh', status: 'error', text: '安装失败' });
-  return false;
+  // 用异步 spawn 而不是 spawnSync：不阻塞事件循环，
+  // npm 的输出能实时转发到界面，用户能看到「还在动」而不是页面一动不动。
+  // 必须 --ignore-scripts：koffi 的 postinstall 缺 CMake 会失败并让 npm 回滚整个安装。
+  // PATH 里加上当前 node 所在目录：用便携 Node 时 npm 就在它旁边。
+  return new Promise((resolve) => {
+    const child = spawn('npm',
+      ['install', DSH_PACKAGE, '--ignore-scripts', '--no-audit', '--no-fund'],
+      {
+        cwd: dshDir,
+        shell: true,
+        windowsHide: true,
+        env: { ...process.env, PATH: `${path.dirname(process.execPath)};${process.env.PATH || ''}` },
+      });
+
+    let buf = '';
+    const handle = (chunk) => {
+      buf += chunk.toString();
+      const lines = buf.split(/\r?\n/);
+      buf = lines.pop();
+      for (const line of lines) {
+        const s = line.trim();
+        if (s) emit({ type: 'log', text: s });
+      }
+    };
+    child.stdout.on('data', handle);
+    child.stderr.on('data', handle);
+
+    const finish = () => {
+      if (fs.existsSync(bin)) {
+        emit({ type: 'step', id: 'dsh', status: 'done', text: 'DeepSeek Harness 已就绪' });
+        return resolve(true);
+      }
+      const tail = buf.split(/\r?\n/).slice(-6).join('\n');
+      if (/EACCES|EPERM|denied/i.test(tail)) {
+        emit({ type: 'needs-elevation', reason: '安装 DeepSeek Harness 时权限不足', hint: '尝试以管理员身份重新运行。' });
+      }
+      if (tail) emit({ type: 'log', text: tail });
+      emit({ type: 'step', id: 'dsh', status: 'error', text: '安装失败' });
+      resolve(false);
+    };
+
+    child.on('close', finish);
+    child.on('error', (e) => {
+      emit({ type: 'log', text: String(e.message) });
+      finish();
+    });
+  });
 }
 
 const GENERATED_MARK = '# 由本地 AI 安装向导生成';
@@ -372,7 +567,7 @@ export async function runInstall(opts, emit) {
   if (!(await stepPrepare(o, emit))) return emit({ type: 'error', text: '准备安装目录失败' });
   if (!(await stepOllama(o, emit))) return emit({ type: 'error', text: 'Ollama 未就绪' });
   if (!(await stepPullModel(o, emit))) return emit({ type: 'error', text: '模型下载未完成' });
-  if (!stepDsh(o, emit)) return emit({ type: 'error', text: 'DeepSeek Harness 安装失败' });
+  if (!(await stepDsh(o, emit))) return emit({ type: 'error', text: 'DeepSeek Harness 安装失败' });
   if (!(await stepConfig(o, emit))) return emit({ type: 'error', text: '配置写入失败' });
   stepShortcuts(o, emit);
 

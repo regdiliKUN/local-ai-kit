@@ -153,13 +153,31 @@ async function installOllama(emit) {
     const out = fs.createWriteStream(tmp);
     let got = 0;
     let lastPct = -1;
+    let lastAt = Date.now();
+    let lastGot = 0;
+    let speed = 0;
     for await (const chunk of r.body) {
       if (!out.write(chunk)) await new Promise((res) => out.once('drain', res));
       got += chunk.length;
+      const now = Date.now();
+      if (now - lastAt >= 500) {
+        speed = (got - lastGot) / ((now - lastAt) / 1000);
+        lastAt = now;
+        lastGot = got;
+      }
       const pct = total ? Math.round((got / total) * 100) : -1;
       if (total && pct !== lastPct) {
         lastPct = pct;
-        emit({ type: 'progress', percent: pct, text: `${(got / 1e6).toFixed(0)} MB / ${(total / 1e6).toFixed(0)} MB` });
+        emit({
+          type: 'progress',
+          phase: 'ollama-setup',
+          percent: pct,
+          got,
+          total,
+          speed,
+          eta: speed > 0 ? (total - got) / speed : 0,
+          text: `${(got / 1e6).toFixed(0)} MB / ${(total / 1e6).toFixed(0)} MB`,
+        });
       }
     }
     await new Promise((res, rej) => out.end((e) => (e ? rej(e) : res())));

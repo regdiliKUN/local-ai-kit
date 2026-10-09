@@ -67,8 +67,11 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>列出你所有分区，按空闲空间排序。<strong>点一下选中</strong>，然后点「开始安装」。</p>
 <blockquote><p>建议避开叠瓦盘（SMR）—— 这种盘持续写入会掉速、寿命也差。<br>拿不准就选 SSD，或者选那块较新的机械硬盘。</p></blockquote>
 <h3>4. 等待安装</h3>
-<p>会显示每一步的进度和实时日志。<strong>下载模型这一步最慢</strong>（十几 GB，取决于网速），</p>
-<p>其余步骤很快。中途关掉也没关系，重新双击那个文件会接着下。</p>
+<p>界面会显示<strong>两层进度</strong>：</p>
+<ul><li><strong>顶部整体进度</strong> —— 「第 3 / 6 步 · 下载模型」，一眼知道还剩多少</li><li><strong>当前步骤的详细进度</strong> —— 下载模型时显示 <strong>已下载 / 总大小</strong>、<strong>实时速度</strong>、<strong>预计剩余时间</strong>，以及分片进度（例如 <code>分片 3 / 5</code>）</li></ul>
+<p>每一步后面还会显示<strong>已经用了多久</strong>，长时间没动静时也能确认程序还在跑。</p>
+<p><strong>下载模型这一步最慢</strong>（十几 GB，取决于网速），其余步骤很快。中途关掉也没关系，重新双击那个文件会接着下。</p>
+<blockquote><p>模型是分成好几个分片同时下载的，界面显示的是<strong>所有分片合起来</strong>的总进度，所以进度条只会往前走，不会来回跳。</p></blockquote>
 <h3>5. 完成</h3>
 <p>装好后<strong>桌面上会出现两个图标</strong>，以后就用它们。</p>
 <hr>
@@ -112,6 +115,12 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>或者自己到 https://ollama.com/download 装好再重新运行。</p>
 <p><strong>Q：下载中断了怎么办？</strong></p>
 <p>重新双击「① 双击这里开始安装.cmd」，会接着下，不用重头来。</p>
+<p><strong>Q：下载模型时进度条走得慢 / 看起来不动？</strong></p>
+<p>界面上显示的速度就是<strong>当前真实网速</strong>。判断是不是卡住，看两点：</p>
+<ul><li>「已下载」的 GB 数还在涨 → 没卡，只是网慢</li><li>「已用时」在跳但 GB 数长时间不变 → 大概率是网络断了</li></ul>
+<p>断了也不用重来，重新双击安装文件会从断点接着下。</p>
+<p><strong>Q：为什么下载模型时还有好几个「分片」？</strong></p>
+<p>大模型是拆成多个分片（layer）存放的，Ollama 会同时下几个。界面显示的是<strong>所有分片加起来</strong>的总进度，所以不用担心某个分片先到 100%。</p>
 <p><strong>Q：浏览器打开后要求登录？</strong></p>
 <p>用控制台窗口里打印的那条<strong>带 <code>?token=</code> 的完整地址</strong>。</p>
 <p><strong>Q：回复很慢？</strong></p>
@@ -164,5 +173,15 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <ol><li>双击桌面「停止本地AI」停止服务</li><li>删除桌面上的两个快捷方式</li><li>删除 <code>C:\Users\你\AppData\Local\Programs\LocalAI</code></li><li>删除模型目录（如 <code>I:\ollama\models</code>，约 17GB）</li><li>删除环境变量：在开始菜单搜「编辑账户的环境变量」，删掉以 <code>OLLAMA_</code> 开头的几项</li><li>可选：在「设置 → 应用」里卸载 Ollama 和 Node.js</li></ol>
 <hr>
 <h2>安全提醒</h2>
-<ul><li><strong>不要把 Ollama（11434 端口）或工作台（3080 端口）映射到公网</strong></li><li>让 AI 首次操作时，先用一个<strong>可以随便丢的文件夹</strong>试，确认没问题再指向重要项目</li><li>本地模型不会把你的内容发到网上 —— 这正是本地部署的意义</li><li>安装向导只接受来自它自己页面的操作，其他网页无法借它安装程序；下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</li></ul></div>
+<ul><li><strong>不要把 Ollama（11434 端口）或工作台（3080 端口）映射到公网</strong></li><li>让 AI 首次操作时，先用一个<strong>可以随便丢的文件夹</strong>试，确认没问题再指向重要项目</li><li>本地模型不会把你的内容发到网上 —— 这正是本地部署的意义</li><li>安装向导只接受来自它自己页面的操作，其他网页无法借它安装程序；下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</li></ul>
+<hr>
+<h2>更新日志</h2>
+<h3>v1.1.1</h3>
+<p><strong>下载模型终于能看到进度了。</strong></p>
+<ul><li><strong>修掉进度条来回跳的问题</strong> —— 之前界面显示的是「某一个分片」的百分比，而模型是多个分片同时下载的，所以进度条会在 100% / 3% / 67% 之间乱跳，完全看不出到底下了多少。现在改成汇总<strong>所有分片</strong>的整体进度。</li><li><strong>新增详细进度信息</strong> —— 已下载 / 总大小、实时速度、预计剩余时间、分片数。</li><li><strong>新增整体步骤进度</strong> —— 顶部显示「第 N / 6 步 · 当前步骤」，不用猜还剩多少。</li><li><strong>每一步显示已用时</strong> —— 装依赖、启动服务这类没有百分比的步骤，改成滚动进度条 + 计时，不再看起来像卡死。</li><li><strong>下载 Ollama 安装包时也有进度了</strong> —— 之前这一步界面上完全没有提示。</li><li><strong>安装 DeepSeek Harness 改为流式输出</strong> —— 界面不再一动不动。</li></ul>
+<h3>v1.1.0</h3>
+<ul><li>图形化安装向导</li></ul>
+<h3>v1.0.1</h3>
+<ul><li>离线友好：内置 Node.js，双击即可，不需要提前装环境</li></ul>
+</div>
 </body></html>
