@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本地 AI 控制台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="console-body">
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-title">本地 AI</div>
+        <div class="brand-sub">控制台</div>
+      </div>
+    </div>
+
+    <ol class="steps" id="tabs">
+      <li data-tab="models" class="active"><span class="dot"></span><span class="label">模型管理</span></li>
+      <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
+    </ol>
+
+    <div class="sidebar-foot" id="sideInfo"></div>
+  </aside>
+
+  <main class="content">
+
+    <!-- ============ 模型管理 ============ -->
+    <section class="view" id="view-models">
+      <h1>模型管理</h1>
+      <div class="guide">
+        <span class="guide-n">能做什么</span>
+        <span>在这里<b>加装</b>或<b>删除</b>模型。删除会立刻释放磁盘空间，不影响其它模型。</span>
+      </div>
+
+      <div class="status-strip" id="statusStrip"></div>
+
+      <h2 class="sec-h">已安装的模型 <span class="sec-n" id="modelCount"></span></h2>
+      <div id="modelList" class="stack"><div class="loading"><span class="spinner"></span> 正在读取…</div></div>
+
+      <h2 class="sec-h">加装新模型</h2>
+      <p class="lead">从 Ollama 官方模型库下载。名字形如 <code>qwen3:8b</code>，可以在
+        <a class="hint-link" href="https://ollama.com/library" target="_blank" rel="noreferrer">模型库</a>里挑。</p>
+      <div class="quick-row" id="quickModels"></div>
+      <div class="custom-row">
+        <span class="check">模型名</span>
+        <input type="text" id="newModel" placeholder="例如 qwen3:8b" spellcheck="false">
+        <button class="btn primary small" id="btnPull">下载</button>
+      </div>
+      <p class="custom-err" id="newModelErr" hidden>模型名不合法，只能用小写字母、数字和 <code>.-_/:</code></p>
+
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="progressTitle">下载中</span>
+          <span class="progress-pct" id="progressPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="progressBar"></div></div>
+        <div class="progress-stats" id="progressStats"></div>
+      </div>
+
+      <details class="logbox" id="logBox" hidden>
+        <summary>查看详细日志</summary>
+        <pre id="log"></pre>
+      </details>
+    </section>
+
+    <!-- ============ 服务设置 ============ -->
+    <section class="view" id="view-settings" hidden>
+      <h1>服务设置</h1>
+      <div class="guide">
+        <span class="guide-n">提示</span>
+        <span>这些开关都是<b>立刻生效</b>的，改完不用重启电脑。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">开机自动启动工作台</div>
+            <div class="s">打开后，每次开机都会自动启动服务并加载模型（会占着显存）。平时想自己控制的话就别开。</div>
+          </div>
+          <label class="switch" id="swAutostartWrap"><input type="checkbox" id="swAutostart"><span class="track"><span class="knob"></span></span></label>
+        </div>
+
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">局域网共享（把模型开放给同网络的其它设备）</div>
+            <div class="s">打开后，同一个 WiFi 下的手机、平板、其它电脑都能调用你机器上的模型。</div>
+          </div>
+          <label class="switch" id="swLanWrap"><input type="checkbox" id="swLan"><span class="track"><span class="knob"></span></span></label>
+        </div>
+
+        <div class="warn-block" id="lanWarn" hidden>
+          <b>⚠️ 打开局域网共享前请想清楚：</b><br>
+          这会把 Ollama 的接口暴露到整个局域网（<code>0.0.0.0:11434</code>）。
+          在公共 WiFi、宿舍网、公司网里，<b>同网段的任何人都能用你的显卡跑模型</b>，也能看到你正在用的模型。
+          只在<b>你信任的家庭网络</b>里打开；用完建议关掉。
+          <div class="lan-confirm">
+            <label class="check"><input type="checkbox" id="lanAgree"> 我知道了，仍然要打开</label>
+            <button class="btn primary small" id="lanOk" disabled>确认打开</button>
+            <button class="btn ghost small" id="lanCancel">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sec-h">服务控制</h2>
+      <div class="row-actions">
+        <button class="btn primary" id="btnStartSvc">启动工作台</button>
+        <button class="btn ghost" id="btnStopSvc">停止服务并释放显存</button>
+      </div>
+      <p class="row-hint" id="svcHint">「启动工作台」等于双击桌面上的「启动本地AI」。</p>
+
+      <h2 class="sec-h">快捷入口</h2>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnOpenInstall">打开安装目录</button>
+        <button class="btn ghost small" id="btnOpenModels">打开模型目录</button>
+        <button class="btn ghost small" id="btnReload">刷新状态</button>
+      </div>
+
+      <h2 class="sec-h">卸载</h2>
+      <div class="row-actions">
+        <button class="btn ghost small danger" id="btnUninstall">卸载本地 AI</button>
+      </div>
+      <p class="row-hint">
+        会在新窗口里打开卸载程序。它会先把「要删什么、不删什么」列清楚，
+        再逐条问你确认 —— 不会直接删东西。
+      </p>
+
+      <h2 class="sec-h">当前配置</h2>
+      <div class="summary" id="cfgSummary"></div>
+      <p class="row-hint">
+        想改模型或上下文长度，重新运行安装向导即可（双击部署包里的「① 双击这里开始安装.cmd」）。
+        也可以直接编辑安装目录下的 <code>配置.json</code>。
+      </p>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="console.js"></script>
+</body>
+</html>

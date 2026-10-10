@@ -103,9 +103,10 @@ export async function servesDir(dir) {
   return disk.length === lib.length && disk.every((m) => lib.includes(m));
 }
 
+/** 结束所有 Ollama 进程（含托盘程序和它拉起的子进程） */
 export function killOllama() {
   for (const img of ['ollama app.exe', 'ollama.exe']) {
-    try { execSync(`taskkill /IM "${img}" /F`, { stdio: 'ignore' }); } catch { /* 没在跑 */ }
+    try { execSync(`taskkill /IM "${img}" /F /T`, { stdio: 'ignore' }); } catch { /* 没在跑 */ }
   }
 }
 

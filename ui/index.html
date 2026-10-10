@@ -34,16 +34,39 @@
     <!-- 1. 环境检测 -->
     <section class="view" id="view-detect">
       <h1>正在检测你的电脑</h1>
-      <p class="lead">安装向导会自动识别显卡、磁盘和已安装的组件。</p>
+      <p class="lead">安装向导会自动识别显卡、磁盘和已装好的组件 —— 这一步你什么都不用做。</p>
+
+      <!-- 一进来就告诉用户：全程只有三步 -->
+      <div class="preview">
+        <div class="preview-title">接下来只需要三步</div>
+        <div class="preview-steps">
+          <div class="pv"><b>1</b><span>选模型</span><i>已按你的显卡推荐好</i></div>
+          <div class="pv"><b>2</b><span>选存放位置</span><i>点一下磁盘就行</i></div>
+          <div class="pv"><b>3</b><span>自动安装</span><i>不用再操作，等它跑完</i></div>
+        </div>
+      </div>
+
       <div id="detectBody" class="stack">
         <div class="loading"><span class="spinner"></span> 检测中...</div>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnRedetect">重新检测</button>
+        <span class="row-hint">刚装了显卡驱动 / Ollama？点这里重新检测一次。</span>
       </div>
     </section>
 
     <!-- 2. 选择模型 -->
     <section class="view" id="view-model" hidden>
       <h1>选择要部署的模型</h1>
+      <div class="guide">
+        <span class="guide-n">怎么做</span>
+        <span><b>①</b> 点一下下面的卡片把它选中（已经帮你选好推荐的那个）&nbsp;&nbsp;<b>②</b> 点右下角「继续」</span>
+      </div>
       <p class="lead" id="modelLead"></p>
+
+      <div class="local-models" id="localModels" hidden></div>
+
       <div class="cards" id="modelCards"></div>
       <div class="custom-row">
         <label class="check">
@@ -53,12 +76,34 @@
         <input type="text" id="customModel" placeholder="例如 qwen2.5-coder:7b" disabled>
         <a class="hint-link" href="https://ollama.com/library" target="_blank" rel="noreferrer">浏览模型库</a>
       </div>
+      <p class="custom-err" id="customModelErr" hidden>模型名不合法。只能用小写字母、数字和 <code>.-_/:</code>，例如 qwen2.5-coder:7b</p>
+
+      <div class="ctx-row">
+        <div class="ctx-head">
+          <span class="ctx-title">上下文长度</span>
+          <span class="ctx-note" id="ctxInfo"></span>
+        </div>
+        <div class="seg" id="ctxSeg"></div>
+        <p class="ctx-hint">越大能记住的对话内容越多，但也越吃显存。拿不准就用默认值。</p>
+      </div>
     </section>
 
     <!-- 3. 存放位置 -->
     <section class="view" id="view-location" hidden>
-      <h1>模型存放在哪里</h1>
-      <p class="lead" id="locLead">模型约需 <b id="needSpace">20</b> GB。建议放在空间充足的盘上。</p>
+      <h1>模型存放在哪个盘</h1>
+      <div class="guide">
+        <span class="guide-n">怎么做</span>
+        <span><b>①</b> 点一下要存放的磁盘（建议选非系统盘、空间大的那块）&nbsp;&nbsp;<b>②</b> 点右下角「开始安装」</span>
+      </div>
+      <p class="lead" id="locLead">模型约需 <b id="needSpace">20</b> GB 空间。</p>
+
+      <div class="warn-block" id="noDisk" hidden>
+        <b>没有找到可用空间 ≥ 20 GB 的磁盘。</b>
+        请在「此电脑」里清理出空间，或者直接在下面手动填一个路径，然后点「重新检测」。
+      </div>
+
+      <div class="warn-block space-warn" id="spaceWarn" hidden></div>
+
       <div class="disks" id="diskList"></div>
       <div class="custom-row">
         <span class="check">或者自己指定文件夹</span>
@@ -70,12 +115,30 @@
         拿不准就选 SSD，或选那块较新的机械硬盘。
       </div>
       <div class="path-preview">将安装到：<code id="dirPreview"></code></div>
+      <div class="space-info" id="spaceInfo"></div>
+
+      <details class="adv">
+        <summary>下载太慢 / 连不上模型仓库？设置网络代理（可选）</summary>
+        <div class="adv-body">
+          <input type="text" id="proxy" placeholder="例如 http://127.0.0.1:7890" spellcheck="false">
+          <p class="adv-hint">
+            如果你平时上网需要走代理（Clash、v2ray 之类），把它的 HTTP 代理地址填在这里，
+            模型下载就会走这个代理。不需要就直接留空。
+          </p>
+          <p class="custom-err" id="proxyErr" hidden>代理地址格式不对，应该形如 http://127.0.0.1:7890</p>
+        </div>
+      </details>
     </section>
 
     <!-- 4. 安装 -->
     <section class="view" id="view-install" hidden>
-      <h1 id="installTitle">正在安装</h1>
-      <p class="lead" id="installLead">请保持这个页面和那个黑色窗口开着。</p>
+      <h1 id="installTitle">正在安装，请勿关闭</h1>
+      <p class="lead" id="installLead">全部自动完成，你只需要等它跑完。</p>
+
+      <div class="notice" id="keepOpen">
+        <b>请保持这个页面开着</b>，也不要关掉那个黑色窗口 —— 关掉就等于中断安装。
+        <span class="notice-sub">（中断了也没关系，重新双击「① 双击这里开始安装.cmd」会接着装，已下载的部分不会重下）</span>
+      </div>
 
       <!-- 整体进度：第几步 / 共几步 -->
       <div class="overall" id="overallWrap" hidden>
@@ -98,6 +161,22 @@
 
       <ul class="tasklist" id="taskList"></ul>
 
+      <!-- 出错时出现：停在哪一步 + 可能原因 + 分步怎么办 + 一键重试 -->
+      <div class="error-panel" id="errorPanel" hidden>
+        <div class="err-head"><span class="err-ico">!</span><b id="errTitle">安装没有完成</b></div>
+        <div class="err-stage" id="errStage"></div>
+        <div class="err-why" id="errWhy"></div>
+        <div class="err-how-title">你可以这样做：</div>
+        <ol class="err-how" id="errHow"></ol>
+        <div class="err-actions">
+          <button class="btn primary small" id="errRetry">重试安装</button>
+          <button class="btn ghost small" id="errRedetect">重新检测</button>
+          <button class="btn ghost small" id="errCopy">复制诊断信息</button>
+          <button class="btn ghost small" id="errLogs">打开日志</button>
+        </div>
+        <div class="err-tip">重试不会从头再来：已经装好的步骤会自动跳过，模型也支持续传。</div>
+      </div>
+
       <details class="logbox">
         <summary>查看详细日志</summary>
         <pre id="log"></pre>
@@ -107,13 +186,34 @@
     <!-- 5. 完成 -->
     <section class="view" id="view-done" hidden>
       <div class="done-mark"></div>
-      <h1>安装完成</h1>
-      <p class="lead">桌面已生成两个快捷方式，以后用它们就行。</p>
+      <h1>安装完成，可以开始用了</h1>
+      <p class="lead">以后就用桌面上的两个图标，不用再打开这个向导。</p>
+
       <div class="summary" id="summary"></div>
-      <div class="shortcut-hint">
-        <div><b>启动本地AI</b> — 启动服务并打开工作台</div>
-        <div><b>停止本地AI</b> — 停止服务、释放显存</div>
+
+      <div class="howto">
+        <div class="howto-title">以后怎么用（就两步）</div>
+        <div class="howto-step">
+          <b>1</b>
+          <div>
+            <div class="t">想用 AI —— 双击桌面上的「启动本地AI」</div>
+            <div class="s">会弹出一个黑色窗口，然后自动打开浏览器里的工作台。那个黑窗口要一直开着，它就是服务本体。</div>
+          </div>
+        </div>
+        <div class="howto-step">
+          <b>2</b>
+          <div>
+            <div class="t">不想用了 / 要玩游戏 —— 双击「停止本地AI」</div>
+            <div class="s">把显存还给游戏和渲染软件。下次要用再双击「启动本地AI」就行。</div>
+          </div>
+        </div>
       </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnLaunch">立即启动工作台</button>
+        <button class="btn ghost" id="btnOpenFolder">打开安装目录</button>
+      </div>
+      <p class="row-hint" id="launchHint"></p>
     </section>
 
   </main>
@@ -127,19 +227,21 @@
   </div>
 </footer>
 
-<!-- 权限申请弹窗 -->
+<!-- 需要用户配合时弹出的窗口（管理员授权 / 安装 Ollama） -->
 <div class="modal-mask" id="modalMask" hidden>
   <div class="modal">
     <div class="modal-icon">!</div>
-    <h2 id="modalTitle">需要管理员权限</h2>
+    <h2 id="modalTitle">需要你配合一下</h2>
     <p id="modalReason"></p>
     <p class="modal-hint" id="modalHint"></p>
     <div class="modal-actions">
       <button class="btn ghost" id="modalCancel">稍后再说</button>
-      <button class="btn primary" id="modalOk">以管理员身份继续</button>
+      <button class="btn primary" id="modalOk">继续</button>
     </div>
   </div>
 </div>
+
+<div class="toast" id="toast" hidden></div>
 
 <script src="app.js"></script>
 </body>

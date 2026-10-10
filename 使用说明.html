@@ -52,31 +52,48 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <h2>双击这个文件</h2>
 <div class="file-chip"><code>① 双击这里开始安装.cmd</code></div>
 <p>就在这个文件夹里，<strong>名字最长的那个</strong>。</p>
-<p>双击后会打开一个图形化安装向导，跟着点「继续」就行，全程不需要输入命令。</p>
+<p>双击后会打开一个图形化安装向导。<strong>每一步该做什么，页面上都写着</strong>，跟着点就行，</p>
+<p>全程不需要输入任何命令。</p>
 <blockquote><p><strong>就这一步。</strong> 下面的内容都是解释和备用信息，不看也能装好。</p></blockquote>
 </div>
 <h2>双击之后会发生什么</h2>
-<h3>1. 浏览器自动打开一个安装向导</h3>
-<p>左边是步骤，右边是内容。第一步会<strong>自动检测你的电脑</strong>，把结果显示成卡片：</p>
-<p>显卡型号和显存、磁盘空间、已经装了哪些组件。</p>
+<h3>0. 先弹出一个黑色窗口</h3>
+<p>那是安装程序本体。它会说「接下来会自动打开浏览器」，然后浏览器就会弹出来。</p>
+<blockquote><p><strong>安装期间别关它。</strong> 关掉它 = 中断安装。装完再关。</p></blockquote>
+<h3>1. 自动检测你的电脑</h3>
+<p>左边是步骤，右边是内容。第一步会<strong>自动识别</strong>你的显卡型号和显存、磁盘空间、</p>
+<p>已经装了哪些组件，结果显示成一张张卡片。</p>
+<p>页面顶部还会告诉你：<strong>接下来只需要三步</strong>（选模型 → 选存放位置 → 自动安装）。</p>
+<p>如果刚装了显卡驱动或 Ollama，点一下页面下方的「<strong>重新检测</strong>」就行，不用重开向导。</p>
 <h3>2. 选择要部署的模型</h3>
-<p>向导会<strong>读你的显存，只列出跑得动的模型</strong>，最适合的那个标着「推荐」徽标。</p>
-<p>每张卡片都写了<strong>下载体积</strong>和<strong>需要多少显存</strong>，直接点一张就行。</p>
-<blockquote><p>如果之前装过模型，向导会自动找到并复用，不会重复下载。</p></blockquote>
+<p>页面顶部有一条蓝色的「<strong>怎么做</strong>」提示，写着这一屏要干的两件事。</p>
+<p>向导会<strong>读你的显存，只列出跑得动的模型</strong>，最适合的那个标着「推荐」。</p>
+<p>每张卡片都写了<strong>下载体积</strong>、<strong>需要多少显存</strong>，还按 25MB/s 估算了<strong>大概要下多久</strong>。</p>
+<p>直接点一张选中就行。</p>
+<blockquote><p>如果本机已经下过某个模型，卡片上会标「<strong>本机已有</strong>」，并告诉你它在哪个目录 ——<br>直接复用，不用重新下载。</p></blockquote>
+<p>下面还能调<strong>上下文长度</strong>（4K / 8K / 16K / 32K / 64K），会实时显示估算的显存占用，</p>
+<p>并标注「够用 / 偏紧 / 可能超出显存」。拿不准就用默认值。</p>
 <h3>3. 选择模型存放在哪个盘</h3>
 <p>列出你所有分区，按空闲空间排序。<strong>点一下选中</strong>，然后点「开始安装」。</p>
-<blockquote><p>建议避开叠瓦盘（SMR）—— 这种盘持续写入会掉速、寿命也差。<br>拿不准就选 SSD，或者选那块较新的机械硬盘。</p></blockquote>
-<h3>4. 等待安装</h3>
-<p>界面会显示<strong>两层进度</strong>：</p>
-<ul><li><strong>顶部整体进度</strong> —— 「第 3 / 6 步 · 下载模型」，一眼知道还剩多少</li><li><strong>当前步骤的详细进度</strong> —— 下载模型时显示 <strong>已下载 / 总大小</strong>、<strong>实时速度</strong>、<strong>预计剩余时间</strong>，以及分片进度（例如 <code>分片 3 / 5</code>）</li></ul>
+<p>选好之后，页面会告诉你<strong>目标盘还剩多少、这次需要多少</strong>。不够的话会直接拦住，</p>
+<p>不让你带着一个必然失败的任务往下走。</p>
+<blockquote><p>建议避开叠瓦盘（SMR）—— 这种盘持续写入会掉速、寿命也差。<br>拿不准就选 SSD，或者选那块较新的机械硬盘。<br>下载慢或连不上模型仓库的话，这一屏最下面可以展开「设置网络代理」。</p></blockquote>
+<h3>4. 等待安装（这一步你什么都不用做）</h3>
+<p>页面顶部会有一条提醒：<strong>请保持这个页面开着，也不要关掉那个黑色窗口</strong>。</p>
+<p>界面上有<strong>两层进度</strong>：</p>
+<ul><li><strong>顶部整体进度</strong> —— 「第 3 / 6 步 · 下载模型」，一眼知道还剩多少</li><li><strong>当前步骤的详细进度</strong> —— 下载模型时显示 <strong>已下载 / 总大小</strong>、<strong>实时速度</strong>、</li></ul>
+<p>  <strong>预计剩余时间</strong>，以及分片进度（例如 <code>分片 3 / 5</code>）</p>
 <p>每一步后面还会显示<strong>已经用了多久</strong>，长时间没动静时也能确认程序还在跑。</p>
-<p><strong>下载模型这一步最慢</strong>（十几 GB，取决于网速），其余步骤很快。中途关掉也没关系，重新双击那个文件会接着下。</p>
-<blockquote><p>模型是分成好几个分片同时下载的，界面显示的是<strong>所有分片合起来</strong>的总进度，所以进度条只会往前走，不会来回跳。</p></blockquote>
+<p><strong>下载模型这一步最慢</strong>（十几 GB，取决于网速），其余步骤很快。</p>
+<p>下载完之后还会有一个「<strong>校验模型</strong>」步骤：向导会真的把模型加载一次，</p>
+<p>确认显存装得下、模型能用 —— 装不下会当场告诉你，而不是等你打开工作台才发现。</p>
+<blockquote><p>中途关掉了也没关系：重新双击那个文件会<strong>接着装</strong>，已经下载好的部分不会重下。</p></blockquote>
 <h3>5. 完成</h3>
-<p>装好后<strong>桌面上会出现两个图标</strong>，以后就用它们。</p>
+<p>装好后页面会直接告诉你<strong>以后怎么用</strong>（就两步），并给你两个按钮：</p>
+<p>「立即启动工作台」和「打开安装目录」。桌面上也会出现两个图标。</p>
 <hr>
 <h2>装好之后怎么用</h2>
-<table><thead><tr><th>桌面图标</th><th>作用</th></tr></thead><tbody><tr><td><strong>启动本地AI</strong></td><td>双击它，自动启动服务并打开浏览器工作台</td></tr><tr><td><strong>停止本地AI</strong></td><td>双击它，停止服务、把显存还给你</td></tr></tbody></table>
+<table><thead><tr><th>桌面图标</th><th>作用</th></tr></thead><tbody><tr><td><strong>启动本地AI</strong></td><td>双击它，自动启动服务并打开浏览器工作台</td></tr><tr><td><strong>停止本地AI</strong></td><td>双击它，停止服务、把显存还给你</td></tr><tr><td><strong>本地AI控制台</strong></td><td>加装 / 删除模型、开关开机自启、开关局域网共享</td></tr></tbody></table>
 <h3>日常使用就两条</h3>
 <ol><li><strong>想用 AI</strong> → 双击「启动本地AI」，浏览器会自动打开工作台</li><li><strong>不想用了 / 要玩游戏</strong> → 双击「停止本地AI」腾出显存</li></ol>
 <blockquote><p>启动后会弹出一个黑色窗口，<strong>保持它开着</strong>，它就是服务控制台。<br>关掉黑窗口等于停止服务。<br>模型运行时会占约 16GB 显存。玩大型游戏、跑渲染前建议先「停止本地AI」。</p></blockquote>
@@ -84,11 +101,35 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p><strong>随时可以关机，没有任何风险。</strong> 不会丢东西，也不会中断任何任务。</p>
 <p>重启后双击「启动本地AI」即可。</p>
 <hr>
+<h2>本地AI控制台（新）</h2>
+<p>双击桌面上的「<strong>本地AI控制台</strong>」，浏览器会打开一个小网页，分两页：</p>
+<h3>模型管理</h3>
+<ul><li><strong>看</strong>：已经装了哪些模型、各占多少磁盘、什么量化</li><li><strong>删</strong>：点「删除」→ 原地变成「确认删除？」→ 再点一下才真删（不会误删）</li><li><strong>装</strong>：输入模型名（比如 <code>qwen3:8b</code>）点「下载」，带实时进度、速度、剩余时间</li><li>下面还有一排常用模型的快捷按钮，点一下就填进输入框</li></ul>
+<h3>服务设置</h3>
+<table><thead><tr><th>开关</th><th>说明</th></tr></thead><tbody><tr><td><strong>开机自动启动工作台</strong></td><td>打开后每次开机自动启动服务并加载模型（会占显存）。想自己控制就别开。</td></tr><tr><td><strong>局域网共享</strong></td><td>把 Ollama 的接口开放给同一个 WiFi 下的手机 / 平板 / 其它电脑。<strong>默认关闭</strong>，打开前必须先在警告里打勾确认。</td></tr></tbody></table>
+<p>下面还有「启动工作台」「停止服务并释放显存」「打开安装目录」「打开模型目录」，以及一个<strong>卸载</strong>入口。</p>
+<blockquote><p>局域网共享会把 Ollama 暴露到 <code>0.0.0.0:11434</code>。<br>在公共 WiFi、宿舍网、公司网里，同网段的任何人都能用你的显卡跑模型。<br><strong>只在你信任的家庭网络里打开，用完关掉。</strong></p></blockquote>
+<hr>
+<h2>想换模型 / 加装模型</h2>
+<p>两种方式都行：</p>
+<ol><li><strong>控制台</strong>（推荐）—— 双击「本地AI控制台」→ 模型管理 → 输入模型名 → 下载</li><li><strong>重跑安装向导</strong> —— 双击部署包里的「① 双击这里开始安装.cmd」，在选模型那一步选别的</li></ol>
+<p>删除模型：控制台里点「删除」，会立刻释放磁盘空间，不影响其它模型。</p>
+<hr>
 <h2>需要提前准备什么</h2>
 <p><strong>其实什么都不用准备</strong> —— 缺什么，安装程序会自己检测并处理。</p>
-<table><thead><tr><th>软件</th><th>没装会怎样</th></tr></thead><tbody><tr><td><strong>Node.js</strong></td><td>双击后<strong>自动下载并安装</strong>（约 30 MB），装完自动继续</td></tr><tr><td><strong>Ollama</strong></td><td>安装向导会弹窗问你，点「以管理员身份继续」就自动装</td></tr></tbody></table>
+<table><thead><tr><th>软件</th><th>没装会怎样</th></tr></thead><tbody><tr><td><strong>Node.js</strong></td><td>双击后<strong>自动下载并安装</strong>（约 30 MB），装完自动继续</td></tr><tr><td><strong>Ollama</strong></td><td>安装向导会弹窗问你，点「自动安装 Ollama」就帮你装好，<strong>装完自动接着往下装</strong></td></tr></tbody></table>
 <p>两者都会弹出一个 Windows 授权窗口，<strong>点「是」即可</strong>。</p>
+<p>如果向导提示需要管理员权限，弹窗里的按钮是「<strong>自动以管理员身份继续</strong>」——</p>
+<p>点一下它就会自己用管理员身份重开，<strong>不用你去找文件右键</strong>。</p>
 <blockquote><p>如果网络连不上官网，程序会提示你手动下载，并自动帮你打开下载页面。</p></blockquote>
+<hr>
+<h2>安装失败 / 卡住了怎么办</h2>
+<p><strong>新版不会只甩一句报错。</strong> 一旦某一步失败，页面会直接展开一块红色的排查面板，</p>
+<p>里面写清楚三件事：</p>
+<ol><li><strong>停在了哪一步</strong>（比如「停在了：下载模型」）</li><li><strong>原因是什么</strong>（把原始报错也显示出来）</li><li><strong>你可以这样做</strong> —— 按顺序列出 1、2、3 条具体操作</li></ol>
+<p>面板上还有四个按钮：</p>
+<table><thead><tr><th>按钮</th><th>作用</th></tr></thead><tbody><tr><td><strong>重试安装</strong></td><td>用同样的设置再跑一遍。<strong>已装好的步骤会自动跳过，模型支持续传</strong></td></tr><tr><td><strong>重新检测</strong></td><td>重新扫一遍硬件和组件（比如你刚装完 Ollama）</td></tr><tr><td><strong>复制诊断信息</strong></td><td>把环境 + 报错 + 日志一次性复制到剪贴板，直接粘贴发给帮你的人</td></tr><tr><td><strong>打开日志</strong></td><td>打开安装日志文件 <code>%TEMP%\localai-setup.log</code></td></tr></tbody></table>
+<blockquote><p>安装过程全程会写一份日志到 <code>%TEMP%\localai-setup.log</code>，<br>在文件资源管理器地址栏输入 <code>%TEMP%</code> 就能找到。</p></blockquote>
 <hr>
 <h2>双击后出现英文报错怎么办</h2>
 <p>如果看到类似这样的英文：</p>
@@ -111,16 +152,40 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>双击后按回车，在授权窗口点「是」即可。</p>
 <p>如果还是不行，手动到 https://nodejs.org 装 <strong>LTS 版本</strong>再重试。</p>
 <p><strong>Q：提示"没有检测到 Ollama"？</strong></p>
-<p>在向导弹出的窗口里点「以管理员身份继续」，它会自动下载安装。</p>
-<p>或者自己到 https://ollama.com/download 装好再重新运行。</p>
+<p>在向导弹出的窗口里点「<strong>自动安装 Ollama</strong>」，它会自动下载安装，</p>
+<p><strong>装完会自动接着往下装</strong>，不用你重新走一遍向导。</p>
+<p>也可以自己到 https://ollama.com/download 装好，然后点「重新检测」。</p>
+<p><strong>Q：提示需要管理员权限？</strong></p>
+<p>点弹窗里的「<strong>自动以管理员身份继续</strong>」。会弹出一个 Windows 授权窗口，点「是」，</p>
+<p>向导会用管理员身份重新打开。<strong>不需要你自己去找文件右键运行。</strong></p>
+<p><strong>Q：提示「这块盘空间不够」？</strong></p>
+<p>向导会按模型体积的 1.3 倍算需要多少空间，不够就不让你点「开始安装」。</p>
+<p>换一块空间更大的盘，或者回上一步选个小一点的模型即可。</p>
+<p><strong>Q：提示「显卡驱动太旧」？</strong></p>
+<p>到 https://www.nvidia.cn/geforce/drivers/ 下载安装最新驱动，重启后回到向导点「重新检测」。</p>
+<p>驱动太旧时 Ollama 会偷偷退回 CPU 跑，慢到没法用，所以提前拦住。</p>
+<p><strong>Q：下载模型很慢 / 一直连不上？</strong></p>
+<p>如果你平时上网需要走代理（Clash、v2ray 之类），在向导的「存放位置」那一步最下面</p>
+<p>展开「设置网络代理」，把 HTTP 代理地址（例如 <code>http://127.0.0.1:7890</code>）填进去，下载就会走它。</p>
+<p>另外：<strong>如果你本机已经有下好的模型，向导会自动发现并直接复用，不用重新下载</strong>（选模型时卡片上会标「本机已有」）。</p>
+<p><strong>Q：怎么卸载？</strong></p>
+<p>打开「本地AI控制台」→ 服务设置 → 最下面点「卸载本地 AI」，</p>
+<p>或者到安装目录里双击 <code>卸载.cmd</code>。</p>
+<p>卸载程序会先把「要删什么、不删什么」列清楚，再逐条问你确认 ——</p>
+<p><strong>模型文件（十几 GB）会单独问一次</strong>，只有路径确实是 <code>...\ollama\models</code> 结构时才允许自动删。</p>
+<p><strong>Q：提示「模型加载失败（多半是显存不够）」？</strong></p>
+<p>向导在下载完模型后会真的试加载一次，装不下会当场报出来，不会等你打开工作台才发现。</p>
+<p>解决办法：回上一步换个小一点的模型，或者把上下文长度调小（选模型那一步可以调）。</p>
 <p><strong>Q：下载中断了怎么办？</strong></p>
 <p>重新双击「① 双击这里开始安装.cmd」，会接着下，不用重头来。</p>
+<p>如果向导还开着，直接点红色面板上的「<strong>重试安装</strong>」更快。</p>
 <p><strong>Q：下载模型时进度条走得慢 / 看起来不动？</strong></p>
 <p>界面上显示的速度就是<strong>当前真实网速</strong>。判断是不是卡住，看两点：</p>
 <ul><li>「已下载」的 GB 数还在涨 → 没卡，只是网慢</li><li>「已用时」在跳但 GB 数长时间不变 → 大概率是网络断了</li></ul>
-<p>断了也不用重来，重新双击安装文件会从断点接着下。</p>
+<p>断了也不用重来，点「重试安装」或重新双击安装文件都会从断点接着下。</p>
 <p><strong>Q：为什么下载模型时还有好几个「分片」？</strong></p>
-<p>大模型是拆成多个分片（layer）存放的，Ollama 会同时下几个。界面显示的是<strong>所有分片加起来</strong>的总进度，所以不用担心某个分片先到 100%。</p>
+<p>大模型是拆成多个分片（layer）存放的，Ollama 会同时下几个。</p>
+<p>界面显示的是<strong>所有分片加起来</strong>的总进度，所以不用担心某个分片先到 100%。</p>
 <p><strong>Q：浏览器打开后要求登录？</strong></p>
 <p>用控制台窗口里打印的那条<strong>带 <code>?token=</code> 的完整地址</strong>。</p>
 <p><strong>Q：回复很慢？</strong></p>
@@ -128,18 +193,29 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p><strong>Q：显存不够 / 加载失败？</strong></p>
 <p>重新运行安装向导，在选模型那一步选个更小的（向导只列跑得动的）。</p>
 <p>也可以打开安装目录的 <code>配置.json</code>，把 <code>contextWindow</code> 改小（比如 <code>16384</code>），重启。</p>
+<p><strong>Q：聊得久了，AI 突然说「已达输出 token 上限」，点继续也没用？</strong></p>
+<p>v1.2.0 已经修好了这个坑：DeepSeek Harness 的自动压缩插件默认预留 65536 token，</p>
+<p>而本地模型的窗口没这么大，导致<strong>压缩被静默禁用</strong>，会话涨满后就再也输出不出来。</p>
+<p>新版安装时会自动写入正确的压缩参数，长对话会被自动摘要压缩，不会卡死。</p>
 <p><strong>Q：想换一个模型？</strong></p>
 <p>重新双击「① 双击这里开始安装.cmd」，在选模型那一步选别的即可。</p>
 <p><strong>Q：想换模型存放的盘？</strong></p>
 <p>重新运行安装向导，在「存放位置」那一步点另一块盘，或者在下面的输入框里填完整路径（比如 <code>E:\AI\ollama\models</code>）。</p>
 <p>注意这会在新位置<strong>重新下载</strong>一份模型；旧的可以手动删掉释放空间。</p>
+<p><strong>Q：我自己改过 DeepSeek Harness 的配置（加过云端模型），重装会不会被覆盖？</strong></p>
+<p><strong>不会。</strong> 新版安装器只更新它自己那几行（本地 provider、压缩参数），</p>
+<p>你在同一个配置文件里手写的其它 provider、插件设置<strong>原样保留</strong>；</p>
+<p>改动前还会在同目录留一份带时间戳的备份（最多保留 3 份）。</p>
 <p><strong>Q：桌面图标显示成旧的 / 白的？</strong></p>
 <p>在桌面空白处按 <code>F5</code> 刷新。</p>
+<p><strong>Q：桌面图标没生成出来？</strong></p>
+<p>到安装目录里双击 <code>重建桌面图标.cmd</code> 补回来。</p>
 <p><strong>Q：可以装到别的电脑吗？</strong></p>
 <p>可以。把这个文件夹整个复制过去，在新电脑上双击「① 双击这里开始安装.cmd」即可。</p>
 <p>（模型文件在另一台机器上会重新下载）</p>
 <p><strong>Q：用的是 AMD 显卡？</strong></p>
-<p>向导会识别 AMD 显卡的显存并推荐模型。但 Ollama 只支持部分 AMD 型号加速，不支持的会退回 CPU 运行，速度很慢。</p>
+<p>向导会识别 AMD 显卡的显存并推荐模型。但 Ollama 只支持部分 AMD 型号加速，</p>
+<p>不支持的会退回 CPU 运行，速度很慢。</p>
 <p><strong>Q：启动时提示「运行中的 Ollama 用的不是配置的模型目录」？</strong></p>
 <p>正常现象。开机自启的 Ollama 可能用的是别的目录，启动器会自动用正确的目录重启它。</p>
 <p><strong>Q：喜欢黑窗口 / 要写脚本自动化？</strong></p>
@@ -149,8 +225,10 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>安装向导会按你的显存只列出跑得动的，下表是完整参考：</p>
 <table><thead><tr><th>模型</th><th>下载体积</th><th>需要显存</th><th>适合</th></tr></thead><tbody><tr><td><code>qwen3.8:27b</code></td><td>16.8 GB</td><td>21 GB+</td><td>24GB 显存，质量最强</td></tr><tr><td><code>qwen3.6:27b</code></td><td>16.8 GB</td><td>21 GB+</td><td>24GB 显存，偏编码</td></tr><tr><td><code>qwen3:14b</code></td><td>9.3 GB</td><td>13 GB+</td><td>16GB 显存，推理强</td></tr><tr><td><code>qwen2.5:14b</code></td><td>9.0 GB</td><td>13 GB+</td><td>16GB 显存，稳</td></tr><tr><td><code>qwen3:8b</code></td><td>5.2 GB</td><td>8 GB+</td><td>8GB 显存</td></tr><tr><td><code>qwen2.5:7b</code></td><td>4.7 GB</td><td>7 GB+</td><td>轻量</td></tr><tr><td><code>qwen2.5:3b</code></td><td>1.9 GB</td><td>4 GB+</td><td>小显存 / 纯 CPU</td></tr><tr><td><code>llama3.2:3b</code></td><td>2.0 GB</td><td>4 GB+</td><td>很轻</td></tr></tbody></table>
 <p>「需要显存」已包含 KV cache 和开销余量。想用别的模型，选「手动输入其他模型」即可。</p>
-<p><strong>上下文长度</strong>由向导按「显存 − 模型体积」自动计算。</p>
-<p><strong>实测参考</strong>（RTX 4090 + Qwen3.8-27B）：显存占用约 16GB，生成速度约 70 字/秒。</p>
+<p><strong>上下文长度</strong>由向导按「显存 − 模型体积」自动计算，最高到 65536。</p>
+<p>显存够的话用大一点，能记住的内容更多；显存紧张就调小。</p>
+<p><strong>实测参考</strong>（RTX 4090 + Qwen3.8-27B，64K 上下文）：</p>
+<p>显存占用约 22.7GB，生成速度约 85~110 字/秒。</p>
 <hr>
 <h2>这个文件夹里都有什么</h2>
 <pre><code>本地AI部署包\
@@ -164,24 +242,94 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p><strong>除了第一个，其他都不用管。</strong></p>
 <hr>
 <h2>安装完成后，程序装在哪</h2>
-<table><thead><tr><th>内容</th><th>位置</th><th>大小</th></tr></thead><tbody><tr><td>程序本体</td><td><code>C:\Users\你\AppData\Local\Programs\LocalAI</code></td><td>约 520 MB</td></tr><tr><td>模型文件</td><td>你在向导里选的盘，如 <code>I:\ollama\models</code></td><td>约 17 GB</td></tr></tbody></table>
+<table><thead><tr><th>内容</th><th>位置</th><th>大小</th></tr></thead><tbody><tr><td>程序本体</td><td><code>C:\Users\你\AppData\Local\Programs\LocalAI</code></td><td>约 520 MB</td></tr><tr><td>模型文件</td><td>你在向导里选的盘，如 <code>I:\ollama\models</code></td><td>约 17 GB</td></tr><tr><td>安装日志</td><td><code>%TEMP%\localai-setup.log</code></td><td>很小</td></tr></tbody></table>
 <p>安装目录里还有：</p>
-<ul><li><code>配置.json</code> — 模型、模型目录、上下文长度，可以直接改</li><li><code>重建桌面图标.cmd</code> — 快捷方式被误删时双击它恢复</li></ul>
-<p>安装向导还会写入几个<strong>用户环境变量</strong>（<code>OLLAMA_MODELS</code>、<code>OLLAMA_CONTEXT_LENGTH</code>、<code>OLLAMA_FLASH_ATTENTION</code>、<code>OLLAMA_KV_CACHE_TYPE</code>、<code>OLLAMA_KEEP_ALIVE</code>），让开机自启的 Ollama 也用同一个模型目录和参数。</p>
+<ul><li><code>配置.json</code> — 模型、模型目录、上下文长度，可以直接改</li><li><code>控制台.cmd</code> — 打开本地AI控制台（和桌面图标一样）</li><li><code>卸载.cmd</code> — 一键卸载</li><li><code>重建桌面图标.cmd</code> — 快捷方式被误删时双击它恢复</li></ul>
+<p>安装向导还会写入几个<strong>用户环境变量</strong>（<code>OLLAMA_MODELS</code>、<code>OLLAMA_CONTEXT_LENGTH</code>、</p>
+<p><code>OLLAMA_FLASH_ATTENTION</code>、<code>OLLAMA_KV_CACHE_TYPE</code>、<code>OLLAMA_KEEP_ALIVE</code>），</p>
+<p>让开机自启的 Ollama 也用同一个模型目录和参数。</p>
+<p>它还会更新 DeepSeek Harness 的配置（<code>C:\Users\你\.dsh\profiles\</code>），</p>
+<p>但<strong>只动它自己那几行</strong>，不会碰你手写的其它内容。</p>
 <hr>
 <h2>卸载</h2>
-<ol><li>双击桌面「停止本地AI」停止服务</li><li>删除桌面上的两个快捷方式</li><li>删除 <code>C:\Users\你\AppData\Local\Programs\LocalAI</code></li><li>删除模型目录（如 <code>I:\ollama\models</code>，约 17GB）</li><li>删除环境变量：在开始菜单搜「编辑账户的环境变量」，删掉以 <code>OLLAMA_</code> 开头的几项</li><li>可选：在「设置 → 应用」里卸载 Ollama 和 Node.js</li></ol>
+<p><strong>推荐：一键卸载。</strong> 两个入口，效果一样：</p>
+<ul><li>打开「本地AI控制台」→ 服务设置 → 最下面点「<strong>卸载本地 AI</strong>」</li><li>或者到安装目录里双击 <code>卸载.cmd</code></li></ul>
+<p>它会按顺序做完这些事，<strong>每一步都先问你</strong>：</p>
+<ol><li>停止服务（工作台 + Ollama）</li><li>删除桌面上的三个快捷方式</li><li><strong>单独问一次</strong>要不要连模型文件一起删（十几 GB）——</li></ol>
+<p>   只有路径确实是 <code>...\ollama\models</code> 结构时才允许自动删，否则只提示你手动处理</p>
+<ol><li>清理安装时写入的 <code>OLLAMA_*</code> 用户环境变量</li><li><strong>单独问一次</strong>要不要顺手卸载 Ollama 和 Node.js（一般不需要，它们可能还有别的用途）</li><li>删除安装目录本身</li></ol>
+<blockquote><p>手动卸载也行：停服务 → 删桌面图标 → 删安装目录 → 删模型目录 →<br>在开始菜单搜「编辑账户的环境变量」删掉 <code>OLLAMA_</code> 开头的几项。</p></blockquote>
 <hr>
 <h2>安全提醒</h2>
-<ul><li><strong>不要把 Ollama（11434 端口）或工作台（3080 端口）映射到公网</strong></li><li>让 AI 首次操作时，先用一个<strong>可以随便丢的文件夹</strong>试，确认没问题再指向重要项目</li><li>本地模型不会把你的内容发到网上 —— 这正是本地部署的意义</li><li>安装向导只接受来自它自己页面的操作，其他网页无法借它安装程序；下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</li></ul>
+<ul><li><strong>不要把 Ollama（11434 端口）或工作台（3080 端口）映射到公网</strong></li><li>让 AI 首次操作时，先用一个<strong>可以随便丢的文件夹</strong>试，确认没问题再指向重要项目</li><li>本地模型不会把你的内容发到网上 —— 这正是本地部署的意义</li><li>安装向导只接受来自它自己页面的操作，其他网页无法借它安装程序；</li></ul>
+<p>  下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</p>
 <hr>
 <h2>更新日志</h2>
+<h3>v1.3.0</h3>
+<p><strong>这一版把「装完之后的日常」补齐了：模型能自己加删、设置能自己开关、想删能干净卸掉。</strong></p>
+<p><strong>新增：本地AI控制台</strong>（桌面第三个图标）</p>
+<ul><li><strong>模型管理</strong> —— 列出已装模型（体积 / 量化 / 日期），一键删除（原地二次确认，不会误删），</li></ul>
+<p>  一键加装（输入模型名 + 常用模型快捷按钮，带实时进度 / 速度 / 剩余时间）</p>
+<ul><li><strong>服务设置</strong> —— 开机自启开关、局域网共享开关、启动工作台 / 停止服务、</li></ul>
+<p>  打开安装目录 / 模型目录</p>
+<ul><li><strong>局域网共享默认关闭</strong>，打开前必须在警告里打勾确认（会明确告诉你会暴露什么）</li></ul>
+<p><strong>新增：一键卸载</strong>（控制台里，或安装目录的 <code>卸载.cmd</code>）</p>
+<ul><li>先把「要删什么、不删什么」逐条列清楚，再逐条确认</li><li>模型文件单独问一次，而且<strong>只有路径确实是 <code>...\ollama\models</code> 结构时才允许自动删</strong></li><li>删除安装目录用延迟删除，绕开「自己正跑在里面删不掉」的问题</li></ul>
+<p><strong>新增：下载加速</strong></p>
+<ul><li><strong>本机模型扫描与复用</strong> —— 自动扫描各盘的 <code>ollama\models</code>，已经下好的模型在选模型时标</li></ul>
+<p>  「本机已有」，直接复用，省掉一次十几 GB 的下载</p>
+<ul><li><strong>可选 HTTP 代理</strong> —— 下载慢或连不上模型仓库时，可以填代理地址（走命令行下载，因为</li></ul>
+<p>  Node 自带的 fetch 默认不认系统代理，而 Ollama 认 <code>HTTPS_PROXY</code>）</p>
+<p><strong>新增：两项预检，把问题拦在下载之前</strong></p>
+<ul><li><strong>磁盘空间预检</strong> —— 按模型体积的 1.3 倍校验目标盘剩余空间，不够就在界面上直接警告</li></ul>
+<p>  并禁用「开始安装」，服务端也再拦一道</p>
+<ul><li><strong>显卡驱动版本预检</strong> —— 解析 <code>nvidia-smi</code> 的驱动版本，低于保守下限报错、低于建议值提示升级，</li></ul>
+<p>  并附驱动下载地址（驱动太旧时 Ollama 会静默退回 CPU，慢到没法用）</p>
+<p><strong>新增：上下文长度可调 + 模型完整性校验</strong></p>
+<ul><li>选模型那一步可以直接切 <strong>4K / 8K / 16K / 32K / 64K</strong>，实时显示<strong>估算显存占用</strong>，</li></ul>
+<p>  并标注「够用 / 偏紧 / 可能超出显存」</p>
+<ul><li>新增「<strong>校验模型</strong>」安装步骤：下载完先用 <code>/api/show</code> 确认注册成功，</li></ul>
+<p>  再真的试加载一次（1 token）—— 显存装不下会当场报出来，</p>
+<p>  而不是等你打开工作台提问才发现「本地运行失败」</p>
+<h3>v1.2.0</h3>
+<p><strong>这一版重点是把「每一步该做什么」讲清楚，以及把出错后的自救路径补上。</strong></p>
+<p><strong>交互引导</strong></p>
+<ul><li><strong>每一步都加了「怎么做」指令条</strong> —— 选模型、选盘这两屏顶部直接写明</li></ul>
+<p>  「① 点一下卡片 ② 点右下角继续」，不用猜</p>
+<ul><li><strong>检测页新增「接下来只需要三步」预告</strong> —— 一进来就知道全程要干什么、还差多少</li><li><strong>新增「重新检测」按钮</strong> —— 刚装了驱动或 Ollama 不用重开向导</li><li><strong>模型卡片显示预计下载时间</strong> —— 按 25MB/s 估算，心里有数</li><li><strong>安装页新增「请保持这个页面开着」提醒条</strong>，并说明中断了也能续装</li><li><strong>完成页改成「以后怎么用（就两步）」图文</strong>，并新增</li></ul>
+<p>  「<strong>立即启动工作台</strong>」「<strong>打开安装目录</strong>」两个按钮，装完可以直接用</p>
+<p><strong>出错时的自救路径</strong></p>
+<ul><li><strong>失败不再只甩一句报错</strong>：页面展开排查面板，写清「停在哪一步 / 原因 / 你可以这样做」，</li></ul>
+<p>  并按步骤给出 1、2、3 条具体操作</p>
+<ul><li><strong>新增「重试安装」</strong> —— 已装好的步骤自动跳过，模型支持续传</li><li><strong>新增「复制诊断信息」</strong> —— 环境 + 报错 + 日志一键复制，方便发给别人排查</li><li><strong>新增「打开日志」</strong> —— 全程写日志到 <code>%TEMP%\localai-setup.log</code></li><li><strong>缺 Ollama 不再算「失败」</strong>：改成「需要你完成一步操作」，</li></ul>
+<p>  点「自动安装 Ollama」装完后<strong>自动接着往下装</strong>，不用重新走一遍向导</p>
+<ul><li><strong>权限不足可以自动提权</strong>：弹窗按钮改成「自动以管理员身份继续」，</li></ul>
+<p>  点一下自动以管理员身份重启向导，不用用户自己去右键</p>
+<ul><li><strong>控制台启动横幅重写</strong> —— 明确写出「会自动打开浏览器」「保持窗口开着」</li></ul>
+<p>  「浏览器没打开就复制这个地址」，端口全被占用时给出排查命令</p>
+<p><strong>修掉的问题</strong></p>
+<ul><li><strong>修掉一个会覆盖用户配置的严重 bug</strong> —— 之前只要配置文件是以</li></ul>
+<p>  「由本地 AI 安装向导生成」开头，重装时就会<strong>整份覆盖</strong>，</p>
+<p>  把用户自己加的云端 provider、插件设置全部抹掉。</p>
+<p>  现在改成<strong>定点合并</strong>：只替换本地 provider 和压缩参数，其余原样保留，</p>
+<p>  改动前还会备份（最多保留 3 份）</p>
+<ul><li><strong>修掉「长对话被截断」</strong> —— DeepSeek Harness 的自动压缩插件默认预留 65536 token，</li></ul>
+<p>  和本地模型窗口一样大，导致压力预算为负、<strong>压缩被静默禁用</strong>；</p>
+<p>  会话涨满后报「已达输出 token 上限」，点「继续」也救不回来。</p>
+<p>  新版安装时自动写入正确的压缩参数（<code>headroomTokens: 8192</code> 等）</p>
+<ul><li><strong>上下文长度上限从 32768 提到 65536</strong> —— 配合 KV cache 量化，</li></ul>
+<p>  24GB 显存可以全量驻留 64K 上下文（实测 RTX 4090 占 22.7G/24.5G）</p>
+<ul><li>安装向导会把每个模型对应的上下文长度算好再下发，命令行安装和图形向导不再各算一套</li></ul>
 <h3>v1.1.1</h3>
 <p><strong>下载模型终于能看到进度了。</strong></p>
-<ul><li><strong>修掉进度条来回跳的问题</strong> —— 之前界面显示的是「某一个分片」的百分比，而模型是多个分片同时下载的，所以进度条会在 100% / 3% / 67% 之间乱跳，完全看不出到底下了多少。现在改成汇总<strong>所有分片</strong>的整体进度。</li><li><strong>新增详细进度信息</strong> —— 已下载 / 总大小、实时速度、预计剩余时间、分片数。</li><li><strong>新增整体步骤进度</strong> —— 顶部显示「第 N / 6 步 · 当前步骤」，不用猜还剩多少。</li><li><strong>每一步显示已用时</strong> —— 装依赖、启动服务这类没有百分比的步骤，改成滚动进度条 + 计时，不再看起来像卡死。</li><li><strong>下载 Ollama 安装包时也有进度了</strong> —— 之前这一步界面上完全没有提示。</li><li><strong>安装 DeepSeek Harness 改为流式输出</strong> —— 界面不再一动不动。</li></ul>
+<ul><li><strong>修掉进度条来回跳的问题</strong> —— 之前界面显示的是「某一个分片」的百分比，</li></ul>
+<p>  而模型是多个分片同时下载的，所以进度条会在 100% / 3% / 67% 之间乱跳，</p>
+<p>  完全看不出到底下了多少。现在改成汇总<strong>所有分片</strong>的整体进度。</p>
+<ul><li><strong>新增详细进度信息</strong> —— 已下载 / 总大小、实时速度、预计剩余时间、分片数。</li><li><strong>新增整体步骤进度</strong> —— 顶部显示「第 N / 6 步 · 当前步骤」，不用猜还剩多少。</li><li><strong>每一步显示已用时</strong> —— 装依赖、启动服务这类没有百分比的步骤，</li></ul>
+<p>  改成滚动进度条 + 计时，不再看起来像卡死。</p>
+<ul><li><strong>下载 Ollama 安装包时也有进度了</strong> —— 之前这一步界面上完全没有提示。</li><li><strong>安装 DeepSeek Harness 改为流式输出</strong> —— 界面不再一动不动。</li></ul>
 <h3>v1.1.0</h3>
 <ul><li>图形化安装向导</li></ul>
 <h3>v1.0.1</h3>
-<ul><li>离线友好：内置 Node.js，双击即可，不需要提前装环境</li></ul>
-</div>
+<ul><li>离线友好：内置 Node.js，双击即可，不需要提前装环境</li></ul></div>
 </body></html>

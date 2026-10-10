@@ -6,6 +6,9 @@ title Local AI Setup (Console)
 echo.
 echo   命令行安装模式（没有图形界面，适合脚本/自动化）
 echo.
+echo   提示：普通用户建议直接用「① 双击这里开始安装.cmd」，
+echo         图形向导每一步都有操作指引，出错时还有排障面板和一键重试。
+echo.
 
 rem 优先用部署包自带的便携 Node，其次用系统里装的
 if exist "%~dp0node\node.exe" set "PATH=%~dp0node;%PATH%"

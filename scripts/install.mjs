@@ -11,9 +11,17 @@
  *       speed  字节/秒（仅模型下载有）
  *       eta    预计剩余秒数（仅模型下载有）
  *       parts  分片进度 { done, total }（仅模型下载有）
- *   { type:'needs-elevation', reason, hint }
+ *   { type:'needs-elevation', reason, hint, action }
+ *   { type:'paused', stage }        缺前置（如 Ollama）导致的暂停，不是失败
  *   { type:'done',   summary }
- *   { type:'error',  text }
+ *   { type:'error',  text, stage, remedy:[...] }
+ *       stage   停在哪一步（prepare / ollama / model / verify / dsh / config）
+ *       remedy  这一步失败时「你可以这样做」的分步指引，界面直接列出来
+ *
+ * 入参 opts：
+ *   model / modelDir / contextWindow / root       必填
+ *   proxy       可选，HTTP 代理（形如 http://127.0.0.1:7890），走命令行 pull
+ *   ollamaExe   可选，Ollama 可执行文件路径
  */
 
 import fs from 'node:fs';
@@ -26,9 +34,10 @@ import { createShortcuts, findDesktop } from './make-shortcuts.mjs';
 import { saveConfig } from './config.mjs';
 import {
   isUp, servesDir, killOllama, spawnServe, waitUp, ollamaEnv, persistOllamaVars, modelCapabilities,
-  OLLAMA_BASE,
+  hasModel, OLLAMA_BASE,
 } from './ollama.mjs';
 import { modelInfo } from './models.mjs';
+import { toLines, seqItemRange, spliceSeqItem, spliceMapKey, insertUnderMapKey } from './yamlpatch.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -178,9 +187,10 @@ async function pullViaApi(model, emit, tracker) {
 }
 
 /** 兜底：老版本 Ollama 没有结构化接口时，解析命令行进度条（精度略低） */
-function pullViaCli(exe, model, modelDir, emit, tracker) {
+function pullViaCli(exe, model, modelDir, emit, tracker, envOverride) {
   return new Promise((resolve, reject) => {
-    const child = spawn(exe, ['pull', model], { env: ollamaEnv({ modelDir }), windowsHide: true });
+    const env = envOverride || ollamaEnv({ modelDir });
+    const child = spawn(exe, ['pull', model], { env, windowsHide: true });
 
     let buf = '';
     const handle = (chunk) => {
@@ -216,8 +226,9 @@ function normPath(p) {
 }
 
 const SCRIPT_FILES = [
-  'config.mjs', 'models.mjs', 'ollama.mjs', 'idlist.mjs', 'make-lnk.mjs', 'make-shortcuts.mjs',
-  'start-local-ai.mjs', 'stop-local-ai.mjs',
+  'config.mjs', 'models.mjs', 'ollama.mjs', 'detect.mjs', 'idlist.mjs', 'make-lnk.mjs',
+  'make-shortcuts.mjs', 'start-local-ai.mjs', 'stop-local-ai.mjs',
+  'console.mjs', 'uninstall.mjs',
 ];
 
 /**
@@ -236,9 +247,26 @@ echo.
 pause
 `.replace(/\n/g, '\r\n');
 
+/**
+ * 卸载入口必须**先切到临时目录**再跑 node：
+ * 卸载的最后一步要删掉安装目录本身，如果当前目录还在里面，Windows 会拒绝删除。
+ */
+const uninstallEntry = `@echo off
+set NODE_OPTIONS=
+title Uninstall Local AI
+cd /d "%TEMP%"
+set "NODE_EXE=node"
+if exist "%~dp0node\\node.exe" set "NODE_EXE=%~dp0node\\node.exe"
+"%NODE_EXE%" "%~dp0uninstall.mjs"
+echo.
+pause
+`.replace(/\n/g, '\r\n');
+
 export const CMD_ENTRIES = {
   'start-ai.cmd': cmdEntry('Local AI Workspace', 'start-local-ai.mjs'),
   'stop-ai.cmd': cmdEntry('Stop Local AI', 'stop-local-ai.mjs'),
+  '控制台.cmd': cmdEntry('Local AI Console', 'console.mjs'),
+  '卸载.cmd': uninstallEntry,
   '重建桌面图标.cmd': cmdEntry('Rebuild Desktop Shortcuts', 'make-shortcuts.mjs'),
 };
 
@@ -252,6 +280,65 @@ function nodeOnPath() {
 
 function isPermError(e) {
   return e && (e.code === 'EACCES' || e.code === 'EPERM' || /access is denied|拒绝访问|权限/i.test(String(e.message)));
+}
+
+/* --------------------------------------------------------- 失败时的指引 */
+
+/**
+ * 每一步失败时给用户的「你可以这样做」。
+ * 只甩一句报错对非技术用户毫无意义，所以失败必须带上分步的自救指引。
+ */
+export const REMEDIES = {
+  prepare: [
+    '确认安装位置的磁盘没有满、也没有被安全软件锁住',
+    '如果装了 360 / 火绒之类的安全软件，先临时退出再点「重试安装」',
+    '还不行就把部署包解压到 D 盘或 E 盘（路径别有中文），重新双击「① 双击这里开始安装.cmd」',
+  ],
+  ollama: [
+    '确认 Ollama 已经装完（安装窗口跑完、托盘出现羊驼图标）再点「重试安装」',
+    '如果弹出了管理员授权窗口，请点「是」',
+    '也可以手动到 https://ollama.com/download 下载安装，再回来点「重试安装」',
+  ],
+  model: [
+    '先确认电脑能上网（模型要从 ollama.com 下载）',
+    '点「重试安装」就能续传 —— 已经下好的部分不会重下',
+    '网速太慢就换个更小的模型，或者换个时间再试；也可以在「存放位置」那一步填一个 HTTP 代理',
+  ],
+  verify: [
+    '点「重试安装」再试一次 —— 多半是模型文件没下完整',
+    '如果提示显存不足：回到上一步换个小一点的模型，或把上下文长度调小',
+    '还不行就删掉安装目录里的 配置.json，重新运行安装向导',
+  ],
+  dsh: [
+    '确认能访问 npm 源（公司网络或代理可能把它拦了）',
+    '点「重试安装」重来一次，npm 会跳过已经下好的包',
+    '临时关掉代理 / 安全软件后再试',
+  ],
+  config: [
+    '确认对当前用户的文件夹有写入权限',
+    '关掉向导，右键「① 双击这里开始安装.cmd」→「以管理员身份运行」再试',
+  ],
+  shortcuts: [
+    '桌面可能被重定向到了别的盘，或者设成了只读',
+    '不影响使用：装完后到安装目录里双击「重建桌面图标.cmd」就能补回来',
+  ],
+};
+
+const FAIL_TEXT = {
+  prepare: '准备安装目录失败',
+  ollama: 'Ollama 未就绪',
+  model: '模型下载未完成',
+  verify: '模型校验没通过',
+  dsh: 'DeepSeek Harness 安装失败',
+  config: '配置写入失败',
+};
+
+/** 某个路径所在磁盘的剩余空间（GB）；取不到返回 null */
+function diskFreeGB(p) {
+  try {
+    const st = fs.statfsSync(path.parse(path.resolve(p)).root);
+    return Math.round((st.bsize * st.bavail) / 1e9);
+  } catch { return null; }
 }
 
 /* ------------------------------------------------------------------ 各步骤 */
@@ -268,6 +355,16 @@ async function stepPrepare(opts, emit) {
     fs.mkdirSync(path.join(root, 'icons'), { recursive: true });
     for (const f of fs.readdirSync(path.join(kitDir, 'icons'))) {
       fs.copyFileSync(path.join(kitDir, 'icons', f), path.join(root, 'icons', f));
+    }
+    // 界面文件也复制过去：安装目录里的「本地AI控制台」要用它
+    const uiSrc = path.join(kitDir, 'ui');
+    if (fs.existsSync(uiSrc)) {
+      const uiDst = path.join(root, 'ui');
+      fs.mkdirSync(uiDst, { recursive: true });
+      for (const f of fs.readdirSync(uiSrc)) {
+        const s = path.join(uiSrc, f);
+        if (fs.statSync(s).isFile()) fs.copyFileSync(s, path.join(uiDst, f));
+      }
     }
     for (const [f, body] of Object.entries(CMD_ENTRIES)) {
       fs.writeFileSync(path.join(root, f), body, 'ascii');
@@ -310,11 +407,11 @@ async function stepOllama(opts, emit) {
     emit({
       type: 'needs-elevation',
       reason: '未检测到 Ollama，需要先安装',
-      hint: 'Ollama 是本地模型运行引擎，必须安装。点击下方按钮会自动下载并安装（会弹出 Windows 管理员授权窗口）。',
+      hint: 'Ollama 是本地模型运行引擎，必须安装。点下面的按钮会自动下载并安装（会弹出 Windows 管理员授权窗口，点「是」即可），装完向导会自动接着往下装。',
       action: 'install-ollama',
     });
     emit({ type: 'step', id: 'ollama', status: 'waiting', text: '等待安装 Ollama' });
-    return false;
+    return 'paused';   // 缺前置 ≠ 失败，界面显示「等你完成一步」而不是「安装未完成」
   }
 
   try {
@@ -359,30 +456,119 @@ async function stepOllama(opts, emit) {
  *
  * 关键点：进度是「所有分片合起来」的，不是某一个分片的 —— 否则进度条会来回跳。
  * 优先用 HTTP 接口拿结构化数据；拿不到再退回命令行解析。
+ * 配了代理时直接走命令行：Node 自带的 fetch 默认不认系统代理，而 Ollama（Go）认 HTTPS_PROXY。
  */
 async function stepPullModel(opts, emit) {
-  const { model, modelDir, ollamaExe } = opts;
+  const { model, modelDir, ollamaExe, proxy } = opts;
   emit({ type: 'step', id: 'model', status: 'running', text: `下载模型 ${model}` });
+
+  // 本机已经有这个模型：直接复用，省掉一次十几 GB 的下载
+  if (hasModel(modelDir, model)) {
+    emit({ type: 'log', text: `${modelDir} 里已经有 ${model}，直接复用，不用重新下载。` });
+    emit({ type: 'progress', phase: 'model', percent: 100, text: '本机已有，跳过下载' });
+    emit({ type: 'step', id: 'model', status: 'skipped', text: '本机已有，跳过下载' });
+    return true;
+  }
+
+  // 空间预检：分片下载写到一半没空间会很麻烦，提前拦一道
+  const needGB = Math.ceil((modelInfo(model)?.gb || 0) * 1.3);
+  const freeGB = diskFreeGB(modelDir);
+  if (freeGB != null && needGB > 0 && freeGB < needGB) {
+    emit({ type: 'log', text: `! 目标磁盘剩余 ${freeGB} GB，预计需要 ${needGB} GB` });
+    emit({ type: 'step', id: 'model', status: 'error', text: `磁盘空间不足（剩 ${freeGB} GB，需要约 ${needGB} GB）` });
+    return false;
+  }
+  if (freeGB != null) emit({ type: 'log', text: `目标磁盘剩余 ${freeGB} GB，预计需要 ${needGB} GB。` });
 
   const expected = Math.round((modelInfo(model)?.gb || 0) * 1e9);
   const tracker = createPullTracker(emit, expected);
   tracker.flush({ force: true });
 
-  try {
-    await pullViaApi(model, emit, tracker);
-  } catch (e) {
-    emit({ type: 'log', text: `! 结构化进度不可用（${e.message}），改用命令行进度` });
+  const cliEnv = proxy
+    ? { ...ollamaEnv({ modelDir }), HTTPS_PROXY: proxy, HTTP_PROXY: proxy, ALL_PROXY: proxy }
+    : null;
+
+  if (proxy) {
+    emit({ type: 'log', text: `已启用代理 ${proxy}，改用命令行下载。` });
     try {
-      await pullViaCli(ollamaExe, model, modelDir, emit, tracker);
-    } catch (e2) {
-      emit({ type: 'log', text: String(e2.message || e2) });
+      await pullViaCli(ollamaExe, model, modelDir, emit, tracker, cliEnv);
+    } catch (e) {
+      emit({ type: 'log', text: String(e.message || e) });
       emit({ type: 'step', id: 'model', status: 'error', text: '下载未完成，可重新运行继续' });
       return false;
+    }
+  } else {
+    try {
+      await pullViaApi(model, emit, tracker);
+    } catch (e) {
+      emit({ type: 'log', text: `! 结构化进度不可用（${e.message}），改用命令行进度` });
+      try {
+        await pullViaCli(ollamaExe, model, modelDir, emit, tracker);
+      } catch (e2) {
+        emit({ type: 'log', text: String(e2.message || e2) });
+        emit({ type: 'step', id: 'model', status: 'error', text: '下载未完成，可重新运行继续' });
+        return false;
+      }
     }
   }
 
   emit({ type: 'progress', phase: 'model', percent: 100, text: '完成' });
   emit({ type: 'step', id: 'model', status: 'done', text: '模型已就绪' });
+  return true;
+}
+
+/**
+ * 模型完整性校验。
+ *
+ * ollama pull 自己会校验分片摘要，但「文件下载完整」不等于「能跑起来」——
+ * 显存不够、模型跟 Ollama 版本不匹配，都要等真正加载时才暴露。
+ * 所以这里显式跑一次 1 token 的推理，把问题在安装阶段就摆出来，
+ * 而不是等用户打开工作台提问才发现「本地运行失败」。
+ */
+async function stepVerify(opts, emit) {
+  const { model, contextWindow } = opts;
+  emit({ type: 'step', id: 'verify', status: 'running', text: '校验模型' });
+
+  const show = await fetch(`${OLLAMA_BASE}/api/show`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model }),
+    signal: AbortSignal.timeout(15000),
+  }).catch(() => null);
+  if (!show || !show.ok) {
+    emit({ type: 'log', text: '模型没有注册到 Ollama 服务里。' });
+    emit({ type: 'step', id: 'verify', status: 'error', text: '模型没注册成功' });
+    return false;
+  }
+  emit({ type: 'log', text: '模型文件完整，已注册到 Ollama。' });
+
+  emit({ type: 'log', text: `正在试加载一次（上下文 ${contextWindow}，首次约 1 分钟）...` });
+  let r = null;
+  try {
+    r = await fetch(`${OLLAMA_BASE}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        prompt: 'hi',
+        stream: false,
+        options: { num_predict: 1, num_ctx: contextWindow },
+      }),
+      signal: AbortSignal.timeout(300000),
+    });
+  } catch (e) {
+    emit({ type: 'log', text: `试加载失败：${e.message}` });
+    emit({ type: 'step', id: 'verify', status: 'error', text: '模型加载失败' });
+    return false;
+  }
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    emit({ type: 'log', text: `试加载失败：${j.error || `HTTP ${r.status}`}` });
+    emit({ type: 'step', id: 'verify', status: 'error', text: '模型加载失败（多半是显存不够）' });
+    return false;
+  }
+
+  emit({ type: 'step', id: 'verify', status: 'done', text: '模型可以正常运行' });
   return true;
 }
 
@@ -464,8 +650,160 @@ function stepDsh(opts, emit) {
 
 const GENERATED_MARK = '# 由本地 AI 安装向导生成';
 
+/** 部署包版本；写进生成的配置，方便以后判断这份文件是谁写的、要不要升级 */
+export const KIT_VERSION = '1.3.0';
+
+/* ------------------------------------------------- dsh 配置块（未缩进） */
+
+function providerBlock(model, contextWindow, input) {
+  return `ollama-local:
+  displayName: Ollama 本地 (${model})
+  apiKeyEnv: OLLAMA_API_KEY
+  api: openai-completions
+  baseURL: http://127.0.0.1:11434/v1
+  models:
+    - id: ${model}
+      name: ${model} 本地
+      contextWindow: ${contextWindow}
+      maxTokens: 8192
+      input: ${input}`;
+}
+
+function llmPiAiBlock(model, contextWindow, input) {
+  const prov = providerBlock(model, contextWindow, input)
+    .split('\n').map((l) => (l.trim() ? `      ${l}` : '')).join('\n');
+  return `- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+${prov}`;
+}
+
+/** headless 档没有 agent 预设，compaction-basic 就挂在根层，按 id 就能命中 */
+function compactionBlock() {
+  return `- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  config:
+    thresholdRatio: 0.6
+    headroomTokens: 8192
+    retainRatio: 0.25`;
+}
+
+function defaultModelBlock(model) {
+  return `- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: ollama-local
+    model: ${model}`;
+}
+
+/**
+ * 读取 preset-standard 副本（web 档要用它覆盖 dsh 默认预设，才能改到
+ * 预设内部的 compaction-basic）。读不到就返回 null，调用方跳过这一项。
+ */
+export function readPresetStandard(kitDir) {
+  try {
+    return fs.readFileSync(path.join(kitDir, 'scripts', 'preset-standard.patch.yml'), 'utf8');
+  } catch { return null; }
+}
+
+/**
+ * 去掉副本开头的说明注释，只留 YAML 实体。
+ * 合并（而不是新建）时必须用它：否则每跑一次安装就会把那段注释再插一遍，越堆越多。
+ */
+export function presetBody(presetText) {
+  const lines = toLines(presetText);
+  let i = 0;
+  while (i < lines.length && (lines[i].trim() === '' || lines[i].trimStart().startsWith('#'))) i++;
+  return lines.slice(i).join('\n').trimEnd();
+}
+
+/**
+ * 把一个 profile 的配置文本更新到最新。
+ *
+ * **定点合并，不整份覆盖**：只替换 ollama-local / preset-standard /
+ * compaction-basic / agent-default-model 这几个条目，用户在同一个文件里
+ * 自己加的 provider、插件配置原样保留。
+ *
+ * @returns {{ text: string, notes: string[] }}
+ */
+export function patchProfileText(prevText, { profile, model, contextWindow, input, presetText }) {
+  const notes = [];
+  let text = String(prevText || '');
+
+  if (!text.trim()) {
+    const parts = [
+      GENERATED_MARK,
+      `# kit-version: ${KIT_VERSION}`,
+      llmPiAiBlock(model, contextWindow, input),
+    ];
+    if (profile === 'web' && presetText) parts.push(presetText.trimEnd());
+    if (profile === 'headless') parts.push(compactionBlock(), defaultModelBlock(model));
+    return { text: `${parts.join('\n')}\n`, notes: ['新建配置'] };
+  }
+
+  // ---- 1) 本地 provider ----
+  const prov = providerBlock(model, contextWindow, input);
+  let done = false;
+  const range = seqItemRange(toLines(text), 'llm-pi-ai');
+  if (range) {
+    const scoped = { from: range[0], to: range[1] };
+    const r1 = spliceMapKey(text, 'ollama-local', prov, scoped);
+    if (r1 != null) {
+      text = r1;
+      done = true;
+      notes.push('更新 ollama-local（你添加的其它 provider 原样保留）');
+    } else {
+      const r2 = insertUnderMapKey(text, 'providers', prov, scoped);
+      if (r2 != null) {
+        text = r2;
+        done = true;
+        notes.push('在 llm-pi-ai 下新增 ollama-local（你添加的其它 provider 原样保留）');
+      }
+    }
+  }
+  if (!done) {
+    text = spliceSeqItem(text, 'llm-pi-ai', llmPiAiBlock(model, contextWindow, input));
+    notes.push('新增 llm-pi-ai 配置块');
+  }
+
+  // ---- 2) web 档：重述 preset-standard，修复长对话被压缩禁用 ----
+  if (profile === 'web' && presetText) {
+    text = spliceSeqItem(text, 'preset-standard', presetBody(presetText));
+    notes.push('写入 preset-standard（修复长对话「已达输出 token 上限」）');
+  }
+
+  // ---- 3) headless 档：根层压缩配置 + 默认模型 ----
+  if (profile === 'headless') {
+    text = spliceSeqItem(text, 'compaction-basic', compactionBlock());
+    text = spliceSeqItem(text, 'agent-default-model', defaultModelBlock(model));
+    notes.push('写入 compaction-basic / agent-default-model');
+  }
+
+  return { text, notes };
+}
+
+/** 改动前留一份带时间戳的备份，最多保留 3 份 */
+function backupProfile(file, emit) {
+  try {
+    const bak = `${file}.${Date.now()}.bak`;
+    fs.copyFileSync(file, bak);
+    emit({ type: 'log', text: `已备份原有配置：${bak}` });
+    const dir = path.dirname(file);
+    const base = path.basename(file);
+    const olds = fs.readdirSync(dir)
+      .filter((n) => n.startsWith(`${base}.`) && n.endsWith('.bak'))
+      .sort();
+    for (const n of olds.slice(0, Math.max(0, olds.length - 3))) {
+      try { fs.rmSync(path.join(dir, n), { force: true }); } catch { /* ignore */ }
+    }
+  } catch (e) {
+    emit({ type: 'log', text: `! 备份配置失败（${e.code || e.message}），继续写入` });
+  }
+}
+
 async function stepConfig(opts, emit) {
-  const { root, model, contextWindow } = opts;
+  const { root, model, contextWindow, kitDir } = opts;
   emit({ type: 'step', id: 'config', status: 'running', text: '写入配置' });
 
   // 按模型实际能力声明输入类型：纯文本模型声明 image 会让工作台发图片过去直接报错
@@ -479,40 +817,22 @@ async function stepConfig(opts, emit) {
     saveConfig(root, { model, modelDir: opts.modelDir, contextWindow });
 
     const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
-    const patch = (withDefault) => `${GENERATED_MARK}
-- id: llm-pi-ai
-  name: '@deepseek-ai/dsh-llm-pi-ai'
-  config:
-    providers:
-      ollama-local:
-        displayName: Ollama 本地 (${model})
-        apiKeyEnv: OLLAMA_API_KEY
-        api: openai-completions
-        baseURL: http://127.0.0.1:11434/v1
-        models:
-          - id: ${model}
-            name: ${model} 本地
-            contextWindow: ${contextWindow}
-            maxTokens: 8192
-            input: ${input}
-${withDefault ? `- id: agent-default-model
-  name: '@deepseek-ai/dsh-agent-default-model'
-  config:
-    provider: ollama-local
-    model: ${model}
-` : ''}`;
+    const presetText = readPresetStandard(kitDir);
+    if (!presetText) emit({ type: 'log', text: '! 没找到 preset-standard 副本，跳过长对话优化' });
 
-    for (const p of ['web', 'headless']) {
-      const dir = path.join(home, 'profiles', p);
+    for (const profile of ['web', 'headless']) {
+      const dir = path.join(home, 'profiles', profile);
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, 'cordis.patch.yml');
-      // 用户自己写过的配置先备份，不直接覆盖
-      if (fs.existsSync(file) && !fs.readFileSync(file, 'utf8').startsWith(GENERATED_MARK)) {
-        const bak = `${file}.${Date.now()}.bak`;
-        fs.copyFileSync(file, bak);
-        emit({ type: 'log', text: `已备份原有配置：${bak}` });
+      const prev = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+      const { text, notes } = patchProfileText(prev, { profile, model, contextWindow, input, presetText });
+      if (prev && prev !== text) backupProfile(file, emit);
+      if (prev !== text) {
+        fs.writeFileSync(file, text, 'utf8');
+        for (const n of notes) emit({ type: 'log', text: `${profile} 档：${n}` });
+      } else {
+        emit({ type: 'log', text: `${profile} 档：配置已是最新，未改动` });
       }
-      fs.writeFileSync(file, patch(p === 'headless'), 'utf8');
     }
 
     // 本地端点也需要一个非空 API key
@@ -553,6 +873,10 @@ function stepShortcuts(opts, emit) {
 
 /* ------------------------------------------------------------------ 主流程 */
 
+/**
+ * 跑完整安装。
+ * @returns {Promise<{ok:boolean, paused?:boolean, stage?:string}>}
+ */
 export async function runInstall(opts, emit) {
   const kitDir = opts.kitDir || path.dirname(path.dirname(fileURLToPath(import.meta.url)));
   const o = {
@@ -564,12 +888,34 @@ export async function runInstall(opts, emit) {
 
   emit({ type: 'begin' });
 
-  if (!(await stepPrepare(o, emit))) return emit({ type: 'error', text: '准备安装目录失败' });
-  if (!(await stepOllama(o, emit))) return emit({ type: 'error', text: 'Ollama 未就绪' });
-  if (!(await stepPullModel(o, emit))) return emit({ type: 'error', text: '模型下载未完成' });
-  if (!(await stepDsh(o, emit))) return emit({ type: 'error', text: 'DeepSeek Harness 安装失败' });
-  if (!(await stepConfig(o, emit))) return emit({ type: 'error', text: '配置写入失败' });
-  stepShortcuts(o, emit);
+  const stages = [
+    ['prepare', () => stepPrepare(o, emit)],
+    ['ollama', () => stepOllama(o, emit)],
+    ['model', () => stepPullModel(o, emit)],
+    ['verify', () => stepVerify(o, emit)],
+    ['dsh', () => stepDsh(o, emit)],
+    ['config', () => stepConfig(o, emit)],
+  ];
+
+  for (const [stage, run] of stages) {
+    const r = await run();
+    // 「缺前置」不是失败：比如没装 Ollama，界面要显示「等你完成一步」并自动续装
+    if (r === 'paused') {
+      emit({ type: 'paused', stage });
+      return { ok: false, paused: true, stage };
+    }
+    if (!r) {
+      emit({
+        type: 'error',
+        stage,
+        text: FAIL_TEXT[stage] || '安装失败',
+        remedy: REMEDIES[stage] || [],
+      });
+      return { ok: false, stage };
+    }
+  }
+
+  const shortcutsOk = stepShortcuts(o, emit);
 
   emit({
     type: 'done',
@@ -578,6 +924,8 @@ export async function runInstall(opts, emit) {
       model: o.model,
       modelDir: o.modelDir,
       contextWindow: o.contextWindow,
+      shortcutsOk,
     },
   });
+  return { ok: true };
 }

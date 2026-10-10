@@ -49,6 +49,7 @@ export function findDesktop() {
 const JOBS = [
   ['启动本地AI.lnk', 'start-ai.cmd', 'icon-start.ico', '启动本地 AI 工作台'],
   ['停止本地AI.lnk', 'stop-ai.cmd', 'icon-stop.ico', '停止本地 AI 工作台并释放显存'],
+  ['本地AI控制台.lnk', '控制台.cmd', 'icon-console.ico', '管理模型、开关开机自启与局域网共享'],
 ];
 
 export function createShortcuts(root, desktop, logger) {

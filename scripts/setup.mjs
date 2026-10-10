@@ -100,13 +100,24 @@ function printer() {
       warn(ev.reason);
       if (ev.action === 'install-ollama') {
         info('请到 https://ollama.com/download 下载并安装（保持默认选项），然后重新运行本脚本。');
-        info('或者双击「① 双击这里开始安装.cmd」，图形向导可以自动安装 Ollama。');
+        info('或者双击「① 双击这里开始安装.cmd」，图形向导可以自动安装并接着往下装。');
       } else if (ev.hint) {
         info(ev.hint);
       }
+    } else if (ev.type === 'paused') {
+      log('');
+      log('  安装暂停了 —— 需要你先完成上面那一步，然后重新运行本脚本。');
+      log('  已完成的步骤会自动跳过。');
+      process.exitCode = 1;
     } else if (ev.type === 'error') {
       log(`\n安装未完成：${ev.text}`);
-      log('修正问题后重新运行本脚本即可，已完成的部分会自动跳过。');
+      if (ev.stage) log(`停在了：${ev.stage}`);
+      if (Array.isArray(ev.remedy) && ev.remedy.length) {
+        log('\n你可以这样做：');
+        ev.remedy.forEach((s, i) => log(`  ${i + 1}. ${s}`));
+      }
+      log('\n修正问题后重新运行本脚本即可，已完成的部分会自动跳过。');
+      log('图形向导有更详细的排障界面：双击「① 双击这里开始安装.cmd」。');
       process.exitCode = 1;
     } else if (ev.type === 'done') {
       const s = ev.summary;
