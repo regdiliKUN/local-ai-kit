@@ -78,7 +78,7 @@ function startOllama(exe) {
 }
 
 export async function ensureOllama() {
-  log('[1/3] Ollama 推理服务');
+  log('[1/4] Ollama 推理服务');
 
   // 不管 11434 上有没有人在跑，一律先清掉，再由本窗口起一个
   if (await isUp(`${OLLAMA_BASE}/api/version`, 1500)) {
@@ -109,10 +109,57 @@ export async function ensureOllama() {
   return false;
 }
 
+/* --------------------------------------------------- 模型存在性预检 */
+
+/**
+ * 启动工作台前先确认配置的模型已经在 Ollama 里。
+ *
+ * 背景：用户常卡在「下载 Ollama」那步，由别人代装 Ollama 后只装了运行时、
+ * 却没跑「下载模型」那步，于是 Ollama 是空的，一对话就撞 404
+ * （"model 'xxx' not found"）。与其让用户撞了 404 才反应过来，
+ * 不如在启动最前面用醒目提示把原因和两步解法讲清楚。
+ *
+ * 非致命：预检失败只打警告，工作台照样启动（和 warmUp 一致），
+ * 真正的 404 兜底仍由 warmUp 负责。
+ */
+export async function precheckModel() {
+  log('[2/4] 模型存在性预检');
+
+  if (!MODEL) {
+    log('      未配置模型，跳过。');
+    return true;
+  }
+
+  let names = null;
+  try {
+    const r = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(4000) });
+    if (r.ok) names = ((await r.json()).models || []).map((m) => m.name);
+  } catch { /* 拿不到列表就交给 warmUp 兜底，这里不打断启动 */ }
+
+  const present = names && names.includes(MODEL);
+  if (present) {
+    log(`      模型 ${MODEL} 已在 Ollama 中，跳过。`);
+    return true;
+  }
+
+  log('');
+  log('      ⚠────────────────────────────────────────────────────────');
+  log(`      配置要用的模型「${MODEL}」在当前 Ollama 里找不到！`);
+  log('      Ollama 刚装好时是空的，必须先把模型下载下来才能用。');
+  log('      二选一即可解决：');
+  log('        1) 重跑部署包向导：双击「① 双击这里开始安装.cmd」，');
+  log('           向导会跳过已装的 Ollama，直接在「下载模型」那步拉取（推荐）；');
+  log('        2) 打开「本地AI控制台」→ 模型管理 → 输入模型名 → 下载。');
+  log('      ⚠────────────────────────────────────────────────────────');
+  log('      工作台仍会启动，但开始对话前必须先完成上面的下载。');
+  log('');
+  return false;
+}
+
 /* --------------------------------------------------------------- 预热 */
 
 export async function warmUp() {
-  log('[2/3] 预热模型');
+  log('[3/4] 预热模型');
 
   const ps = await fetch(`${OLLAMA_BASE}/api/ps`).then((r) => r.json()).catch(() => null);
   const loaded = ps && ps.models && ps.models.find((m) => m.name === MODEL || m.model === MODEL);
@@ -167,7 +214,7 @@ export async function warmUp() {
 /* ------------------------------------------------------- DeepSeek Harness */
 
 export function runDsh() {
-  log('[3/3] 启动 DeepSeek Harness');
+  log('[4/4] 启动 DeepSeek Harness');
   log('      正在启动（约 10 秒）...');
 
   const bin = path.join(ROOT, 'dsh-runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
@@ -239,6 +286,7 @@ if (isDirectRun) {
 
     (async () => {
       if (!(await ensureOllama())) { process.exitCode = 1; return; }
+      await precheckModel();
       if (!(await warmUp())) log('      工作台仍会启动，但对话前需要先解决上面的问题。');
 
       if (await isUp(DSH_BASE)) {

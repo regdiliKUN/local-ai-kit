@@ -9,21 +9,21 @@
 
 export const MODEL_CHOICES = [
   {
-    tag: 'qwen3.8:27b',
-    name: 'Qwen3.8 27B',
-    gb: 16.8,
-    needGB: 21,
-    params: 27,
+    tag: 'qwen3:32b',
+    name: 'Qwen3 32B',
+    gb: 20.0,
+    needGB: 23,
+    params: 32,
     note: '质量最强，长任务与工具调用最好',
     tags: ['推荐', '工具调用'],
   },
   {
-    tag: 'qwen3.6:27b',
-    name: 'Qwen3.6 27B',
-    gb: 16.8,
-    needGB: 21,
-    params: 27,
-    note: 'agentic 编码方向强化',
+    tag: 'qwen3:30b-a3b',
+    name: 'Qwen3 30B-A3B',
+    gb: 19.0,
+    needGB: 22,
+    params: 30,
+    note: 'agentic 编码方向强化（MoE，显存占用更低）',
     tags: ['工具调用'],
   },
   {
