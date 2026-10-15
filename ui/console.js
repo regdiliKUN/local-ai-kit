@@ -45,7 +45,7 @@ function toast(msg) {
 }
 
 /** 常见模型的快捷按钮 */
-const QUICK = ['qwen3:8b', 'qwen2.5:7b', 'qwen3:14b', 'qwen2.5:14b', 'qwen3.8:27b'];
+const QUICK = ['qwen3:8b', 'qwen2.5:7b', 'qwen3:14b', 'qwen2.5:14b', 'qwen3:32b'];
 
 let state = null;
 
