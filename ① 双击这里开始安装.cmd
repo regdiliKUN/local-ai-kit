@@ -73,8 +73,11 @@ set "NODE_EXE=%CAND%"
 exit /b 0
 
 rem ---- Node.js missing or too old: hand over to the PowerShell helper ----
+rem      NOTE: pass "%~dp0." not "%~dp0" - the trailing backslash of %~dp0
+rem      would escape the closing quote and the path would arrive with a
+rem      stray quote, making bootstrap.ps1 unable to find its scripts.
 :bootstrap
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\bootstrap.ps1" "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\bootstrap.ps1" "%~dp0."
 goto :end
 
 :failed

@@ -1,11 +1,12 @@
 ﻿# 本地 AI 安装包 —— 前置依赖助手
 #
 # 用途：当电脑上没有 Node.js（或版本太旧）时，用中文说明情况，
-#       并自动下载安装 Node.js，装完接着启动图形安装向导。
+#       并自动下载安装 Node.js，装完接着启动安装程序。
 #
-# 由「① 双击这里开始安装.cmd」在检测不到 Node.js 时调用。
+# 调用方：由「① 双击这里开始安装.cmd」在检测不到 Node.js 时调用（装完走图形向导）；
+#         「备用-命令行安装.cmd」也会调用它，并传 -Target scripts\setup.mjs 走命令行模式。
 
-param([string]$KitDir = '')
+param([string]$KitDir = '', [string]$Target = 'scripts\installer.mjs')
 
 $ErrorActionPreference = 'Continue'
 try { $Host.UI.RawUI.WindowTitle = 'Local AI Setup' } catch { }
@@ -37,8 +38,8 @@ function Get-NodeVer($exe) {
     try { return ((& $exe -v) -replace '^v', '') } catch { return '' }
 }
 
-function Start-Installer($nodeExe, $kit) {
-    $script = Join-Path $kit 'scripts\installer.mjs'
+function Start-Installer($nodeExe, $kit, $target) {
+    $script = Join-Path $kit $target
     if (-not (Test-Path $script)) {
         Say "  找不到安装脚本：$script" 'Red'
         return 1
@@ -50,6 +51,14 @@ function Start-Installer($nodeExe, $kit) {
 # ---------------------------------------------------------------- 主流程
 
 if (-not $KitDir) { $KitDir = (Get-Location).Path }
+
+# 调用方可能是 cmd，而 cmd 的 "%~dp0" 末尾那个反斜杠会把收尾引号转义掉，
+# 于是路径带着一个多余的引号传进来（Join-Path 之后 Test-Path 会直接报非法字符）。
+# 这里统一清掉多余引号与尾部路径分隔符，保证 $KitDir 干净。
+$KitDir = ($KitDir -replace '^"|"$', '').Trim().TrimEnd('\', '/')
+if ($KitDir -match '^[A-Za-z]:$') { $KitDir += '\' }
+if (-not $KitDir) { $KitDir = (Get-Location).Path }
+if (-not $Target) { $Target = 'scripts\installer.mjs' }
 
 $node = Get-NodePath
 $reason = ''
@@ -68,7 +77,7 @@ if (-not $node) {
 }
 
 if (-not $reason) {
-    $code = Start-Installer $node $KitDir
+    $code = Start-Installer $node $KitDir $Target
     exit $code
 }
 
@@ -212,7 +221,7 @@ $node2 = Get-NodePath
 if (-not $node2) {
     Say ''
     Say '  Node.js 已安装，但当前窗口还看不到它。' 'Yellow'
-    Say '  请【重新双击】「① 双击这里开始安装.cmd」，就能继续了。'
+    Say '  请【重新运行】刚才那个 .cmd 文件，就能继续了。'
     Say '  （或者重启电脑后重试）'
     exit 0
 }
@@ -221,5 +230,5 @@ Say ''
 Say '  Node.js 安装成功，正在继续安装本地 AI ...' 'Green'
 Say ''
 Start-Sleep -Seconds 2
-$code = Start-Installer $node2 $KitDir
+$code = Start-Installer $node2 $KitDir $Target
 exit $code

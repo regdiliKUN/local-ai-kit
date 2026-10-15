@@ -265,6 +265,25 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>  下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</p>
 <hr>
 <h2>更新日志</h2>
+<h3>v1.3.3</h3>
+<p><strong>这一版把「电脑上还没装 Node.js」时的自动安装路真正修通了。</strong></p>
+<p><strong>修复：双击后报 <code>'node' is not recognized</code>，或窗口一闪就没了</strong></p>
+<ul><li>旧入口脚本只信 <code>where node</code>。Windows 自带一种「应用执行别名」的 <code>node.exe</code></li></ul>
+<p>  （0 字节占位文件），<code>where node</code> 能查到它，但真去执行时会报</p>
+<p>  <code>'node' is not recognized as an internal or external command</code></p>
+<ul><li>现在改成<strong>必须 <code>node -v</code> 真的跑通</strong>才算数，0 字节的假 node 会被跳过</li><li>另一个坑：<code>set &quot;MAJOR=%MAJOR:v=%&quot;</code> 会把读不到版本号的空值变成字符串 <code>v=</code>，</li></ul>
+<p>  于是后面「没版本号就去自动装 Node」的判断失效，直接去调 <code>node</code> 而报错。已修</p>
+<p><strong>修复：自动装完 Node.js 之后，仍然说找不到安装程序</strong></p>
+<ul><li>入口脚本把部署包路径当 <code>&quot;%~dp0&quot;</code> 传出去，末尾的反斜杠会把收尾引号转义掉，</li></ul>
+<p>  PowerShell 实际拿到的路径多一个引号，拼路径后直接报「路径中有非法字符」</p>
+<ul><li>也就是说，<strong>以前「没装 Node.js 就自动帮你装」这条路其实是走不通的</strong>：</li></ul>
+<p>  Node.js 装好了，程序却还是找不到自己</p>
+<ul><li>现在改传 <code>&quot;%~dp0.&quot;</code>，并在 <code>bootstrap.ps1</code> 里对路径做一次清理</li></ul>
+<p><strong>修复：<code>备用-命令行安装.cmd</code> 的同类问题</strong></p>
+<ul><li>同样的假 node 判断问题；另外该文件里混了中文 <code>echo</code> 和带中文的括号块，</li></ul>
+<p>  在 cmd.exe 里会解析错位，可能让出错退出失效、继续往下跑到报错那一步</p>
+<ul><li>现在它和图形入口共用同一套检测，文件本身改成纯 ASCII + CRLF</li><li>顺带：没装 Node.js 时它也会调用 <code>bootstrap.ps1</code> 自动装好再继续（命令行模式）</li></ul>
+<hr>
 <h3>v1.3.0</h3>
 <p><strong>这一版把「装完之后的日常」补齐了：模型能自己加删、设置能自己开关、想删能干净卸掉。</strong></p>
 <p><strong>新增：本地AI控制台</strong>（桌面第三个图标）</p>
