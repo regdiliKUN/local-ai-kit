@@ -18,7 +18,7 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from './config.mjs';
-import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
+import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv, isValidModelName } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
 import { MIN_AGENT_CONTEXT } from './models.mjs';
@@ -400,7 +400,9 @@ const server = http.createServer(async (req, res) => {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
     const body = await readBody(req);
     const model = String(body.model || '').trim();
-    if (!/^[a-z0-9][a-z0-9._\-/]*(:[a-z0-9._\-]+)?$/i.test(model)) {
+    // 复用 ollama.mjs 的校验（含 120 字符上限）：这里原来是自己抄了一份正则，
+    // 少了长度限制，200 个 a 也能通过，接着就会去拉起 Ollama 拉一个不存在的模型。
+    if (!isValidModelName(model)) {
       return json(res, 400, { error: '模型名不合法，例如 qwen3:8b' });
     }
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，而且找不到它的安装位置' });
@@ -419,6 +421,7 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const model = String(body.model || '').trim();
     if (!model) return json(res, 400, { error: '缺少模型名' });
+    if (!isValidModelName(model)) return json(res, 400, { error: '模型名不合法' });
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，无法删除' });
     busy = `delete:${model}`;
     eventLog = [];

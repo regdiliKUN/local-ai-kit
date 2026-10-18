@@ -73,6 +73,7 @@ async function loadState() {
   renderModels();
   renderSettings();
   renderConfig();
+  reconcileUpdating();
 }
 
 function renderStatus() {
@@ -204,6 +205,7 @@ function connectSSE() {
       setTimeout(loadState, 400);
     } else if (ev.type === 'idle') {
       setBusy(false);
+      reconcileUpdating();
     }
   };
   es.onerror = () => { /* 自动重连 */ };
@@ -536,6 +538,28 @@ function finishUpdate(ok, result, errText) {
 
   setTimeout(() => { $('updProgress').hidden = true; }, 900);
   setTimeout(() => { refreshUpdateInfo({ silent: true }); loadState().catch(() => {}); }, 700);
+}
+
+/**
+ * 用服务端的 updating 状态校准按钮。
+ * 场景：更新中刷新了页面 —— 本地状态丢了，但服务端还在跑，
+ * 不校准的话按钮会显示可点，点了只会拿到 409。
+ */
+async function reconcileUpdating() {
+  if (!state) return;
+  if (state.updating) {
+    updRunning = true;
+    updState = 'updating';
+    paintUpdateButton();
+    $('updProgress').hidden = false;
+    if (!$('updStatus').textContent) $('updStatus').textContent = '更新正在进行中…';
+  } else if (updRunning && updState === 'updating') {
+    // 服务端已经跑完了，但 done 事件可能没收到（页面刚刷新 / 断线）
+    updRunning = false;
+    updState = 'ready';
+    paintUpdateButton();
+    $('updProgress').hidden = true;
+  }
 }
 
 function setupUpdateCard() {
