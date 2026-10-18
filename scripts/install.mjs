@@ -229,6 +229,8 @@ const SCRIPT_FILES = [
   'config.mjs', 'models.mjs', 'ollama.mjs', 'detect.mjs', 'idlist.mjs', 'make-lnk.mjs',
   'make-shortcuts.mjs', 'start-local-ai.mjs', 'stop-local-ai.mjs',
   'console.mjs', 'uninstall.mjs',
+  // 「版本与更新」要用：控制台里重新生成 dsh 配置、比对部署包版本
+  'update.mjs', 'yamlpatch.mjs', 'install.mjs', 'preset-standard.patch.yml',
 ];
 
 /**
@@ -703,7 +705,10 @@ function defaultModelBlock(model) {
  */
 export function readPresetStandard(kitDir) {
   try {
-    return fs.readFileSync(path.join(kitDir, 'scripts', 'preset-standard.patch.yml'), 'utf8');
+    // 统一成 LF：这个副本在 Windows 上会被 checkout 成 CRLF，混进生成结果里
+    // 会让「配置是否已同步」的比对永远不相等（每次检查都报待同步）。
+    return fs.readFileSync(path.join(kitDir, 'scripts', 'preset-standard.patch.yml'), 'utf8')
+      .replace(/\r\n/g, '\n');
   } catch { return null; }
 }
 

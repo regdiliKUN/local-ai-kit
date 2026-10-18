@@ -693,3 +693,58 @@ html, body {
 
 .set-card .warn-block { margin: 4px 0 16px; }
 .lan-confirm { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+
+
+/* ==================================================================
+   版本与更新卡片（控制台 → 服务设置）
+   ================================================================== */
+
+.upd-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px;
+}
+.upd-head { display: flex; align-items: flex-start; gap: 16px; }
+.upd-head-text { flex: 1; min-width: 0; }
+.upd-title { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.upd-sub { font-size: 12.5px; color: var(--text-dim); margin-top: 3px; line-height: 1.65; }
+
+.upd-badge {
+  font-size: 11.5px; font-weight: 600; padding: 1px 9px; border-radius: 20px;
+  border: 1px solid var(--border); color: var(--text-dim); background: var(--bg);
+  white-space: nowrap;
+}
+.upd-badge.warn { color: var(--warn); border-color: currentColor; background: transparent; }
+.upd-badge.ok { color: var(--ok); border-color: currentColor; background: transparent; }
+.upd-badge.err { color: var(--err); border-color: currentColor; background: transparent; }
+
+.upd-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.upd-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--bg);
+}
+.upd-row .u-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; }
+.upd-row .u-name .u-sub { display: block; font-weight: 400; font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.upd-row .u-ver { font-size: 12.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.upd-row .u-ver b { color: var(--text); }
+.upd-row .u-ver .arrow { margin: 0 5px; }
+.upd-row .u-tag { font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.upd-row .u-tag.ok { color: var(--ok); }
+.upd-row .u-tag.warn { color: var(--warn); }
+.upd-row .u-tag.err { color: var(--err); }
+.upd-row .u-tag.dim { color: var(--text-dim); }
+.upd-row.manual { border-style: dashed; }
+.upd-row a { color: var(--accent); font-size: 11.5px; }
+
+.upd-progress { margin-top: 14px; }
+.upd-progress .progress { margin-bottom: 8px; }
+.upd-status { font-size: 12.5px; color: var(--text-dim); }
+
+.upd-result { margin-top: 14px; font-size: 12.5px; line-height: 1.8; padding: 10px 12px; border-radius: 9px; }
+.upd-result.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.upd-result.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.upd-result.err { color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); }
+.upd-result a { color: inherit; text-decoration: underline; }
+.upd-result .u-line { display: block; }
+
+.upd-card .logbox { margin-top: 12px; }
