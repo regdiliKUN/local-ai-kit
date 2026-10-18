@@ -29,7 +29,7 @@ export function ollamaVars({ modelDir, contextWindow } = {}) {
   const vars = {
     OLLAMA_FLASH_ATTENTION: '1',
     OLLAMA_KV_CACHE_TYPE: 'q8_0',
-    OLLAMA_CONTEXT_LENGTH: String(contextWindow || 8192),
+    OLLAMA_CONTEXT_LENGTH: String(contextWindow || 16384),
     OLLAMA_KEEP_ALIVE: '30m',
   };
   if (modelDir) vars.OLLAMA_MODELS = modelDir;

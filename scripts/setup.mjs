@@ -13,7 +13,7 @@ import readline from 'node:readline/promises';
 
 import { detectAll } from './detect.mjs';
 import { runInstall } from './install.mjs';
-import { pickContextWindow, modelInfo } from './models.mjs';
+import { pickContextWindow, modelInfo, MIN_AGENT_CONTEXT } from './models.mjs';
 import { findOllama, isValidModelName } from './ollama.mjs';
 
 const log = (s = '') => console.log(s);
@@ -151,7 +151,7 @@ function printer() {
   log('\n[2/3] 选择模型');
   const model = await askModel(d);
   const gb = (modelInfo(model) || {}).gb;
-  const contextWindow = gb ? pickContextWindow(d.gpu.vramGB, gb) : 8192;
+  const contextWindow = gb ? pickContextWindow(d.gpu.vramGB, gb) : MIN_AGENT_CONTEXT;
   info(`✓ 模型：${model}，上下文长度：${contextWindow}`);
 
   log('\n[3/3] 设置模型存放位置');

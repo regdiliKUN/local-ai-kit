@@ -21,6 +21,7 @@ import { loadConfig } from './config.mjs';
 import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
+import { MIN_AGENT_CONTEXT } from './models.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -325,7 +326,7 @@ const server = http.createServer(async (req, res) => {
       root: ROOT,
       model: cfg.model || '',
       modelDir: cfg.modelDir || '',
-      contextWindow: cfg.contextWindow || 8192,
+      contextWindow: cfg.contextWindow || MIN_AGENT_CONTEXT,
       running,
       models: models || [],
       settings,

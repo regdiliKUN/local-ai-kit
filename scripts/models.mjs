@@ -84,8 +84,36 @@ export const MODEL_CHOICES = [
 
 export const DEFAULT_MODEL = MODEL_CHOICES[0].tag;
 
-/** 界面上可选的上下文长度档位 */
-export const CONTEXT_OPTIONS = [4096, 8192, 16384, 32768, 65536];
+/**
+ * agent 模式（dsh 工作台）能用的最小上下文窗口。
+ *
+ * 不能更小的原因不是显存，而是 dsh 自身的固定开销：persona + plan-mode 说明 +
+ * 20 多个工具的定义 + agent-instructions（最多 64KB）本身就是一万多 token。
+ * 窗口小于它时，光是「把提示词塞进去」就已经占满窗口，留给输出的预算归零，
+ * 每轮都报「已达输出 token 上限」，点「继续」只会更糟（提示词又长一截）。
+ */
+export const MIN_AGENT_CONTEXT = 16384;
+
+/** 界面上可选的上下文长度档位（低于 MIN_AGENT_CONTEXT 的档位不给选） */
+export const CONTEXT_OPTIONS = [16384, 32768, 65536];
+
+/**
+ * 每次请求为「输出」预留的 token（= dsh provider 配置里的 maxTokens）。
+ *
+ * dsh 的自动压缩按 contextWindow − maxTokens 算「消息预算」，再减去 headroom 才是
+ * 可用的压力预算；预算 ≤ 0 时压缩会被静默禁用（TargetPressureConfigError）。
+ * 所以 maxTokens 不能写死：8K 窗口配 8K 输出 = 消息预算 0，压缩直接失效。
+ */
+export function completionReserve(contextWindow) {
+  const cw = Number(contextWindow) || MIN_AGENT_CONTEXT;
+  return Math.max(1024, Math.min(8192, Math.round(cw * 0.25)));
+}
+
+/** 自动压缩要预留的余量（= dsh compaction-basic 的 headroomTokens），同样按窗口缩放 */
+export function compactionHeadroom(contextWindow) {
+  const cw = Number(contextWindow) || MIN_AGENT_CONTEXT;
+  return Math.max(512, Math.min(8192, Math.round(cw * 0.125)));
+}
 
 /** 按显存过滤出能跑的模型；没有独显时只给最小的那几个 */
 export function modelsForVram(vramGB) {
@@ -109,11 +137,14 @@ export function recommendModel(vramGB) {
  */
 export function pickContextWindow(vramGB, modelGB) {
   const spare = (vramGB || 0) - (modelGB || 0);
-  if (spare >= 7) return 65536;
-  if (spare >= 5) return 32768;
-  if (spare >= 3.5) return 16384;
-  if (spare >= 1.5) return 8192;
-  return 4096;
+  let cw;
+  if (spare >= 7) cw = 65536;
+  else if (spare >= 5) cw = 32768;
+  else if (spare >= 3.5) cw = 16384;
+  else if (spare >= 1.5) cw = 8192;
+  else cw = 4096;
+  // 显存再紧也不能低于 agent 的可用下限，否则工作台一开口就是「已达输出 token 上限」
+  return Math.max(MIN_AGENT_CONTEXT, cw);
 }
 
 export function modelInfo(tag) {

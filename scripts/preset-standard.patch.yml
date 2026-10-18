@@ -18,9 +18,14 @@
 #
 # 不改它会怎样：compaction-basic 默认 headroomTokens = 65536，
 # 而本地模型窗口通常也只有 32768~65536，于是
-#     压力预算 = (窗口 - 8192) - 65536  <= 0
+#     压力预算 = (窗口 - maxTokens) - 65536  <= 0
 # 触发 TargetPressureConfigError，压缩被静默禁用 —— 会话一路涨到窗口填满、
 # 输出预算归零，表现为「已达输出 token 上限」而且点「继续」也救不回来。
+#
+# 注意下面 compaction-basic 里的 headroomTokens 只是「模板值」：
+# 安装器会用 tunePreset() 按实际窗口重写（16K→2048 / 32K→4096 / 64K→8192），
+# 因为固定 8192 在 16K 窗口下会把压力预算压到 0，压缩同样失效。
+# maxTokens 同理，由 providerBlock() 按窗口写成窗口的 25%（上限 8192）。
 # ---------------------------------------------------------------------------
 - id: preset-standard
   name: '@deepseek-ai/dsh-agent-preset'
