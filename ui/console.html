@@ -20,6 +20,7 @@
 
     <ol class="steps" id="tabs">
       <li data-tab="models" class="active"><span class="dot"></span><span class="label">模型管理</span></li>
+      <li data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
 
@@ -65,6 +66,73 @@
         <summary>查看详细日志</summary>
         <pre id="log"></pre>
       </details>
+    </section>
+
+    <!-- ============ 上下文与模型 ============ -->
+    <section class="view" id="view-context" hidden>
+      <h1>上下文与模型</h1>
+      <div class="guide">
+        <span class="guide-n">说明</span>
+        <span>这里改的是<b>工作台真正使用的配置</b>，和重跑安装向导效果一致。改完点「应用」，<b>再重启工作台</b>才生效。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">使用的模型</div>
+            <div class="s">从已安装的模型里选。切换后工作台会用新模型，不用重装。</div>
+          </div>
+          <select id="ctxModel" class="ctx-select"></select>
+        </div>
+
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">上下文长度（窗口）</div>
+            <div class="s">一次对话最多能装多少 token。越大越能记住前文，但也越吃显存、越慢。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="number" id="ctxWindow" class="ctx-input" min="2048" max="262144" step="1024">
+            <span class="ctx-unit">tokens</span>
+          </div>
+        </div>
+
+        <div class="quick-row" id="ctxPresets"></div>
+
+        <details class="ctx-adv" id="ctxAdv">
+          <summary>高级：自己定输出上限与压缩参数</summary>
+          <div class="ctx-grid">
+            <label>输出上限 maxTokens
+              <input type="number" id="ctxMaxTokens" class="ctx-input" step="256" min="256">
+            </label>
+            <label>压缩余量 headroomTokens
+              <input type="number" id="ctxHeadroom" class="ctx-input" step="256" min="128">
+            </label>
+            <label>压缩阈值 thresholdRatio
+              <input type="number" id="ctxThreshold" class="ctx-input" step="0.05" min="0.3" max="0.9">
+            </label>
+            <label>保留比例 retainRatio
+              <input type="number" id="ctxRetain" class="ctx-input" step="0.05" min="0.05" max="0.5">
+            </label>
+          </div>
+          <p class="row-hint">
+            留空 = 按窗口自动推导。压缩余量太小会让压缩过于频繁，太大会让压力预算变成负数——那样压缩会被静默禁用，
+            表现就是「聊久了回答越来越短」。下面的实时检查会替你算。
+          </p>
+        </details>
+      </div>
+
+      <h2 class="sec-h">实时检查</h2>
+      <div class="summary" id="ctxBudget"></div>
+
+      <h2 class="sec-h">变更预览</h2>
+      <div class="summary" id="ctxDiff"></div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnApplyCtx">应用配置</button>
+        <button class="btn ghost small" id="btnResetCtx">全部改回自动</button>
+        <button class="btn ghost small" id="btnReloadCtx">重新读取</button>
+      </div>
+      <p class="row-hint" id="ctxApplyHint">应用前会自动备份原来的 配置.json 与两个 profile 文件。</p>
     </section>
 
     <!-- ============ 服务设置 ============ -->
@@ -131,8 +199,7 @@
       <h2 class="sec-h">当前配置</h2>
       <div class="summary" id="cfgSummary"></div>
       <p class="row-hint">
-        想改模型或上下文长度，重新运行安装向导即可（双击部署包里的「① 双击这里开始安装.cmd」）。
-        也可以直接编辑安装目录下的 <code>配置.json</code>。
+        要改模型、上下文长度或压缩参数，去左侧「<b>上下文与模型</b>」页直接改，不用重跑安装向导。
       </p>
     </section>
 

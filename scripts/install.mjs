@@ -651,7 +651,7 @@ function stepDsh(opts, emit) {
 const GENERATED_MARK = '# 由本地 AI 安装向导生成';
 
 /** 部署包版本；写进生成的配置，方便以后判断这份文件是谁写的、要不要升级 */
-export const KIT_VERSION = '1.3.3';
+export const KIT_VERSION = '1.3.6';
 
 /* ------------------------------------------------- dsh 配置块（未缩进） */
 
@@ -686,7 +686,51 @@ export function compactionBudget(contextWindow) {
   };
 }
 
-function providerBlock(model, contextWindow, input) {
+const clampInt = (v, lo, hi, dflt) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return dflt;
+  return Math.min(hi, Math.max(lo, Math.round(n)));
+};
+
+const clampFloat = (v, lo, hi, dflt) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return dflt;
+  return Math.min(hi, Math.max(lo, n));
+};
+
+/**
+ * 由 配置.json 算出实际生效的四个数字。
+ *
+ * 控制台允许用户自己填，所以这里做「有就用、没有就按窗口推导、越界就夹住」。
+ * 关键不变量：压力预算 = 窗口 − 输出 − 余量 必须 > 0，
+ * 否则 dsh 的 compaction-basic 会抛 TargetPressureConfigError，压缩被静默禁用。
+ */
+export function resolveBudgets(cfg = {}) {
+  const ctx = Math.max(2048, Number(cfg.contextWindow) || 8192);
+  const autoOut = outputBudget(ctx);
+  const autoCmp = compactionBudget(ctx);
+  const maxTokens = clampInt(cfg.maxTokens, 256, Math.max(256, Math.floor(ctx / 2)), autoOut);
+  const headroomTokens = clampInt(cfg.headroomTokens, 128, Math.max(128, ctx), autoCmp.headroomTokens);
+  const thresholdRatio = clampFloat(cfg.thresholdRatio, 0.3, 0.9, autoCmp.thresholdRatio);
+  const retainRatio = clampFloat(cfg.retainRatio, 0.05, 0.5, autoCmp.retainRatio);
+  return {
+    contextWindow: ctx,
+    maxTokens,
+    headroomTokens,
+    thresholdRatio,
+    retainRatio,
+    budget: ctx - maxTokens - headroomTokens,
+    auto: { maxTokens: autoOut, headroomTokens: autoCmp.headroomTokens },
+    overridden: {
+      maxTokens: Number(cfg.maxTokens) > 0,
+      headroomTokens: Number(cfg.headroomTokens) > 0,
+      thresholdRatio: Number(cfg.thresholdRatio) > 0,
+      retainRatio: Number(cfg.retainRatio) > 0,
+    },
+  };
+}
+
+function providerBlock(model, contextWindow, input, maxTokens) {
   return `ollama-local:
   displayName: Ollama 本地 (${model})
   apiKeyEnv: OLLAMA_API_KEY
@@ -696,12 +740,12 @@ function providerBlock(model, contextWindow, input) {
     - id: ${model}
       name: ${model} 本地
       contextWindow: ${contextWindow}
-      maxTokens: ${outputBudget(contextWindow)}
+      maxTokens: ${maxTokens || outputBudget(contextWindow)}
       input: ${input}`;
 }
 
-function llmPiAiBlock(model, contextWindow, input) {
-  const prov = providerBlock(model, contextWindow, input)
+function llmPiAiBlock(model, contextWindow, input, maxTokens) {
+  const prov = providerBlock(model, contextWindow, input, maxTokens)
     .split('\n').map((l) => (l.trim() ? `      ${l}` : '')).join('\n');
   return `- id: llm-pi-ai
   name: '@deepseek-ai/dsh-llm-pi-ai'
@@ -711,8 +755,8 @@ ${prov}`;
 }
 
 /** headless 档没有 agent 预设，compaction-basic 就挂在根层，按 id 就能命中 */
-function compactionBlock(contextWindow) {
-  const b = compactionBudget(contextWindow);
+function compactionBlock(budgets) {
+  const b = budgets || resolveBudgets({});
   return `- id: compaction-basic
   name: '@deepseek-ai/dsh-compaction-basic'
   config:
@@ -735,11 +779,14 @@ function defaultModelBlock(model) {
  * 预设是静态文件，而窗口要到安装时（看显存）才知道，
  * 所以不能把 8192 写死在 YAML 里 —— 必须在写入前替换。
  */
-export function applyCompactionBudget(yamlText, contextWindow) {
-  const b = compactionBudget(contextWindow);
+export function applyCompactionBudget(yamlText, budgetsOrContext) {
+  const b = (budgetsOrContext && typeof budgetsOrContext === 'object')
+    ? budgetsOrContext
+    : compactionBudget(budgetsOrContext);
   return String(yamlText)
     .replace(/(\n\s*thresholdRatio:\s*)[\d.]+/, `$1${b.thresholdRatio}`)
-    .replace(/(\n\s*headroomTokens:\s*)\d+/, `$1${b.headroomTokens}`);
+    .replace(/(\n\s*headroomTokens:\s*)\d+/, `$1${b.headroomTokens}`)
+    .replace(/(\n\s*retainRatio:\s*)[\d.]+/, `$1${b.retainRatio}`);
 }
 
 /**
@@ -772,23 +819,29 @@ export function presetBody(presetText) {
  *
  * @returns {{ text: string, notes: string[] }}
  */
-export function patchProfileText(prevText, { profile, model, contextWindow, input, presetText }) {
+export function patchProfileText(prevText, { profile, model, contextWindow, input, presetText, budgets }) {
   const notes = [];
   let text = String(prevText || '');
+  const b = budgets || resolveBudgets({ contextWindow });
 
   if (!text.trim()) {
     const parts = [
       GENERATED_MARK,
       `# kit-version: ${KIT_VERSION}`,
-      llmPiAiBlock(model, contextWindow, input),
+      llmPiAiBlock(model, contextWindow, input, b.maxTokens),
     ];
-    if (profile === 'web' && presetText) parts.push(presetText.trimEnd());
-    if (profile === 'headless') parts.push(compactionBlock(), defaultModelBlock(model));
+    // 新建文件时也必须过一遍预算替换：
+    // 直接把 presetText 原样塞进去的话，预设里的 0.6 / 8192 / 0.25 会原封不动落盘，
+    // 小窗口机器上压力预算还是负数 —— 等于这次修复只对「重跑安装」生效，全新安装没生效。
+    if (profile === 'web' && presetText) {
+      parts.push(applyCompactionBudget(presetBody(presetText), b).trimEnd());
+    }
+    if (profile === 'headless') parts.push(compactionBlock(b), defaultModelBlock(model));
     return { text: `${parts.join('\n')}\n`, notes: ['新建配置'] };
   }
 
   // ---- 1) 本地 provider ----
-  const prov = providerBlock(model, contextWindow, input);
+  const prov = providerBlock(model, contextWindow, input, b.maxTokens);
   let done = false;
   const range = seqItemRange(toLines(text), 'llm-pi-ai');
   if (range) {
@@ -815,13 +868,13 @@ export function patchProfileText(prevText, { profile, model, contextWindow, inpu
   // ---- 2) web 档：重述 preset-standard，修复长对话被压缩禁用 ----
   if (profile === 'web' && presetText) {
     text = spliceSeqItem(text, 'preset-standard',
-      applyCompactionBudget(presetBody(presetText), contextWindow));
+      applyCompactionBudget(presetBody(presetText), b));
     notes.push('写入 preset-standard（修复长对话「已达输出 token 上限」）');
   }
 
   // ---- 3) headless 档：根层压缩配置 + 默认模型 ----
   if (profile === 'headless') {
-    text = spliceSeqItem(text, 'compaction-basic', compactionBlock(contextWindow));
+    text = spliceSeqItem(text, 'compaction-basic', compactionBlock(b));
     text = spliceSeqItem(text, 'agent-default-model', defaultModelBlock(model));
     notes.push('写入 compaction-basic / agent-default-model');
   }

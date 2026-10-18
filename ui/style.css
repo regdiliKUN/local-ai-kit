@@ -693,3 +693,44 @@ html, body {
 
 .set-card .warn-block { margin: 4px 0 16px; }
 .lan-confirm { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+
+/* ---------------- 上下文与模型 ---------------- */
+
+.ctx-select {
+  min-width: 220px; max-width: 320px; padding: 8px 11px; font: inherit; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text);
+}
+
+.ctx-inline { display: flex; align-items: center; gap: 8px; }
+
+.ctx-input {
+  width: 132px; padding: 8px 11px; font: inherit; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: var(--text);
+}
+.ctx-input:disabled { opacity: .5; }
+
+.ctx-unit { font-size: 12.5px; color: var(--text-dim); }
+
+.ctx-adv { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.ctx-adv > summary { cursor: pointer; font-size: 13.5px; color: var(--text-dim); }
+.ctx-adv > summary:hover { color: var(--accent); }
+
+.ctx-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 18px; margin-top: 14px;
+}
+.ctx-grid label {
+  display: flex; flex-direction: column; gap: 6px;
+  font-size: 12.5px; color: var(--text-dim);
+}
+.ctx-grid .ctx-input { width: 100%; }
+
+.ctx-bad { color: var(--err); font-weight: 600; }
+.ctx-good { color: var(--ok); font-weight: 600; }
+
+@media (max-width: 720px) {
+  .ctx-grid { grid-template-columns: 1fr; }
+  .ctx-select { min-width: 0; width: 100%; }
+}

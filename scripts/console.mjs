@@ -21,6 +21,8 @@ import { loadConfig } from './config.mjs';
 import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
+import { saveConfig } from './config.mjs';
+import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -304,6 +306,118 @@ async function doDelete(model, emit) {
   emit({ type: 'log', text: `${model} 已删除，磁盘空间已释放。` });
 }
 
+/* ------------------------------------------------------- 上下文与模型配置 */
+
+const CTX_MIN = 2048;
+const CTX_MAX = 262144;
+const CTX_PRESETS = [4096, 8192, 16384, 32768, 65536, 131072];
+
+/** 覆盖前先留一份，路径带时间戳，出错能拿回来 */
+function backupFile(file) {
+  try {
+    if (!fs.existsSync(file)) return null;
+    const dst = `${file}.bak-${Date.now()}`;
+    fs.copyFileSync(file, dst);
+    return dst;
+  } catch { return null; }
+}
+
+/** 模型是否支持视觉：决定写 [text] 还是 [text, image]。
+ *  拿不到就沿用安装时的保守做法（按支持视觉处理）。 */
+async function capsFor(model) {
+  try {
+    const r = await fetch(`${OLLAMA_BASE}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return null;
+    return (await r.json()).capabilities || null;
+  } catch { return null; }
+}
+
+function readContextState() {
+  const cur = loadConfig(ROOT) || {};
+  const b = resolveBudgets(cur);
+  return {
+    model: cur.model || '',
+    modelDir: cur.modelDir || '',
+    contextWindow: b.contextWindow,
+    maxTokens: b.maxTokens,
+    headroomTokens: b.headroomTokens,
+    thresholdRatio: b.thresholdRatio,
+    retainRatio: b.retainRatio,
+    budget: b.budget,
+    auto: b.auto,
+    overridden: b.overridden,
+  };
+}
+
+/**
+ * 写入 配置.json 并重写两个 profile。
+ *
+ * 与安装向导走的是同一套函数（patchProfileText / applyCompactionBudget），
+ * 所以控制台改出来的结果和重跑安装向导完全一致，不会出现两套逻辑各写各的。
+ */
+async function applyConfig(body) {
+  const cur = loadConfig(ROOT) || {};
+  if (!cur.model && !body.model) throw new Error('还没有配置过模型，请先运行安装向导。');
+
+  const next = { ...cur };
+  if (typeof body.model === 'string' && body.model.trim()) next.model = body.model.trim();
+
+  if (body.contextWindow !== undefined && body.contextWindow !== null && body.contextWindow !== '') {
+    const n = Number(body.contextWindow);
+    if (!Number.isFinite(n)) throw new Error('上下文长度必须是数字');
+    next.contextWindow = Math.min(CTX_MAX, Math.max(CTX_MIN, Math.round(n)));
+  }
+
+  // 留空 = 交回自动推导；填了就用填的（越界会被 resolveBudgets 夹住）
+  for (const k of ['maxTokens', 'headroomTokens', 'thresholdRatio', 'retainRatio']) {
+    if (!(k in body)) continue;
+    const v = body[k];
+    if (v === null || v === '') delete next[k];
+    else if (Number.isFinite(Number(v)) && Number(v) > 0) next[k] = Number(v);
+  }
+
+  const b = resolveBudgets(next);
+  if (b.budget <= 0) {
+    throw new Error(
+      `压力预算 = 窗口 ${b.contextWindow} − 输出 ${b.maxTokens} − 余量 ${b.headroomTokens} ` +
+      `= ${b.budget}，必须大于 0。把「输出上限」或「压缩余量」调小一点。`);
+  }
+
+  const caps = await capsFor(next.model);
+  const input = caps && !caps.includes('vision') ? '[text]' : '[text, image]';
+
+  const backups = [];
+  backups.push(backupFile(path.join(ROOT, '配置.json')));
+  saveConfig(ROOT, next);
+
+  const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
+  const presetText = readPresetStandard(ROOT);
+  const notes = [];
+  for (const profile of ['web', 'headless']) {
+    const dir = path.join(home, 'profiles', profile);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'cordis.patch.yml');
+    const prev = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+    const { text, notes: n } = patchProfileText(prev, {
+      profile, model: next.model, contextWindow: b.contextWindow, input, presetText, budgets: b,
+    });
+    if (prev !== text) {
+      backups.push(backupFile(file));
+      fs.writeFileSync(file, text, 'utf8');
+      notes.push(`${profile} 档：${n.join('、')}`);
+    } else {
+      notes.push(`${profile} 档：已是最新，未改动`);
+    }
+  }
+
+  return { config: next, budgets: b, notes, backups: backups.filter(Boolean) };
+}
+
 /* ------------------------------------------------------------------ 路由 */
 
 const server = http.createServer(async (req, res) => {
@@ -334,6 +448,31 @@ const server = http.createServer(async (req, res) => {
       busy,
       logPath: path.join(os.tmpdir(), 'localai-console.log'),
     });
+  }
+
+  if (p === '/api/config' && req.method === 'GET') {
+    const cs = readContextState();
+    const running = !!(await ollamaVersion());
+    const models = running ? await listModels() : [];
+    return json(res, 200, {
+      ...cs,
+      models: (models || []).map((m) => m.name),
+      limits: { min: CTX_MIN, max: CTX_MAX },
+      presets: CTX_PRESETS,
+      kitVersion: KIT_VERSION,
+      dshHome: process.env.DSH_HOME || path.join(os.homedir(), '.dsh'),
+    });
+  }
+
+  if (p === '/api/config' && req.method === 'POST') {
+    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    try {
+      const body = await readBody(req);
+      const out = await applyConfig(body);
+      return json(res, 200, { ok: true, ...out });
+    } catch (e) {
+      return json(res, 400, { error: String((e && e.message) || e) });
+    }
   }
 
   if (p === '/api/events') {

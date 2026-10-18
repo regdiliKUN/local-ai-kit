@@ -56,8 +56,16 @@ for (const li of document.querySelectorAll('#tabs li')) {
     for (const x of document.querySelectorAll('#tabs li')) x.classList.toggle('active', x === li);
     for (const v of document.querySelectorAll('.view')) v.hidden = true;
     $(`view-${li.dataset.tab}`).hidden = false;
+    if (location.hash !== `#${li.dataset.tab}`) history.replaceState(null, '', `#${li.dataset.tab}`);
     window.scrollTo(0, 0);
   });
+}
+
+// 支持 #context / #settings 这种深链，刷新后停在同一个页
+{
+  const want = (location.hash || '').replace('#', '');
+  const hit = want && document.querySelector(`#tabs li[data-tab="${want}"]`);
+  if (hit) hit.click();
 }
 
 /* ------------------------------------------------------------------ 状态 */
@@ -68,6 +76,7 @@ async function loadState() {
   renderModels();
   renderSettings();
   renderConfig();
+  await loadContext();
 }
 
 function renderStatus() {
@@ -153,6 +162,165 @@ function renderConfig() {
     <div class="row"><span class="k">模型目录</span><span class="v">${esc(state.modelDir || '（未设置）')}</span></div>
     <div class="row"><span class="k">上下文长度</span><span class="v">${state.contextWindow}</span></div>
     <div class="row"><span class="k">安装目录</span><span class="v">${esc(state.root)}</span></div>`;
+}
+
+/* ------------------------------------------------------- 上下文与模型 */
+
+let ctxState = null;
+
+/** 与 install.mjs 的 outputBudget / compactionBudget 保持一致（前端只用来实时预览） */
+const autoOut = (ctx) => Math.max(512, Math.min(8192, Math.floor(ctx / 4)));
+const autoHead = (ctx) => Math.max(512, Math.min(8192, Math.floor(ctx / 8)));
+
+async function loadContext() {
+  ctxState = await (await fetch('/api/config')).json();
+  renderContext();
+}
+
+function ctxForm() {
+  return {
+    model: $('ctxModel').value,
+    contextWindow: $('ctxWindow').value,
+    maxTokens: $('ctxMaxTokens').value.trim(),
+    headroomTokens: $('ctxHeadroom').value.trim(),
+    thresholdRatio: $('ctxThreshold').value.trim(),
+    retainRatio: $('ctxRetain').value.trim(),
+  };
+}
+
+function renderBudget() {
+  if (!ctxState) return;
+  const f = ctxForm();
+  const ctx = Math.max(2048, Number(f.contextWindow) || ctxState.contextWindow);
+  const out = f.maxTokens === '' ? autoOut(ctx) : Number(f.maxTokens);
+  const head = f.headroomTokens === '' ? autoHead(ctx) : Number(f.headroomTokens);
+  const ratio = f.thresholdRatio === '' ? 0.6 : Number(f.thresholdRatio);
+  const budget = ctx - out - head;
+  const ok = budget > 0;
+  const trigger = Math.round(ctx * (Number.isFinite(ratio) ? ratio : 0.6));
+
+  $('ctxBudget').innerHTML = `
+    <div class="row"><span class="k">压力预算</span>
+      <span class="v">${ctx} − ${out} − ${head} =
+        <b class="${ok ? 'ctx-good' : 'ctx-bad'}">${budget}</b></span></div>
+    <div class="row"><span class="k">判读</span>
+      <span class="v">${ok
+        ? `可用。会话涨到约 ${trigger} tokens 时触发压缩，压到 ${Math.round(ctx * 0.25)} 左右`
+        : '负数 —— 压缩会被静默禁用，表现是「聊久了回答越来越短」。必须调小输出上限或压缩余量'}</span></div>
+    <div class="row"><span class="k">实际生效</span>
+      <span class="v">窗口 ${ctx} · 输出 ${out} · 余量 ${head}</span></div>`;
+
+  renderDiff(ctx, out, head, ratio);
+}
+
+function renderDiff(ctx, out, head, ratio) {
+  const s = ctxState;
+  const f = ctxForm();
+  const rows = [];
+  const add = (k, from, to) => {
+    if (String(from) !== String(to)) {
+      rows.push(`<div class="row"><span class="k">${k}</span>
+        <span class="v">${esc(from)} → <b>${esc(to)}</b></span></div>`);
+    }
+  };
+  add('模型', s.model, f.model);
+  add('上下文长度', s.contextWindow, ctx);
+  add('输出上限', s.maxTokens, out);
+  add('压缩余量', s.headroomTokens, head);
+  add('压缩阈值', s.thresholdRatio, f.thresholdRatio === '' ? s.thresholdRatio : ratio);
+  add('保留比例', s.retainRatio, f.retainRatio === '' ? s.retainRatio : f.retainRatio);
+
+  $('ctxDiff').innerHTML = rows.length
+    ? rows.join('')
+    : '<div class="row"><span class="k">—</span><span class="v">没有改动</span></div>';
+}
+
+function renderContext() {
+  const s = ctxState;
+  const names = Array.from(new Set([...(s.models || []), s.model].filter(Boolean)));
+  $('ctxModel').innerHTML = names.length
+    ? names.map((n) => `<option value="${esc(n)}"${n === s.model ? ' selected' : ''}>${esc(n)}${n === s.model ? '（当前）' : ''}</option>`).join('')
+    : '<option value="">（没有可用模型）</option>';
+
+  $('ctxWindow').value = s.contextWindow;
+  // 高级项：只有被显式改过才填值，留空表示「按窗口自动」
+  $('ctxMaxTokens').value = s.overridden.maxTokens ? s.maxTokens : '';
+  $('ctxHeadroom').value = s.overridden.headroomTokens ? s.headroomTokens : '';
+  $('ctxThreshold').value = s.overridden.thresholdRatio ? s.thresholdRatio : '';
+  $('ctxRetain').value = s.overridden.retainRatio ? s.retainRatio : '';
+  $('ctxMaxTokens').placeholder = `自动 ${s.auto.maxTokens}`;
+  $('ctxHeadroom').placeholder = `自动 ${s.auto.headroomTokens}`;
+  $('ctxThreshold').placeholder = '自动 0.6';
+  $('ctxRetain').placeholder = '自动 0.25';
+
+  $('ctxPresets').innerHTML = (s.presets || [])
+    .map((n) => `<button class="chip" type="button" data-ctx="${n}">${n >= 1024 ? n / 1024 + 'K' : n}</button>`)
+    .join('');
+  for (const b of document.querySelectorAll('#ctxPresets .chip')) {
+    b.addEventListener('click', () => { $('ctxWindow').value = b.dataset.ctx; renderBudget(); });
+  }
+
+  renderBudget();
+}
+
+for (const id of ['ctxModel', 'ctxWindow', 'ctxMaxTokens', 'ctxHeadroom', 'ctxThreshold', 'ctxRetain']) {
+  const el = $(id);
+  if (el) el.addEventListener('input', renderBudget);
+  if (el) el.addEventListener('change', renderBudget);
+}
+
+if ($('btnReloadCtx')) {
+  $('btnReloadCtx').addEventListener('click', async () => {
+    await loadContext();
+    toast('已重新读取配置');
+  });
+}
+
+if ($('btnResetCtx')) {
+  $('btnResetCtx').addEventListener('click', () => {
+    $('ctxMaxTokens').value = '';
+    $('ctxHeadroom').value = '';
+    $('ctxThreshold').value = '';
+    $('ctxRetain').value = '';
+    renderBudget();
+    toast('已清空高级项，将按窗口自动推导（记得点「应用配置」）');
+  });
+}
+
+if ($('btnApplyCtx')) {
+  $('btnApplyCtx').addEventListener('click', async () => {
+    const f = ctxForm();
+    const body = {
+      model: f.model,
+      contextWindow: Number(f.contextWindow),
+      maxTokens: f.maxTokens === '' ? null : Number(f.maxTokens),
+      headroomTokens: f.headroomTokens === '' ? null : Number(f.headroomTokens),
+      thresholdRatio: f.thresholdRatio === '' ? null : Number(f.thresholdRatio),
+      retainRatio: f.retainRatio === '' ? null : Number(f.retainRatio),
+    };
+    $('btnApplyCtx').disabled = true;
+    try {
+      const out = await post('/api/config', body);
+      ctxState = { ...ctxState, ...out.config, ...out.budgets, models: ctxState.models };
+      // 用后端返回的夹取结果回填，避免界面显示与真实写入不一致
+      $('ctxWindow').value = out.budgets.contextWindow;
+      $('ctxMaxTokens').value = out.budgets.overridden.maxTokens ? out.budgets.maxTokens : '';
+      $('ctxHeadroom').value = out.budgets.overridden.headroomTokens ? out.budgets.headroomTokens : '';
+      $('ctxThreshold').value = out.budgets.overridden.thresholdRatio ? out.budgets.thresholdRatio : '';
+      $('ctxRetain').value = out.budgets.overridden.retainRatio ? out.budgets.retainRatio : '';
+      await loadContext();
+      await loadState();
+      $('ctxApplyHint').innerHTML =
+        `已写入。${out.notes.join('；')}。<b>重启工作台后生效</b>` +
+        (out.backups.length ? `（已备份 ${out.backups.length} 个文件）` : '');
+      toast('配置已应用，重启工作台后生效');
+    } catch (e) {
+      $('ctxApplyHint').innerHTML = `<span class="ctx-bad">${esc(e.message)}</span>`;
+      toast('没有写入：' + e.message);
+    } finally {
+      $('btnApplyCtx').disabled = false;
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ 下载 */
