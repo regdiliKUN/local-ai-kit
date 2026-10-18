@@ -372,6 +372,15 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const model = String(body.model || '').trim();
     if (!model) return json(res, 400, { error: '缺少模型名' });
+    // 当前配置正在用的模型不能直接删。
+    // 控制台只读配置、不回写，所以删掉之后：工作台启动失败 → 用户回控制台装个新的
+    // → 配置仍指向被删的那个 → 还是起不来。这是个没有出口的死循环，直接拦掉。
+    if (cfg.model && model === cfg.model) {
+      return json(res, 409, {
+        error: `「${model}」是当前工作台正在使用的模型，删掉后无法启动。` +
+               `请先双击「① 双击这里开始安装.cmd」换用别的模型，再回来删除。`,
+      });
+    }
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，无法删除' });
     busy = `delete:${model}`;
     eventLog = [];

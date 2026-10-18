@@ -10,27 +10,27 @@
 ## 一条命令
 
 ```bat
-python healthcheck\run_all.py
+node healthcheck\quick.mjs
 ```
 
-需要 Python 3.10+。**不装任何第三方包**，全标准库。
+**只用 Node**，不需要 Python，不装任何第三方包。约 40 秒。
 
-脚本会依次跑：工具自检 → 21 题质量基线 → 5 档长上下文漂移 → 3 seed 采样稳定性 → 打判据。
+脚本会依次跑：21 题质量基线 → 长上下文漂移 → 采样稳定性 → 打判据。
 
-输出 `healthcheck/check_out/<时间戳>/summary.md`。
+输出 `healthcheck/check_out/<时间戳>/run.json`。
 
 | 退出码 | 含义 |
 |---|---|
 | 0 | 全部达标 |
-| 2 | 有不达标项（看 summary.md 里哪几题没过） |
-| 1 | 环境问题（Ollama 没起来、端口不对） |
+| 2 | 有不达标项（看 run.json 里的 `fails`） |
+| 1 | 环境问题（服务没起来、端口不对） |
 
 ### 常用参数
 
 ```bat
-python healthcheck\run_all.py --quick      :: 只跑 8K/16K/32K，快一倍
-python healthcheck\run_all.py --baseline   :: 和上一次对比，直接报退步了哪几题
-python healthcheck\run_all.py --selftest   :: 只检查工具本身，不连模型
+node healthcheck\quick.mjs --quick      :: 只跑 8K/16K，更快
+node healthcheck\quick.mjs --json       :: 机器可读（控制台用这个）
+node healthcheck\quick.mjs --selftest   :: 只检查判分器，不连模型
 ```
 
 ### 换模型 / 换端口
@@ -38,8 +38,19 @@ python healthcheck\run_all.py --selftest   :: 只检查工具本身，不连模�
 ```bat
 set LOCAL_AI_MODEL=qwen3.8:32b
 set LOCAL_AI_BASE_URL=http://127.0.0.1:11434/v1
+node healthcheck\quick.mjs
+```
+
+### 想要更完整的报告
+
+装了 Python 3.10+ 的话：
+
+```bat
 python healthcheck\run_all.py
 ```
+
+多出来的是：阶梯曲线 SVG、拐点检测、多 seed 稳定性、21 题逐条明细、`--baseline` 回归对比。
+判据与 `quick.mjs` 一致，日常用 Node 版就够。
 
 ---
 

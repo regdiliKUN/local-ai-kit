@@ -241,14 +241,17 @@ def health() -> bool:
 # ---------------------------------------------------------------- 指标
 
 def first_divergence(a: str, b: str) -> int:
-    """首个不同的字符序号；完全相同返回 -1；一方是另一方前缀则返回较短长度。"""
+    """首个不同的字符序号。
+
+    >= 0 某一位真的不同；-1 完全相同；-2 一方是另一方的前缀（长度不同）。
+    原来把"前缀"返回成较短长度，会把长度差误报成分歧，
+    于是出现「首分歧=451 但翻转率=0%」这种自相矛盾的输出。
+    """
     n = min(len(a), len(b))
     for i in range(n):
         if a[i] != b[i]:
             return i
-    if len(a) != len(b):
-        return n
-    return -1
+    return -1 if len(a) == len(b) else -2
 
 
 def flip_rate(base: str, test: str, warmup: int = WARMUP) -> float | None:
@@ -374,7 +377,7 @@ def print_table(rows: list[dict]) -> None:
     print("-" * 58)
     for r in rows:
         fr = "  n/a" if r["flip_rate"] is None else f"{r['flip_rate']:6.1%}"
-        fd = "same" if r["first_div"] == -1 else str(r["first_div"])
+        fd = {-1: "same", -2: "len≠"}.get(r["first_div"], str(r["first_div"]))
         sec = "     n/a" if r.get("elapsed_s") is None else f"{r['elapsed_s']:6.1f}s"
         lev = "     n/a" if r.get("lev") is None else f"{r['lev']:8.3f}"
         print(f"{r['ctx']:>9} {fd:>7} {fr:>8} {r['events']:>5} {lev:>8} {sec:>8}")
@@ -407,7 +410,7 @@ def find_knee(rows: list[dict], alarm: float = ALARM_RATE) -> dict:
     onset : 第一个出现任何分歧的上下文 —— “开始跑偏”
     alarm : 第一个翻转率超过阈值的上下文 —— “显著崩坏”
     """
-    onset = next((r for r in rows if r["first_div"] not in (-1, None)), None)
+    onset = next((r for r in rows if r["first_div"] not in (-1, -2, None)), None)
     trip = next((r for r in rows if (r["flip_rate"] or 0) > alarm), None)
     return {"onset": onset, "alarm": trip}
 
@@ -424,7 +427,8 @@ def render_ascii_curve(rows: list[dict]) -> None:
     for r, rate in zip(rows, rates):
         width = int(rate / peak * 34)
         bar = "█" * width + ("·" if width == 0 else "")
-        fd = "same" if r["first_div"] in (-1, None) else f"@{r['first_div']}"
+        fd = ("same" if r["first_div"] in (-1, None) else
+              "len≠" if r["first_div"] == -2 else f"@{r['first_div']}")
         flag = "  ⚠" if rate > ALARM_RATE else ""
         print(f"{r['ctx']:>7} │{bar:<35}{rate:7.2%}  首分歧 {fd}{flag}")
     print("-" * 66)

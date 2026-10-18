@@ -147,11 +147,11 @@ AMD 显卡能识别显存并推荐模型，但 Ollama 只支持部分型号加�
 **先别急着换显卡**——用体检工具量一下，再决定改什么。
 
 ```bat
-python healthcheck\run_all.py
+node healthcheck\quick.mjs
 ```
 
-它会跑 21 道质量题 + 5 档长上下文漂移 + 3 次采样稳定性，输出一份报告到
-`healthcheck\check_out\<时间戳>\summary.md`。
+它会跑 21 道质量题 + 长上下文漂移 + 采样稳定性，输出一份报告到
+`healthcheck\check_out\<时间戳>\run.json`。全程约 40 秒，**只用 Node**，不需要装 Python。
 
 | 你会看到 | 说明 |
 |---|---|
@@ -162,7 +162,12 @@ python healthcheck\run_all.py
 三种「变笨」的成因和修法完全不同，详见 [healthcheck/IMPACT.md](healthcheck/IMPACT.md)。
 其中最常被误判的一种（上下文预算配错）**不需要换硬件**，本仓库已经修了压缩余量的推导方式。
 
-工具需要 Python 3.10+，零第三方依赖，不会修改任何配置。
+> 装了 Python 3.10+ 的话，`healthcheck/run_all.py` 提供更完整的版本
+> （阶梯曲线 SVG、拐点检测、多 seed 稳定性、21 题明细）。
+> 两者的判据一致，日常用 `quick.mjs` 就够。
+
+从下载到使用的完整链路审计、以及"变笨了该在哪一步介入"，见
+[healthcheck/USER-JOURNEY.md](healthcheck/USER-JOURNEY.md)。
 
 ## 常见问题
 
@@ -231,13 +236,15 @@ v1.1.1 已修复。模型是多个分片同时下载的，之前界面显示的�
 ├── ui/                      # 安装向导界面
 ├── icons/                   # 桌面快捷方式图标
 ├── docs/                    # 界面截图
-├── healthcheck/             # 模型体检（Python，零依赖）
-│   ├── run_all.py           #   一条命令跑全套
+├── healthcheck/             # 模型体检
+│   ├── quick.mjs            #   一条命令跑全套（Node，推荐）
+│   ├── run_all.py           #   同上，Python 完整版（阶梯曲线/拐点/多 seed）
 │   ├── eval_runner.py       #   21 题质量基线
 │   ├── flip_probe.py        #   长上下文漂移探针
 │   ├── command_guard.py     #   破坏性命令拦截（只判定不执行）
 │   ├── golden.jsonl         #   题库
-│   └── IMPACT.md            #   「变笨」影响分析
+│   ├── IMPACT.md            #   「变笨」影响分析
+│   └── USER-JOURNEY.md      #   从下载到使用的链路审计
 └── scripts/                 # 安装与运行脚本
 ```
 
@@ -251,6 +258,54 @@ v1.1.1 已修复。模型是多个分片同时下载的，之前界面显示的�
 - 安装过程幂等，可重复运行
 
 ## 更新记录
+
+### v1.3.5
+
+**主题：按真实用户链路审计了一遍，修掉"装了但用不上"的几处断点。**
+
+**新增：Node 版体检 `healthcheck/quick.mjs`**
+
+v1.3.4 的体检工具是 Python 写的，但本包承诺"只要 Node"、安装器也只装 Node ——
+走完一键安装的用户**根本跑不起来**（Windows 的 `python` 还是个跳转微软商店的假别名）。
+
+现在 `node healthcheck\quick.mjs` 即可，零依赖，约 40 秒。
+Python 版 `run_all.py` 保留给开发者（多出曲线 SVG、拐点检测、多 seed）。
+
+**修复：控制台删掉正在用的模型会陷入死循环**
+
+控制台只读配置、不回写，所以：
+
+```
+删掉正在用的模型 → 启动失败（precheckModel 只警告）
+                → 回控制台装个新的 → 配置仍指向被删的 → 还是失败
+```
+
+现在删除当前模型会被拦下，并提示先重跑安装向导换模型。
+
+**修复：「首分歧」把长度差误报成分歧**
+
+一方是另一方前缀时，`first_divergence` 返回"较短长度"，于是输出自相矛盾：
+
+```
+首分歧=451   翻转率=0.0%
+```
+
+改为返回 `-2`、显示 `len≠`，且不计入 onset 判定。Python / Node 两版同步。
+
+**修复：阶梯会超出模型实际窗口**
+
+阶梯写死 8K/16K/32K，但模型实际 `num_ctx` 可能更小，超出的那档会被**静默截断**，
+测出来的"零漂移"是假的。现在先读 `配置.json`、再问 Ollama `/api/ps` 的 `context_length`，
+超限档位自动跳过并说明原因。
+
+**修复：完成页文案与实际不符**
+
+写"以后就用桌面上的两个图标"，实际创建三个（漏了控制台）——而控制台正是唯一能长期操作的地方。
+
+**新增文档：`healthcheck/USER-JOURNEY.md`**
+
+从"点下载"到"能用"的 12 个环节，逐环节列出引导方式、代码位置与障碍；
+给出 6 个修正工具嵌入点（E1–E6）和 8 条验证结论（V1–V8）。
 
 ### v1.3.4
 

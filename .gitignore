@@ -3,6 +3,7 @@
 dsh-runtime/
 ui/index.html.bak
 healthcheck/check_out/
+healthcheck/probe_out/
 __pycache__/
 
 # 系统文件
