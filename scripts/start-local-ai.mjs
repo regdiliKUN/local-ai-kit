@@ -19,6 +19,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { loadConfig } from './config.mjs';
+import { MIN_AGENT_CONTEXT } from './models.mjs';
 import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp } from './ollama.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +28,7 @@ const MAX_OLLAMA_RESPAWNS = 3;
 
 const cfg = loadConfig(ROOT);
 const MODEL = (cfg && cfg.model) || '';
-const CONTEXT_LENGTH = Number(cfg && cfg.contextWindow) || 8192;
+const CONTEXT_LENGTH = Number(cfg && cfg.contextWindow) || MIN_AGENT_CONTEXT;
 
 const children = [];
 let shuttingDown = false;
@@ -160,6 +161,20 @@ export async function precheckModel() {
 
 export async function warmUp() {
   log('[3/4] 预热模型');
+
+  // 老配置.json 里可能还留着 8K：先明确告警，否则用户只会看到没头没尾的
+  // 「已达输出 token 上限」，而且点多少次「继续」都一样。
+  if (CONTEXT_LENGTH < MIN_AGENT_CONTEXT) {
+    log('');
+    log('      ⚠────────────────────────────────────────────────────────');
+    log(`      配置的上下文长度只有 ${CONTEXT_LENGTH}，低于工作台可用下限 ${MIN_AGENT_CONTEXT}。`);
+    log('      dsh 自身的提示词 + 工具定义就占掉大半窗口，留给输出的预算几乎为 0，');
+    log('      表现为每轮都提示「已达输出 token 上限」，点「继续」也救不回来。');
+    log('      解决：重跑「① 双击这里开始安装.cmd」，把上下文改到 32K；');
+    log(`      或直接改 配置.json 里的 contextWindow（建议 ${MIN_AGENT_CONTEXT * 2}）后重启。`);
+    log('      ⚠────────────────────────────────────────────────────────');
+    log('');
+  }
 
   const ps = await fetch(`${OLLAMA_BASE}/api/ps`).then((r) => r.json()).catch(() => null);
   const loaded = ps && ps.models && ps.models.find((m) => m.name === MODEL || m.model === MODEL);

@@ -323,7 +323,7 @@ function updateContext() {
   const d = state.detect;
   const info = d && d.models.find((m) => m.tag === state.model);
   // 上下文长度由服务端算好（和命令行安装共用同一套公式），前端直接用
-  state.contextWindow = info ? (info.contextWindow || 8192) : 8192;
+  state.contextWindow = info ? (info.contextWindow || 16384) : 16384;
   paintContext();
   footerMsg(state.model ? `已选择：${state.model}` : '请选择或输入一个模型');
   updateNext();
@@ -341,7 +341,7 @@ function paintContext() {
   const label = `${Math.round(state.contextWindow / 1024)}K`;
   if (est == null) {
     $('ctxInfo').innerHTML = `上下文 <b>${label}</b>`
-      + (info ? '' : '（手动输入的模型不知道体积，先保守取 8K）');
+      + (info ? '' : '（手动输入的模型不知道体积，先保守取 16K）');
     return;
   }
   const ratio = vram ? est / vram : 0;

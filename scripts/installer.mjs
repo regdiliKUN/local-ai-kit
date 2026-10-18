@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { detectAll, freeSpaceGB } from './detect.mjs';
 import { runInstall } from './install.mjs';
 import { findOllama, isValidModelName } from './ollama.mjs';
-import { modelInfo } from './models.mjs';
+import { modelInfo, MIN_AGENT_CONTEXT } from './models.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const KIT = path.dirname(HERE);
@@ -97,8 +97,10 @@ function validateInstall(body) {
   const modelDir = path.win32.resolve(rawDir);
   if (!fs.existsSync(modelDir.slice(0, 3))) return { error: `磁盘 ${modelDir.slice(0, 2)} 不存在` };
 
-  const cw = Math.round(Number(body.contextWindow) || 8192);
-  const contextWindow = Math.min(131072, Math.max(2048, cw));
+  // 下限不再是「显存够不够」，而是「工作台能不能跑」：低于 16K 时 dsh 的固定
+  // 提示词就占满窗口，输出预算归零，每轮都报「已达输出 token 上限」。
+  const cw = Math.round(Number(body.contextWindow) || MIN_AGENT_CONTEXT);
+  const contextWindow = Math.min(131072, Math.max(MIN_AGENT_CONTEXT, cw));
 
   // 可选代理：网络连不上 ollama.com 时用户会填一个
   const proxy = String(body.proxy || '').trim();

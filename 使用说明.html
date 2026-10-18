@@ -71,7 +71,7 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>每张卡片都写了<strong>下载体积</strong>、<strong>需要多少显存</strong>，还按 25MB/s 估算了<strong>大概要下多久</strong>。</p>
 <p>直接点一张选中就行。</p>
 <blockquote><p>如果本机已经下过某个模型，卡片上会标「<strong>本机已有</strong>」，并告诉你它在哪个目录 ——<br>直接复用，不用重新下载。</p></blockquote>
-<p>下面还能调<strong>上下文长度</strong>（4K / 8K / 16K / 32K / 64K），会实时显示估算的显存占用，</p>
+<p>下面还能调<strong>上下文长度</strong>（16K / 32K / 64K，32K 起推荐），会实时显示估算的显存占用，</p>
 <p>并标注「够用 / 偏紧 / 可能超出显存」。拿不准就用默认值。</p>
 <h3>3. 选择模型存放在哪个盘</h3>
 <p>列出你所有分区，按空闲空间排序。<strong>点一下选中</strong>，然后点「开始安装」。</p>
@@ -194,9 +194,11 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>重新运行安装向导，在选模型那一步选个更小的（向导只列跑得动的）。</p>
 <p>也可以打开安装目录的 <code>配置.json</code>，把 <code>contextWindow</code> 改小（比如 <code>16384</code>），重启。</p>
 <p><strong>Q：聊得久了，AI 突然说「已达输出 token 上限」，点继续也没用？</strong></p>
-<p>v1.2.0 已经修好了这个坑：DeepSeek Harness 的自动压缩插件默认预留 65536 token，</p>
-<p>而本地模型的窗口没这么大，导致<strong>压缩被静默禁用</strong>，会话涨满后就再也输出不出来。</p>
-<p>新版安装时会自动写入正确的压缩参数，长对话会被自动摘要压缩，不会卡死。</p>
+<p>已修，原因是两处算术都不成立：自动压缩插件默认预留 65536 token，而本地模型窗口没这么大；</p>
+<p>另外 <code>maxTokens</code> 过去固定写 8192，窗口只有 8K/16K 时「窗口 − maxTokens − 预留」直接 ≤ 0。</p>
+<p>两种情况都会让<strong>压缩被静默禁用</strong>，会话涨满后输出预算归零，点「继续」只会更糟。</p>
+<p>现在安装器按实际窗口写入 <code>maxTokens</code>（窗口的 25%，上限 8192）与 <code>headroomTokens</code></p>
+<p>（窗口的 12.5%，上限 8192），并去掉 4K/8K 档位、把下限锁在 16K。以前选过小窗口的重跑一次安装向导即可。</p>
 <p><strong>Q：想换一个模型？</strong></p>
 <p>重新双击「① 双击这里开始安装.cmd」，在选模型那一步选别的即可。</p>
 <p><strong>Q：想换模型存放的盘？</strong></p>

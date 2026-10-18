@@ -36,7 +36,7 @@ import {
   isUp, servesDir, killOllama, spawnServe, waitUp, ollamaEnv, persistOllamaVars, modelCapabilities,
   hasModel, OLLAMA_BASE,
 } from './ollama.mjs';
-import { modelInfo } from './models.mjs';
+import { modelInfo, completionReserve, compactionHeadroom, MIN_AGENT_CONTEXT } from './models.mjs';
 import { toLines, seqItemRange, spliceSeqItem, spliceMapKey, insertUnderMapKey } from './yamlpatch.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -665,7 +665,7 @@ function providerBlock(model, contextWindow, input) {
     - id: ${model}
       name: ${model} 本地
       contextWindow: ${contextWindow}
-      maxTokens: 8192
+      maxTokens: ${completionReserve(contextWindow)}
       input: ${input}`;
 }
 
@@ -680,12 +680,12 @@ ${prov}`;
 }
 
 /** headless 档没有 agent 预设，compaction-basic 就挂在根层，按 id 就能命中 */
-function compactionBlock() {
+function compactionBlock(contextWindow) {
   return `- id: compaction-basic
   name: '@deepseek-ai/dsh-compaction-basic'
   config:
     thresholdRatio: 0.6
-    headroomTokens: 8192
+    headroomTokens: ${compactionHeadroom(contextWindow)}
     retainRatio: 0.25`;
 }
 
@@ -719,6 +719,22 @@ export function presetBody(presetText) {
 }
 
 /**
+ * 按实际窗口把预设副本里的压缩参数改成这一档该用的值。
+ *
+ * 副本里写的是 8192（对应 32K/64K 窗口）。窗口只有 16K 时，
+ * 「消息预算 16384−4096=12288」再减 8192 的 headroom 就只剩 4096，
+ * 而 8K 窗口直接变成 0 —— 压缩又被静默禁用，用户看到的还是「已达输出 token 上限」。
+ * 所以这里必须按窗口缩放，不能沿用固定值。
+ */
+export function tunePreset(text, contextWindow) {
+  const headroom = compactionHeadroom(contextWindow);
+  return String(text || '').replace(
+    /^(\s*headroomTokens:\s*)\d+\s*$/m,
+    (_, k) => `${k}${headroom}`,
+  );
+}
+
+/**
  * 把一个 profile 的配置文本更新到最新。
  *
  * **定点合并，不整份覆盖**：只替换 ollama-local / preset-standard /
@@ -731,15 +747,21 @@ export function patchProfileText(prevText, { profile, model, contextWindow, inpu
   const notes = [];
   let text = String(prevText || '');
 
+  // 窗口太小时先说清楚：这里能写配置，但写下去也救不了「输出 token 上限」
+  if (Number(contextWindow) < MIN_AGENT_CONTEXT) {
+    notes.push(`! 上下文 ${contextWindow} 低于工作台可用下限 ${MIN_AGENT_CONTEXT}，`
+      + '自动压缩仍会失效，建议重跑安装向导改到 32K');
+  }
+
   if (!text.trim()) {
     const parts = [
       GENERATED_MARK,
       `# kit-version: ${KIT_VERSION}`,
       llmPiAiBlock(model, contextWindow, input),
     ];
-    if (profile === 'web' && presetText) parts.push(presetText.trimEnd());
-    if (profile === 'headless') parts.push(compactionBlock(), defaultModelBlock(model));
-    return { text: `${parts.join('\n')}\n`, notes: ['新建配置'] };
+    if (profile === 'web' && presetText) parts.push(tunePreset(presetText.trimEnd(), contextWindow));
+    if (profile === 'headless') parts.push(compactionBlock(contextWindow), defaultModelBlock(model));
+    return { text: `${parts.join('\n')}\n`, notes: [...notes, '新建配置'] };
   }
 
   // ---- 1) 本地 provider ----
@@ -769,13 +791,13 @@ export function patchProfileText(prevText, { profile, model, contextWindow, inpu
 
   // ---- 2) web 档：重述 preset-standard，修复长对话被压缩禁用 ----
   if (profile === 'web' && presetText) {
-    text = spliceSeqItem(text, 'preset-standard', presetBody(presetText));
+    text = spliceSeqItem(text, 'preset-standard', tunePreset(presetBody(presetText), contextWindow));
     notes.push('写入 preset-standard（修复长对话「已达输出 token 上限」）');
   }
 
   // ---- 3) headless 档：根层压缩配置 + 默认模型 ----
   if (profile === 'headless') {
-    text = spliceSeqItem(text, 'compaction-basic', compactionBlock());
+    text = spliceSeqItem(text, 'compaction-basic', compactionBlock(contextWindow));
     text = spliceSeqItem(text, 'agent-default-model', defaultModelBlock(model));
     notes.push('写入 compaction-basic / agent-default-model');
   }
