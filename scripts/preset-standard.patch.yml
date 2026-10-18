@@ -88,6 +88,12 @@
           toolResultPruner: true
         config:
           # ↓↓↓ 本部署包唯一改动：显式收紧压缩余量，让自动压缩真的能触发 ↓↓↓
+          # 注意：下面两个数字是**占位默认值**。安装时 install.mjs 的
+          # applyCompactionBudget() 会按实际上下文窗口重算并替换：
+          #     headroomTokens = clamp(窗口 / 8, 512, 8192)
+          # 窗口 4096 → 512；8192 → 1024；16384 → 2048；32768 → 4096；65536 → 8192
+          # 写死 8192 在窗口 4096/8192 时会让压力预算变成负数，
+          # compaction-basic 抛 TargetPressureConfigError，压缩被静默禁用。
           - id: compaction-basic
             name: '@deepseek-ai/dsh-compaction-basic'
             config:

@@ -2,6 +2,8 @@
 配置.json
 dsh-runtime/
 ui/index.html.bak
+healthcheck/check_out/
+__pycache__/
 
 # 系统文件
 Thumbs.db

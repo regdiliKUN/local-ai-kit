@@ -655,6 +655,37 @@ export const KIT_VERSION = '1.3.3';
 
 /* ------------------------------------------------- dsh 配置块（未缩进） */
 
+/**
+ * 输出预算：不能超过窗口的四分之一。
+ *
+ * 原来写死 8192，但 pickContextWindow() 在小显存下会返回 4096 / 8192 ——
+ * 窗口 4096 却要求 8192 输出，等于「输出预算比整个上下文还大」，
+ * 模型每轮都被截断，表现就是「回答又短又断、像是变笨了」。
+ */
+export function outputBudget(contextWindow) {
+  const ctx = Math.max(2048, Number(contextWindow) || 8192);
+  return Math.max(512, Math.min(8192, Math.floor(ctx / 4)));
+}
+
+/**
+ * 压缩余量：与窗口成正比，而不是固定 8192。
+ *
+ * dsh 的压力预算是 (窗口 − 输出预算) − headroomTokens，必须 > 0，
+ * 否则 compaction-basic 抛 TargetPressureConfigError、**压缩被静默禁用**：
+ * 会话一路涨到填满窗口，输出预算归零，用户看到的是「已达输出 token 上限」。
+ *
+ * 固定 8192 时，窗口 4096 → (4096−8192)−8192 < 0，必踩。
+ * 改成窗口的 1/8 后：4096→512、8192→1024、16384→2048、32768→4096、65536→8192。
+ */
+export function compactionBudget(contextWindow) {
+  const ctx = Math.max(2048, Number(contextWindow) || 8192);
+  return {
+    thresholdRatio: 0.6,
+    headroomTokens: Math.max(512, Math.min(8192, Math.floor(ctx / 8))),
+    retainRatio: 0.25,
+  };
+}
+
 function providerBlock(model, contextWindow, input) {
   return `ollama-local:
   displayName: Ollama 本地 (${model})
@@ -665,7 +696,7 @@ function providerBlock(model, contextWindow, input) {
     - id: ${model}
       name: ${model} 本地
       contextWindow: ${contextWindow}
-      maxTokens: 8192
+      maxTokens: ${outputBudget(contextWindow)}
       input: ${input}`;
 }
 
@@ -680,13 +711,14 @@ ${prov}`;
 }
 
 /** headless 档没有 agent 预设，compaction-basic 就挂在根层，按 id 就能命中 */
-function compactionBlock() {
+function compactionBlock(contextWindow) {
+  const b = compactionBudget(contextWindow);
   return `- id: compaction-basic
   name: '@deepseek-ai/dsh-compaction-basic'
   config:
-    thresholdRatio: 0.6
-    headroomTokens: 8192
-    retainRatio: 0.25`;
+    thresholdRatio: ${b.thresholdRatio}
+    headroomTokens: ${b.headroomTokens}
+    retainRatio: ${b.retainRatio}`;
 }
 
 function defaultModelBlock(model) {
@@ -695,6 +727,19 @@ function defaultModelBlock(model) {
   config:
     provider: ollama-local
     model: ${model}`;
+}
+
+/**
+ * 把预设副本里的压缩参数替换成按当前窗口算出来的值。
+ *
+ * 预设是静态文件，而窗口要到安装时（看显存）才知道，
+ * 所以不能把 8192 写死在 YAML 里 —— 必须在写入前替换。
+ */
+export function applyCompactionBudget(yamlText, contextWindow) {
+  const b = compactionBudget(contextWindow);
+  return String(yamlText)
+    .replace(/(\n\s*thresholdRatio:\s*)[\d.]+/, `$1${b.thresholdRatio}`)
+    .replace(/(\n\s*headroomTokens:\s*)\d+/, `$1${b.headroomTokens}`);
 }
 
 /**
@@ -769,13 +814,14 @@ export function patchProfileText(prevText, { profile, model, contextWindow, inpu
 
   // ---- 2) web 档：重述 preset-standard，修复长对话被压缩禁用 ----
   if (profile === 'web' && presetText) {
-    text = spliceSeqItem(text, 'preset-standard', presetBody(presetText));
+    text = spliceSeqItem(text, 'preset-standard',
+      applyCompactionBudget(presetBody(presetText), contextWindow));
     notes.push('写入 preset-standard（修复长对话「已达输出 token 上限」）');
   }
 
   // ---- 3) headless 档：根层压缩配置 + 默认模型 ----
   if (profile === 'headless') {
-    text = spliceSeqItem(text, 'compaction-basic', compactionBlock());
+    text = spliceSeqItem(text, 'compaction-basic', compactionBlock(contextWindow));
     text = spliceSeqItem(text, 'agent-default-model', defaultModelBlock(model));
     notes.push('写入 compaction-basic / agent-default-model');
   }
