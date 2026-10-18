@@ -418,6 +418,66 @@ async function applyConfig(body) {
   return { config: next, budgets: b, notes, backups: backups.filter(Boolean) };
 }
 
+/* ------------------------------------------------------------------ 体检 */
+
+/**
+ * 跑 healthcheck/quick.mjs，把每一行 JSON 转成 SSE 事件。
+ *
+ * 用 process.execPath 而不是 'node'：控制台本身就是 node 起的，
+ * 直接复用同一个可执行文件，避免用户 PATH 里没有 node 的情况。
+ */
+function runHealth(quick) {
+  const script = path.join(ROOT, 'healthcheck', 'quick.mjs');
+  if (!fs.existsSync(script)) {
+    broadcast({ type: 'health-error', text: '找不到 healthcheck/quick.mjs' });
+    return;
+  }
+  const args = [script, '--json'];
+  if (quick) args.push('--quick');
+
+  const child = spawn(process.execPath, args, {
+    cwd: ROOT,
+    env: { ...process.env },
+    windowsHide: true,
+  });
+
+  let buf = '';
+  const onLine = (line) => {
+    const t = line.trim();
+    if (!t) return;
+    let ev;
+    try { ev = JSON.parse(t); } catch {
+      broadcast({ type: 'health-log', text: t });
+      return;
+    }
+    if (ev.type === 'log') broadcast({ type: 'health-log', text: ev.text });
+    else if (ev.type === 'item') broadcast({ type: 'health-item', id: ev.id, ok: ev.ok, cat: ev.cat });
+    else if (ev.type === 'done') broadcast({ type: 'health-done', ok: ev.ok, summary: ev.summary });
+    else if (ev.type === 'error') broadcast({ type: 'health-error', text: ev.text });
+  };
+
+  child.stdout.on('data', (d) => {
+    buf += d.toString('utf8');
+    const parts = buf.split(/\r?\n/);
+    buf = parts.pop() || '';
+    for (const p of parts) onLine(p);
+  });
+  child.stderr.on('data', (d) => broadcast({ type: 'health-log', text: d.toString('utf8').trim() }));
+
+  child.on('error', (e) => {
+    busy = null;
+    broadcast({ type: 'health-error', text: `启动体检失败：${e.message}` });
+  });
+  child.on('exit', (code) => {
+    if (buf.trim()) onLine(buf);
+    busy = null;
+    if (code !== 0 && code !== 2) {
+      broadcast({ type: 'health-error', text: `体检进程退出（code=${code}）` });
+    }
+    broadcast({ type: 'idle' });
+  });
+}
+
 /* ------------------------------------------------------------------ 路由 */
 
 const server = http.createServer(async (req, res) => {
@@ -473,6 +533,14 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return json(res, 400, { error: String((e && e.message) || e) });
     }
+  }
+
+  if (p === '/api/health' && req.method === 'POST') {
+    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    const body = await readBody(req).catch(() => ({}));
+    busy = 'health';
+    runHealth(!!(body && body.quick));
+    return json(res, 202, { started: true });
   }
 
   if (p === '/api/events') {

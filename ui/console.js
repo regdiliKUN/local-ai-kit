@@ -323,6 +323,61 @@ if ($('btnApplyCtx')) {
   });
 }
 
+/* ------------------------------------------------------------------ 体检 */
+
+let healthDone = 0;
+const HEALTH_TOTAL = 21;
+
+function appendHealthLog(t) {
+  const pre = $('healthLog');
+  $('healthLogBox').hidden = false;
+  const lines = (pre.textContent + t + '\n').split('\n');
+  pre.textContent = lines.slice(-300).join('\n');
+  pre.scrollTop = pre.scrollHeight;
+}
+
+function healthReset() {
+  healthDone = 0;
+  $('healthLog').textContent = '';
+  $('healthLogBox').hidden = true;
+  $('healthWrap').hidden = false;
+  $('healthBar').style.width = '0%';
+  $('healthPct').textContent = '0%';
+  $('healthTitle').textContent = '体检中…';
+  $('healthStats').innerHTML = '';
+  $('healthResult').innerHTML = '<div class="row"><span class="k">—</span><span class="v">正在跑，别关这个窗口…</span></div>';
+}
+
+function renderHealthResult(s, ok) {
+  const rows = ((s && s.verdicts) || []).map((v) =>
+    `<div class="row"><span class="k">${v.ok ? '✅' : '❌'} ${esc(v.name)}</span>` +
+    `<span class="v">${esc(v.detail)}</span></div>`);
+  const fails = (s && s.eval && s.eval.fails) || [];
+  if (fails.length) {
+    rows.push(`<div class="row"><span class="k">未通过的题</span><span class="v">${esc(fails.join(', '))}</span></div>`);
+  }
+  if (s && s.elapsed_s) {
+    rows.push(`<div class="row"><span class="k">耗时</span><span class="v">${s.elapsed_s} 秒</span></div>`);
+  }
+  $('healthResult').innerHTML = rows.join('')
+    || '<div class="row"><span class="k">—</span><span class="v">没有拿到结果</span></div>';
+  toast(ok ? '体检全部达标' : '体检有不达标项，看下面的判据');
+}
+
+async function startHealth(quick) {
+  healthReset();
+  try {
+    await post('/api/health', { quick: !!quick });
+  } catch (e) {
+    $('healthResult').innerHTML =
+      `<div class="row"><span class="k">失败</span><span class="v">${esc(e.message)}</span></div>`;
+    $('healthWrap').hidden = true;
+  }
+}
+
+if ($('btnHealth')) $('btnHealth').addEventListener('click', () => startHealth(false));
+if ($('btnHealthQuick')) $('btnHealthQuick').addEventListener('click', () => startHealth(true));
+
 /* ------------------------------------------------------------------ 下载 */
 
 function showLog(on) {
@@ -364,6 +419,23 @@ function connectSSE() {
       toast(ev.action === 'delete' ? `${ev.model} 已删除` : `${ev.model} 下载完成`);
       setBusy(false);
       setTimeout(loadState, 400);
+    } else if (ev.type === 'health-item') {
+      healthDone++;
+      const pct = Math.min(100, Math.round((healthDone / HEALTH_TOTAL) * 100));
+      $('healthBar').style.width = `${pct}%`;
+      $('healthPct').textContent = `${pct}%`;
+      $('healthTitle').textContent = `体检中… 第 ${healthDone}/${HEALTH_TOTAL} 题`;
+    } else if (ev.type === 'health-log') {
+      appendHealthLog(ev.text);
+    } else if (ev.type === 'health-done') {
+      renderHealthResult(ev.summary, ev.ok);
+      $('healthWrap').hidden = true;
+    } else if (ev.type === 'health-error') {
+      appendHealthLog('错误：' + ev.text);
+      $('healthResult').innerHTML =
+        `<div class="row"><span class="k">失败</span><span class="v">${esc(ev.text)}</span></div>`;
+      $('healthWrap').hidden = true;
+      toast('体检失败：' + ev.text);
     } else if (ev.type === 'idle') {
       setBusy(false);
     }

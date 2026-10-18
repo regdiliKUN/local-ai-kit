@@ -21,6 +21,7 @@
     <ol class="steps" id="tabs">
       <li data-tab="models" class="active"><span class="dot"></span><span class="label">模型管理</span></li>
       <li data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
+      <li data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
 
@@ -133,6 +134,40 @@
         <button class="btn ghost small" id="btnReloadCtx">重新读取</button>
       </div>
       <p class="row-hint" id="ctxApplyHint">应用前会自动备份原来的 配置.json 与两个 profile 文件。</p>
+    </section>
+
+    <!-- ============ 模型体检 ============ -->
+    <section class="view" id="view-health" hidden>
+      <h1>模型体检</h1>
+      <div class="guide">
+        <span class="guide-n">什么时候用</span>
+        <span>回答变短、长对话跑偏、同一问题有时对有时错 —— 先跑一次，<b>别急着换显卡</b>。多数情况是配置问题，不是模型不行。</span>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnHealth">开始体检</button>
+        <button class="btn ghost small" id="btnHealthQuick">快速体检（跳过 32K）</button>
+      </div>
+      <p class="row-hint">完整版约 40 秒。只读模型接口、只写报告文件，<b>不改任何配置</b>。</p>
+
+      <div class="progress-wrap" id="healthWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="healthTitle">体检中…</span>
+          <span class="progress-pct" id="healthPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="healthBar"></div></div>
+        <div class="progress-stats" id="healthStats"></div>
+      </div>
+
+      <h2 class="sec-h">结果</h2>
+      <div class="summary" id="healthResult">
+        <div class="row"><span class="k">—</span><span class="v">还没有跑过</span></div>
+      </div>
+
+      <details class="logbox" id="healthLogBox" hidden>
+        <summary>查看详细日志</summary>
+        <pre id="healthLog"></pre>
+      </details>
     </section>
 
     <!-- ============ 服务设置 ============ -->
