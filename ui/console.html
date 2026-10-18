@@ -105,6 +105,31 @@
         </div>
       </div>
 
+      <h2 class="sec-h">版本与更新</h2>
+      <div class="upd-card">
+        <div class="upd-head">
+          <div class="upd-head-text">
+            <div class="upd-title">组件版本 <span class="upd-badge" id="updBadge" hidden></span></div>
+            <div class="upd-sub" id="updSub">比对部署包、dsh 运行时、Ollama 与 dsh 配置，能自动更新的会就地升级。</div>
+          </div>
+          <button class="btn primary small" id="btnUpdate">检查并更新</button>
+        </div>
+
+        <div class="upd-list" id="updList"></div>
+
+        <div class="upd-progress" id="updProgress" hidden>
+          <div class="progress"><div class="bar" id="updBar"></div></div>
+          <div class="upd-status" id="updStatus"></div>
+        </div>
+
+        <div class="upd-result" id="updResult" hidden></div>
+
+        <details class="logbox" id="updLogBox" hidden>
+          <summary>查看更新日志</summary>
+          <pre id="updLog"></pre>
+        </details>
+      </div>
+
       <h2 class="sec-h">服务控制</h2>
       <div class="row-actions">
         <button class="btn primary" id="btnStartSvc">启动工作台</button>

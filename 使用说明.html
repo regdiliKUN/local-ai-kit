@@ -108,6 +108,11 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <h3>服务设置</h3>
 <table><thead><tr><th>开关</th><th>说明</th></tr></thead><tbody><tr><td><strong>开机自动启动工作台</strong></td><td>打开后每次开机自动启动服务并加载模型（会占显存）。想自己控制就别开。</td></tr><tr><td><strong>局域网共享</strong></td><td>把 Ollama 的接口开放给同一个 WiFi 下的手机 / 平板 / 其它电脑。<strong>默认关闭</strong>，打开前必须先在警告里打勾确认。</td></tr></tbody></table>
 <p>下面还有「启动工作台」「停止服务并释放显存」「打开安装目录」「打开模型目录」，以及一个<strong>卸载</strong>入口。</p>
+<h3>版本与更新</h3>
+<p>「服务设置」页里有一张「<strong>版本与更新</strong>」卡片，按钮叫「<strong>检查并更新</strong>」。点一下会检查四样东西：</p>
+<table><thead><tr><th>组件</th><th>能自动更新吗</th><th>说明</th></tr></thead><tbody><tr><td>部署包（本地 AI 工具集）</td><td>否</td><td>有新版时给下载链接，解压后重跑向导即可，模型不会重下</td></tr><tr><td>DeepSeek Harness 运行时</td><td><strong>能</strong></td><td>通过 npm 就地升级；失败会自动装回原版本</td></tr><tr><td>Ollama 推理引擎</td><td>否</td><td>要装官方安装包，这里只告诉你版本差多少</td></tr><tr><td>dsh 配置（provider / 压缩参数）</td><td><strong>能</strong></td><td>只改本部署包自己写的那几行，你自己加的 provider 原样保留，改动前会备份</td></tr></tbody></table>
+<ul><li>已经是最新：按钮点完只提示「已是最新」，不会动任何文件</li><li>正在更新：按钮变「更新中…」并且点不动，下面是进度条和实时日志（可展开）</li><li>更新成功：绿色提示写清「谁从什么版本升到什么版本」；如果换了运行时，<strong>重启工作台后生效</strong></li><li>更新失败：红色提示写清是哪个组件、什么原因；运行时升级失败会自动回滚</li></ul>
+<blockquote><p>更新过程中不会停你的服务，也不会动模型文件。<br>检查更新要联网（GitHub / npm）；公司网络拦截时会提示「检查失败」，稍后再试即可。</p></blockquote>
 <blockquote><p>局域网共享会把 Ollama 暴露到 <code>0.0.0.0:11434</code>。<br>在公共 WiFi、宿舍网、公司网里，同网段的任何人都能用你的显卡跑模型。<br><strong>只在你信任的家庭网络里打开，用完关掉。</strong></p></blockquote>
 <hr>
 <h2>想换模型 / 加装模型</h2>

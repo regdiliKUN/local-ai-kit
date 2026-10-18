@@ -57,6 +57,11 @@ for (const li of document.querySelectorAll('#tabs li')) {
     for (const v of document.querySelectorAll('.view')) v.hidden = true;
     $(`view-${li.dataset.tab}`).hidden = false;
     window.scrollTo(0, 0);
+    // 第一次进「服务设置」时静默查一次版本，省得用户还要先点一下
+    if (li.dataset.tab === 'settings' && !updCheckedOnce) {
+      updCheckedOnce = true;
+      refreshUpdateInfo({ silent: true });
+    }
   });
 }
 
@@ -68,6 +73,7 @@ async function loadState() {
   renderModels();
   renderSettings();
   renderConfig();
+  reconcileUpdating();
 }
 
 function renderStatus() {
@@ -172,6 +178,7 @@ function connectSSE() {
   es.onmessage = (m) => {
     let ev;
     try { ev = JSON.parse(m.data); } catch { return; }
+    if (ev.scope === 'update') { handleUpdateEvent(ev); return; }
     if (ev.type === 'progress') {
       $('progressWrap').hidden = false;
       const pct = Math.max(0, Math.min(100, Math.round(ev.percent || 0)));
@@ -198,6 +205,7 @@ function connectSSE() {
       setTimeout(loadState, 400);
     } else if (ev.type === 'idle') {
       setBusy(false);
+      reconcileUpdating();
     }
   };
   es.onerror = () => { /* 自动重连 */ };
@@ -316,9 +324,253 @@ async function applyLan(on) {
   }
 }
 
+/* ------------------------------------------------------------ 版本与更新 */
+
+const UPD_BTN = {
+  idle: '检查并更新',
+  ready: '检查并更新',   // 有更新可装
+  checking: '检查中…',
+  updating: '更新中…',
+  done: '重新检查',      // 已是最新
+  error: '重试',
+};
+
+let updReport = null;
+let updRunning = false;
+let updCheckedOnce = false;
+let updState = 'idle';
+
+function paintUpdateButton() {
+  const b = $('btnUpdate');
+  b.textContent = UPD_BTN[updState] || UPD_BTN.idle;
+  b.disabled = updState === 'checking' || updState === 'updating';
+}
+
+function setBadge(kind, text) {
+  const el = $('updBadge');
+  if (!text) { el.hidden = true; return; }
+  el.hidden = false;
+  el.className = `upd-badge ${kind || ''}`.trim();
+  el.textContent = text;
+}
+
+function setUpdateResult(kind, html) {
+  const el = $('updResult');
+  if (!html) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.className = `upd-result ${kind}`;
+  el.innerHTML = html;
+}
+
+function updLogLine(t) {
+  const pre = $('updLog');
+  pre.textContent += t + '\n';
+  pre.scrollTop = pre.scrollHeight;
+}
+
+/** 把一次检查结果画成 4 行组件清单 */
+function renderUpdateReport(report) {
+  const list = report.components || [];
+  $('updList').innerHTML = list.map((c) => {
+    const outdated = c.status === 'outdated';
+    const ver = outdated
+      ? `<b>${esc(c.current)}</b><span class="arrow">→</span><b>${esc(c.latest)}</b>`
+      : `<b>${esc(c.current)}</b>`;
+    const tag = c.status === 'ok'
+      ? '<span class="u-tag ok">已是最新</span>'
+      : outdated
+        ? `<span class="u-tag ${c.auto ? 'warn' : 'dim'}">${c.auto ? '可更新' : '需手动更新'}</span>`
+        : '<span class="u-tag dim">未能检查</span>';
+    const sub = c.reason
+      ? `<span style="color:var(--warn)">${esc(c.reason)}</span>`
+      : esc(c.hint || '');
+    const link = outdated && !c.auto && c.url
+      ? ` <a href="${esc(c.url)}" target="_blank" rel="noreferrer">去下载</a>`
+      : '';
+    return `<div class="upd-row${c.auto ? '' : ' manual'}">
+      <div class="u-name">${esc(c.name)}<span class="u-sub">${sub}${link}</span></div>
+      <div class="u-ver">${ver}</div>
+      ${tag}
+    </div>`;
+  }).join('');
+
+  const t = String(report.checkedAt || '').slice(11, 16);
+  if (report.updates > 0) {
+    setBadge('warn', `${report.updates} 项可更新`);
+    $('updSub').textContent = report.autoUpdates
+      ? `检查于 ${t}，其中 ${report.autoUpdates} 项可以自动更新，点右边按钮直接装。`
+      : `检查于 ${t}，这些都要手动更新（点对应行里的「去下载」）。`;
+    updState = 'ready';
+  } else {
+    setBadge('ok', '已是最新');
+    $('updSub').textContent = `检查于 ${t}，所有组件都是最新版本。`;
+    updState = 'done';
+  }
+  paintUpdateButton();
+}
+
+/** 只查不更（打开「服务设置」时静默跑一次） */
+async function refreshUpdateInfo({ silent } = {}) {
+  if (updRunning) return null;
+  updState = 'checking';
+  paintUpdateButton();
+  try {
+    const r = await fetch('/api/update/check');
+    const report = await r.json();
+    if (!r.ok || report.error) throw new Error(report.error || `HTTP ${r.status}`);
+    updReport = report;
+    renderUpdateReport(report);   // 内部会按有无更新设置按钮状态
+    return report;
+  } catch (e) {
+    setBadge('err', '检查失败');
+    $('updSub').textContent = '检查更新失败，可以稍后重试。';
+    updState = 'error';
+    paintUpdateButton();
+    if (!silent) setUpdateResult('err', `检查失败：${esc(e.message)}<span class="u-line">常见原因：断网、GitHub / npm 访问不了、公司网络拦截。</span>`);
+    return null;
+  }
+}
+
+/** 点按钮：先查，有可自动更新的就立刻更新；没有就给提示 */
+async function onUpdateClick() {
+  if (updRunning || updState === 'checking') return;   // 前端防连点
+  setUpdateResult('', '');
+  $('updLog').textContent = '';
+  const report = await refreshUpdateInfo({ silent: false });
+  if (!report) return;
+
+  const outdated = report.components.filter((c) => c.status === 'outdated');
+  const auto = outdated.filter((c) => c.auto);
+  const manual = outdated.filter((c) => !c.auto);
+
+  if (!outdated.length) {
+    setUpdateResult('ok', '已是最新版本，不需要更新。');
+    toast('已是最新，无需更新');
+    return;
+  }
+  if (!auto.length) {
+    setUpdateResult('warn',
+      `有 ${manual.length} 项需要手动更新：<span class="u-line">`
+      + manual.map((c) => `${esc(c.name)} ${esc(c.current)} → ${esc(c.latest)}（<a href="${esc(c.url)}" target="_blank" rel="noreferrer">去下载</a>）`).join('<br>')
+      + '</span>');
+    toast('这些组件需要手动更新');
+    return;
+  }
+
+  // 开始更新
+  updRunning = true;
+  updState = 'updating';
+  paintUpdateButton();
+  $('updProgress').hidden = false;
+  $('updLogBox').hidden = false;
+  $('updBar').style.width = '2%';
+  $('updStatus').textContent = `正在更新 ${auto.length} 项…`;
+
+  try {
+    const r = await post('/api/update/run', {});
+    if (r.started === false) {
+      updRunning = false;
+      updState = 'done';
+      paintUpdateButton();
+      $('updProgress').hidden = true;
+      setUpdateResult('ok', '刚刚又检查了一遍，已经是最新版本。');
+      return;
+    }
+    // 后续进度靠 SSE（scope=update）推送
+  } catch (e) {
+    updRunning = false;
+    updState = 'error';
+    paintUpdateButton();
+    $('updProgress').hidden = true;
+    setUpdateResult('err', `更新没有开始：${esc(e.message)}`);
+    toast(e.message);
+  }
+}
+
+/** 更新过程中的 SSE 事件（scope=update） */
+function handleUpdateEvent(ev) {
+  if (ev.type === 'progress') {
+    $('updProgress').hidden = false;
+    $('updBar').style.width = `${Math.max(2, Math.min(100, Math.round(ev.percent || 0)))}%`;
+    if (ev.label) $('updStatus').textContent = `正在更新：${ev.label}`;
+  } else if (ev.type === 'step') {
+    updLogLine(`[${ev.id}] ${ev.text}`);
+    $('updStatus').textContent = ev.text;
+  } else if (ev.type === 'log') {
+    updLogLine(ev.text);
+  } else if (ev.type === 'done') {
+    finishUpdate(true, ev.result);
+  } else if (ev.type === 'error') {
+    finishUpdate(false, ev.result, ev.text);
+  }
+}
+
+function finishUpdate(ok, result, errText) {
+  updRunning = false;
+  updState = ok ? 'done' : 'error';
+  paintUpdateButton();
+  $('updBar').style.width = '100%';
+
+  const lines = [];
+  if (ok) {
+    const ups = (result && result.updated) || [];
+    lines.push(ups.length
+      ? `已更新 ${ups.length} 项：<span class="u-line">${ups.map((u) => `· ${esc(u.name || u.id)} ${esc(u.from)} → ${esc(u.to)}`).join('<br>')}</span>`
+      : '没有需要更新的组件。');
+    if (result && result.restartHint) {
+      lines.push('dsh 运行时换过了 —— <b>重启工作台</b>（先「停止服务」，再「启动工作台」）后生效。');
+    }
+    setUpdateResult('ok', lines.join('<span class="u-line"></span>'));
+    toast('更新完成');
+  } else {
+    lines.push(`更新失败：${esc(errText || '未知原因')}`);
+    const fails = (result && result.failed) || [];
+    for (const f of fails) lines.push(`· ${esc(f.id)}：${esc(f.reason)}`);
+    if (fails.some((f) => f.id === 'dsh')) lines.push('已尝试回滚到原版本；如果工作台起不来，重跑安装向导可修好。');
+    setUpdateResult('err', lines.join('<span class="u-line"></span>'));
+    toast('更新失败：' + (errText || '请查看日志'));
+  }
+
+  const skipped = (result && result.skipped) || [];
+  if (skipped.length) {
+    lines.push(`另有 ${skipped.length} 项需手动更新：${skipped.map((s) => esc(s.name || s.id)).join('、')}`);
+  }
+
+  setTimeout(() => { $('updProgress').hidden = true; }, 900);
+  setTimeout(() => { refreshUpdateInfo({ silent: true }); loadState().catch(() => {}); }, 700);
+}
+
+/**
+ * 用服务端的 updating 状态校准按钮。
+ * 场景：更新中刷新了页面 —— 本地状态丢了，但服务端还在跑，
+ * 不校准的话按钮会显示可点，点了只会拿到 409。
+ */
+async function reconcileUpdating() {
+  if (!state) return;
+  if (state.updating) {
+    updRunning = true;
+    updState = 'updating';
+    paintUpdateButton();
+    $('updProgress').hidden = false;
+    if (!$('updStatus').textContent) $('updStatus').textContent = '更新正在进行中…';
+  } else if (updRunning && updState === 'updating') {
+    // 服务端已经跑完了，但 done 事件可能没收到（页面刚刷新 / 断线）
+    updRunning = false;
+    updState = 'ready';
+    paintUpdateButton();
+    $('updProgress').hidden = true;
+  }
+}
+
+function setupUpdateCard() {
+  paintUpdateButton();
+  $('btnUpdate').addEventListener('click', onUpdateClick);
+}
+
 /* ------------------------------------------------------------------ 启动 */
 
 setupButtons();
+setupUpdateCard();
 connectSSE();
 loadState().catch((e) => {
   $('modelList').innerHTML = `<div class="issue error">读取状态失败：${esc(e.message)}</div>`;

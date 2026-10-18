@@ -18,10 +18,11 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from './config.mjs';
-import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
+import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv, isValidModelName } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
 import { MIN_AGENT_CONTEXT } from './models.mjs';
+import { checkUpdates, applyUpdates, createUpdateLock } from './update.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -53,6 +54,7 @@ let PORT = 0;
 const clients = new Set();
 let busy = null;            // 当前在忙什么（'pull:模型名' 之类），避免并发操作
 let eventLog = [];
+const updateLock = createUpdateLock();
 
 const cfg = loadConfig(ROOT) || {};
 
@@ -333,8 +335,52 @@ const server = http.createServer(async (req, res) => {
       disks: disks.map((d) => ({ letter: d.letter, freeGB: d.freeGB, totalGB: d.totalGB })),
       modelDirFreeGB: cfg.modelDir ? freeSpaceGB(cfg.modelDir) : null,
       busy,
+      updating: updateLock.busy,
       logPath: path.join(os.tmpdir(), 'localai-console.log'),
     });
+  }
+
+  /* ---------------------------------------------------------- 版本与更新 */
+
+  if (p === '/api/update/check') {
+    try {
+      return json(res, 200, await checkUpdates({ root: ROOT }));
+    } catch (e) {
+      return json(res, 500, { error: String((e && e.message) || e) });
+    }
+  }
+
+  if (p === '/api/update/run' && req.method === 'POST') {
+    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    // 同步占位：下面要 await 检查更新，不先占住的话第二个请求会一起钻进来
+    busy = 'update';
+
+    // 重新查一遍，避免拿着过期结果去升级（用户可能点了检查之后隔很久才点更新）
+    let report;
+    try {
+      report = await checkUpdates({ root: ROOT });
+    } catch (e) {
+      busy = null;
+      return json(res, 502, { error: `检查更新失败：${String((e && e.message) || e)}` });
+    }
+    const auto = report.components.filter((c) => c.status === 'outdated' && c.auto);
+    if (!auto.length) {
+      busy = null;
+      return json(res, 200, { started: false, reason: 'up-to-date', report });
+    }
+
+    eventLog = [];
+    json(res, 202, { started: true, report });
+
+    updateLock.run(() => applyUpdates({
+      report,
+      root: ROOT,
+      emit: (ev) => broadcast({ ...ev, scope: 'update' }),
+      dshRunning: !!pidOnPort(3080),
+    }))
+      .catch((e) => broadcast({ type: 'error', text: String((e && e.message) || e), scope: 'update' }))
+      .finally(() => { busy = null; broadcast({ type: 'idle' }); });
+    return;
   }
 
   if (p === '/api/events') {
@@ -354,7 +400,9 @@ const server = http.createServer(async (req, res) => {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
     const body = await readBody(req);
     const model = String(body.model || '').trim();
-    if (!/^[a-z0-9][a-z0-9._\-/]*(:[a-z0-9._\-]+)?$/i.test(model)) {
+    // 复用 ollama.mjs 的校验（含 120 字符上限）：这里原来是自己抄了一份正则，
+    // 少了长度限制，200 个 a 也能通过，接着就会去拉起 Ollama 拉一个不存在的模型。
+    if (!isValidModelName(model)) {
       return json(res, 400, { error: '模型名不合法，例如 qwen3:8b' });
     }
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，而且找不到它的安装位置' });
@@ -373,6 +421,7 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     const model = String(body.model || '').trim();
     if (!model) return json(res, 400, { error: '缺少模型名' });
+    if (!isValidModelName(model)) return json(res, 400, { error: '模型名不合法' });
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，无法删除' });
     busy = `delete:${model}`;
     eventLog = [];
