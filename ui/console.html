@@ -127,9 +127,12 @@
           <option value="name">按名称</option>
           <option value="date">按安装时间（新在前）</option>
         </select>
+        <button class="btn ghost small" id="btnPickIdle" title="勾选所有装完没用过、或超过 30 天没动的模型">勾选闲置</button>
         <button class="btn ghost small" id="btnBatchDel" disabled>批量删除</button>
         <span class="list-count" id="modelFilterCount"></span>
       </div>
+
+      <div id="idleSummary" hidden></div>
 
       <h2 class="sec-h">已安装的模型 <span class="sec-n" id="modelCount"></span></h2>
       <div id="modelList" class="stack"><div class="loading"><span class="spinner"></span> 正在读取…</div></div>

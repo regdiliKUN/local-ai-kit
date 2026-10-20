@@ -591,8 +591,84 @@ async function loadModelUsage() {
     const next = {};
     for (const row of r.rows || []) next[row.name] = row;
     usageMap = next;
+    renderIdleSummary(r);
     renderModels();
   } catch { /* 拿不到就不显示，不影响列表本身 */ }
+}
+
+/**
+ * 闲置统计：多少个体积被「装完没用过」占着。
+ *
+ * 模型管理页最容易犯的错是只列体积、不说总量——
+ * 用户看到一排 5GB/17GB 也不知道加起来浪费了多少。
+ */
+function renderIdleSummary(rep) {
+  const box = $('idleSummary');
+  if (!box) return;
+  const rows = rep.rows || [];
+  if (!rows.length) { box.hidden = true; return; }
+
+  const sizeOf = (name) => {
+    const m = (state.models || []).find((x) => x.name === name);
+    return m ? (m.sizeGB || 0) : 0;
+  };
+  const never = rows.filter((r) => r.never);
+  const stale = rows.filter((r) => !r.never && r.stale);
+  const used = rows.filter((r) => !r.never && !r.stale);
+  const idleGB = [...never, ...stale].reduce((n, r) => n + sizeOf(r.name), 0);
+  const totalGB = rows.reduce((n, r) => n + sizeOf(r.name), 0);
+
+  box.hidden = false;
+  if (!never.length && !stale.length) {
+    box.innerHTML = `<div class="guide" style="margin-bottom:10px">
+      <span class="guide-n">用量</span>
+      <span>${rows.length} 个模型都在用，没有闲置的。</span></div>`;
+    return;
+  }
+
+  const segments = [
+    { label: '在用', value: used.length, color: 'var(--ok)' },
+    { label: '闲置', value: stale.length, color: 'var(--warn)' },
+    { label: '没用过', value: never.length, color: 'var(--text-dim)' },
+  ].filter((x) => x.value > 0);
+
+  box.innerHTML = `<div class="idle-sum">
+    <div class="idle-chart">${Chart.donut(segments, {
+      size: 116,
+      centerText: `${idleGB.toFixed(1)}`,
+      centerSub: 'GB 闲置',
+    })}</div>
+    <div class="idle-text">
+      <b>${never.length + stale.length} 个模型可以清掉</b>
+      <div class="idle-line">占 <b>${idleGB.toFixed(1)} GB</b>，总容量 ${totalGB.toFixed(1)} GB 的 ${totalGB ? Math.round((idleGB / totalGB) * 100) : 0}%</div>
+      <div class="idle-line dim">
+        ${never.length ? `装完没用过 ${never.length} 个` : ''}${never.length && stale.length ? ' · ' : ''}${stale.length ? `超过 ${rep.staleDays} 天没动 ${stale.length} 个` : ''}
+      </div>
+      <button class="btn ghost small" id="btnPickIdle2" style="margin-top:8px">勾选这些模型</button>
+    </div>
+  </div>`;
+  const b = $('btnPickIdle2');
+  if (b) b.addEventListener('click', pickIdleModels);
+}
+
+/** 勾选所有闲置模型，让用户自己按「批量删除」确认——不替用户做删除决定 */
+function pickIdleModels() {
+  const idle = new Set(
+    Object.values(usageMap).filter((r) => r.stale).map((r) => r.name),
+  );
+  if (!idle.size) return;
+  let n = 0;
+  for (const c of document.querySelectorAll('[data-pick]')) {
+    const on = idle.has(c.dataset.pick);
+    c.checked = on;
+    if (on) n++;
+  }
+  const btn = $('btnBatchDel');
+  if (btn) {
+    btn.disabled = n === 0;
+    btn.textContent = n ? `批量删除（${n}）` : '批量删除';
+  }
+  if (typeof toast === 'function') toast(`已勾选 ${n} 个闲置模型，确认后点「批量删除」`);
 }
 
 function useText(name) {
@@ -2962,5 +3038,18 @@ document.addEventListener('DOMContentLoaded', () => {
       })
       .catch((e) => { if (typeof toast === 'function') toast(`导出失败：${e.message}`); })
       .finally(() => { btn.disabled = false; btn.textContent = old; });
+  });
+});
+
+
+/* 模型管理页的「勾选闲置」按钮 */
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btnPickIdle');
+  if (btn) btn.addEventListener('click', () => {
+    if (!Object.keys(usageMap).length) {
+      if (typeof toast === 'function') toast('用量数据还没加载好，稍等一下');
+      return;
+    }
+    pickIdleModels();
   });
 });
