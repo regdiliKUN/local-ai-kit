@@ -683,7 +683,12 @@ const server = createSafeServer(async (req, res) => {
     return json(res, 200, await buildMetrics());
   }
 
-  if (cfg.backend === 'strata') return handleStrata(req, res, { cfg, root: ROOT, ui: UI, token: TOKEN });
+  if (cfg.backend === 'strata') {
+    return handleStrata(req, res, {
+      cfg, root: ROOT, ui: UI, token: TOKEN,
+      metrics: () => buildMetrics(),
+    });
+  }
 
   /* ---------------------------------------------------------- 空间分析 */
   if (p === '/api/space') {

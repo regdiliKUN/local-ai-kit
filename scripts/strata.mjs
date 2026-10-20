@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { readBody } from './local-http.mjs';
+import { readBody, resolveStaticPath, applySecurityHeaders } from './local-http.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let operation = null;
@@ -68,7 +68,9 @@ export function runStrataAction(cfg, action, { dryRun = false } = {}) {
     let out = '', err = '';
     child.stdout.on('data', (chunk) => { out += chunk.toString('utf8'); });
     child.stderr.on('data', (chunk) => { err += chunk.toString('utf8'); });
-    const timer = setTimeout(() => { child.kill(); reject(new Error('服务操作超时，请查看日志')); }, 20000);
+    // 超时给得宽松些：PowerShell 脚本要核验脚本路径、按端口找进程、逐个停，
+    // 机器负载高的时候 20 秒可能不够。宁可多等，也不要让用户以为「没反应」。
+    const timer = setTimeout(() => { child.kill(); reject(new Error('服务操作超时，请查看日志')); }, 60000);
     child.on('error', (error) => { clearTimeout(timer); reject(error); });
     child.on('close', (code) => {
       clearTimeout(timer);
@@ -84,7 +86,7 @@ function json(res, code, value) {
   res.end(JSON.stringify(value));
 }
 
-export async function handleStrata(req, res, { cfg, ui, token }) {
+export async function handleStrata(req, res, { cfg, ui, token, metrics }) {
   const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
   if (pathname === '/api/state' && req.method === 'GET') return json(res, 200, await strataState(cfg));
   if (pathname === '/api/service' && req.method === 'POST') {
@@ -102,11 +104,30 @@ export async function handleStrata(req, res, { cfg, ui, token }) {
   }
   // Block Ollama-specific APIs while using Strata, including model downloads and profile edits.
   if (pathname.startsWith('/api/')) return json(res, 409, { error: '当前为 Strata 部署，请使用工作台维护模型与配置' });
-  if (req.method === 'GET' && ['/', '/strata.html', '/strata.js'].includes(pathname)) {
-    const file = pathname === '/strata.js' ? 'strata.js' : 'strata.html';
-    let body = fs.readFileSync(path.join(ui, file), 'utf8');
-    if (file.endsWith('.html')) body = body.replace('/*TOKEN*/', `window.__TOKEN__=${JSON.stringify(token)};`);
-    res.writeHead(200, { 'Content-Type': file.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+  // Strata 模式只提供这几张页面：控制台本体、它的脚本和图表库。
+  // 注意用 resolveStaticPath 校验，别让 ../ 之类的路径穿出去。
+  if (req.method === 'GET' && ['/', '/strata.html', '/strata.js', '/charts.js'].includes(pathname)) {
+    const file = pathname === '/' ? 'strata.html' : pathname.replace(/^\/+/, '');
+    const full = resolveStaticPath(ui, file);
+    if (!full || !fs.existsSync(full)) return json(res, 404, { error: 'not found' });
+    let body = fs.readFileSync(full, 'utf8');
+    if (file === 'strata.html') {
+      body = body.replace('/*TOKEN*/', `window.__TOKEN__=${JSON.stringify(token)};`);
+      // 首屏把机器状态一起注入 —— 页面一打开就有数字，不闪「读取中」
+      if (metrics) {
+        try {
+          const boot = await metrics();
+          body = body.replace('<script src="charts.js"></script>',
+            `<script>window.__METRICS__=${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>`
+            + '<script src="charts.js"></script>');
+        } catch { /* 拿不到就算了，页面会自己再拉一次 */ }
+      }
+    }
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': file.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
     return res.end(body);
   }
   return json(res, 404, { error: 'not found' });

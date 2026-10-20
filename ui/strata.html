@@ -13,6 +13,18 @@
     .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:#1a2429;border:1px solid #304047;border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px}
     .card h2{font-size:19px;font-weight:600;margin:0}.card p{font-size:14px;margin:0;min-height:48px}.badge{font-size:13px;color:#edc790}.badge.online{color:#80dec4}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto}.link{background:transparent;font-size:14px}
     .bar{margin-top:20px;padding:22px;border:1px solid #304047;border-radius:12px;display:flex;justify-content:space-between;align-items:center;gap:20px}.bar p{margin:0;font-size:14px}.note{font-size:13px;color:#879ba1;margin-top:26px}code{word-break:break-all;color:#bdcfd1}.message{min-height:26px;margin:22px 0;color:#80dec4;line-height:1.7}.message.error{color:#f1b3a9}
+    .gauges{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-top:8px}
+    .gauge{background:#1a2429;border:1px solid #304047;border-radius:12px;padding:16px 18px}
+    .gauge .k{font-size:12px;color:#879ba1}.gauge .v{font-size:26px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+    .gauge .v .unit{font-size:14px;font-weight:500;color:#879ba1}.gauge .s{font-size:11.5px;color:#879ba1;margin-top:1px}
+    .gauge .sp{margin-top:8px;height:30px}.gauge .sp svg{width:100%;height:30px}
+    .gpu{display:flex;gap:24px;align-items:center;flex-wrap:wrap;margin-top:10px}
+    .gpu table{border-collapse:collapse;font-size:13px;width:100%;max-width:420px}
+    .gpu td{padding:6px 0;border-bottom:1px solid #26343a}.gpu td:first-child{color:#879ba1;width:40%}.gpu td:last-child{text-align:right;font-weight:600}
+    .spark-line{stroke:#80dec4;stroke-width:1.6;stroke-linejoin:round}.spark-area{fill:#80dec4;opacity:.14}.spark-dot{fill:#80dec4}
+    .gauge-track{stroke:#26343a}.gauge-fill{stroke:#80dec4}.gauge-fill.warn{stroke:#edc790}.gauge-fill.err{stroke:#f1b3a9}
+    .gauge-value{fill:#e4eceb;font-size:24px;font-weight:700}.gauge-unit{fill:#879ba1;font-size:13px}.gauge-label{fill:#879ba1;font-size:11.5px}
+    .section{margin-top:44px}.section h2{font-size:20px;font-weight:600;margin:0 0 16px}
     @media(max-width:750px){main{padding:28px 18px}.grid{grid-template-columns:1fr}header,.bar{align-items:flex-start;flex-direction:column}.card p{min-height:0}h1{font-size:27px}}
   </style>
 </head>
@@ -23,9 +35,22 @@
     <article class="card"><span id="webui-status" class="badge">检测中…</span><h2>聊天与文件</h2><p>流式对话、文件夹上传和提示词润色。需要引擎先运行。</p><div class="actions"><button data-action="webui">启动 WebUI</button><a id="webui-link" class="link" target="_blank" rel="noopener">打开聊天 ↗</a></div></article>
     <article class="card"><span id="dsh-status" class="badge">检测中…</span><h2>DeepSeek Harness</h2><p>读写文件、运行命令、完成多步任务。启动时自动打开登录入口。</p><div class="actions"><button data-action="workbench" class="primary">启动工作台</button><a id="dsh-link" class="link" target="_blank" rel="noopener">打开 Agent ↗</a></div></article>
   </section>
+
+  <section class="section">
+    <h2>机器状态</h2>
+    <p>显卡、内存、磁盘现在什么情况。准备打游戏之前看一眼，把显存还回去。</p>
+    <div class="gauges">
+      <div class="gauge"><div class="k">显卡显存</div><div class="v" id="gVram">—</div><div class="s" id="gVramSub">读取中…</div><div class="sp" id="gVramSpark"></div></div>
+      <div class="gauge"><div class="k">CPU 占用</div><div class="v" id="gCpu">—</div><div class="s" id="gCpuSub">读取中…</div><div class="sp" id="gCpuSpark"></div></div>
+      <div class="gauge"><div class="k">内存占用</div><div class="v" id="gMem">—</div><div class="s" id="gMemSub">读取中…</div><div class="sp" id="gMemSpark"></div></div>
+      <div class="gauge"><div class="k">磁盘占用</div><div class="v" id="gDisk">—</div><div class="s" id="gDiskSub">读取中…</div><div class="sp" id="gDiskSpark"></div></div>
+    </div>
+    <div class="gpu" id="gpuDetail"></div>
+  </section>
+
   <div class="bar"><p>结束使用后，停止三个服务并释放模型占用的显存。</p><button data-action="stop" class="danger">停止全部服务</button></div>
   <p id="engine-error" class="message error" role="status" hidden></p>
   <div id="message" class="message" role="status" aria-live="polite"></div>
   <p class="note">部署位置：<code id="root">读取中…</code><br>运行日志：部署目录下的 logs 文件夹。关闭此页面后，服务继续运行。</p>
-  <script>/*TOKEN*/</script><script src="strata.js"></script>
+  <script>/*TOKEN*/</script><script src="charts.js"></script><script src="strata.js"></script>
 </main></body></html>
