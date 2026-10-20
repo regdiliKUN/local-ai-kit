@@ -63,15 +63,12 @@ for (const li of document.querySelectorAll('#tabs li')) {
     if (li.dataset.tab === 'dashboard') loadDashboard().catch(() => {});
     if (li.dataset.tab === 'health') loadTrend('health').catch(() => {});
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
+    if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
   });
 }
 
-// 支持 #context / #settings 这种深链，刷新后停在同一个页
-{
-  const want = (location.hash || '').replace('#', '');
-  const hit = want && document.querySelector(`#tabs li[data-tab="${want}"]`);
-  if (hit) hit.click();
-}
+// 深链（#context / #settings / #palette）的处理放在文件末尾 ——
+// 命令面板等定义在后面，提前调用会撞上 const 的暂时性死区。
 
 /* ------------------------------------------------------------------ 主题 */
 
@@ -153,6 +150,7 @@ async function loadState() {
     renderQueue(state.queue);
     playModels();
     benchModels();
+    compareModels();
     loadSpace().catch(() => {});
     loadCaps();
     if (window.__BOOT__.metrics) renderMetrics(window.__BOOT__.metrics);
@@ -807,6 +805,7 @@ function loadSession(id) {
 
 function playRender() {
   const box = $('chatBox');
+  renderCtxUsage();
   if (!playHistory.length) {
     box.innerHTML = '<div class="chat-empty" id="chatEmpty">还没开始。问点什么试试 —— 比如「用一句话解释什么是显存」。</div>';
     return;
@@ -1059,6 +1058,12 @@ if ($('btnClearHealth')) {
     catch (e) { toast(e.message); }
   });
 }
+if ($('btnCsvHealth')) {
+  $('btnCsvHealth').addEventListener('click', () => { window.open('/api/history.csv?kind=health', '_blank'); });
+}
+if ($('btnCsvBench')) {
+  $('btnCsvBench').addEventListener('click', () => { window.open('/api/history.csv?kind=bench', '_blank'); });
+}
 if ($('btnClearBench')) {
   $('btnClearBench').addEventListener('click', async () => {
     try { await fetch('/api/history?kind=bench', { method: 'DELETE' }); loadTrend('bench'); toast('测速历史已清空'); }
@@ -1125,7 +1130,37 @@ if ($('libQuery')) {
   $('libQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchLibrary(); });
 }
 
-/* ------------------------------------------------------------ 模型对比 */
+/* ------------------------------------------------------------ 上下文占用 */
+
+/**
+ * 粗略估算一段文字占多少 token。
+ *
+ * 没有 token 器时也能给出「大概」：中文大约 1.5 字一个 token，
+ * 英文大约 4 个字符一个 token，外加每条消息几 token 的格式开销。
+ * 用途是让用户对「还能聊多久」有个直观感觉，不是精确计数。
+ */
+function estimateTokens(text) {
+  const s = String(text || '');
+  const cjk = (s.match(/[一-鿿　-〿]/g) || []).length;
+  const rest = s.length - cjk;
+  return Math.round(cjk / 1.5 + rest / 4);
+}
+
+function renderCtxUsage() {
+  const box = $('ctxUsage');
+  if (!box) return;
+  const messages = playHistory.filter((m) => m.role === 'user' || m.role === 'assistant');
+  if (!messages.length) { box.innerHTML = ''; return; }
+  const tokens = messages.reduce((n, m) => n + estimateTokens(m.content) + 4, 0);
+  const window_ = ctxState && ctxState.contextWindow ? ctxState.contextWindow : 8192;
+  const pct = Math.min(100, Math.round((tokens / window_) * 100));
+  const left = Math.max(0, window_ - tokens);
+  const perTurn = Math.round(messages.reduce((n, m) => n + estimateTokens(m.content) + 4, 0) / messages.length);
+  box.innerHTML = [
+    ['上下文占用', `约 ${tokens} / ${window_} tokens（${pct}%）`],
+    ['还能聊', `大概还能再聊 ${Math.floor(left / Math.max(1, perTurn))} 轮`],
+  ].map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('');
+}
 
 const compareState = {};   // model -> { content, status, stats }
 
@@ -1226,6 +1261,79 @@ async function startCompare() {
 
 if ($('btnCompare')) $('btnCompare').addEventListener('click', startCompare);
 
+/* -------------------------------------------------- 模型适配度雷达（估算） */
+
+/** 从 "8.2B" / "494.03M" 里取出参数量（单位：B） */
+function parseParams(text) {
+  const s = String(text || '').trim();
+  const m = /^([\d.]+)\s*([BKM])?/i.exec(s);
+  if (!m) return 0;
+  const n = Number(m[1]) || 0;
+  const unit = (m[2] || 'B').toUpperCase();
+  if (unit === 'M') return n / 1000;
+  if (unit === 'K') return n / 1e6;
+  return n;
+}
+
+/**
+ * 给每个已装模型算一个适配度雷达。
+ *
+ * 五个维度：质量、显存余量、速度预期、能力、上下文余量。
+ * 都是估算 —— 目的是让人别只凭「哪个名字大」来选。
+ */
+async function renderFitRadar() {
+  const box = $('fitGrid');
+  if (!box) return;
+  const models = state.models || [];
+  if (!models.length) {
+    box.innerHTML = '<div class="chart-empty">还没有已安装的模型</div>';
+    return;
+  }
+  let vramGB = 0;
+  let memGB = 0;
+  // 优先用首屏注入的指标（页面开头就带），不用再等一次接口
+  let boot = window.__BOOT__ && window.__BOOT__.metrics;
+  if (boot && boot.current) {
+    const g = (boot.current.gpu || [])[0];
+    if (g && g.memoryTotalMB) vramGB = Math.round(g.memoryTotalMB / 1024);
+    if (boot.current.memory) memGB = boot.current.memory.totalGB;
+  } else {
+    try {
+      const m = await (await fetch('/api/metrics')).json();
+      vramGB = m.current && m.current.gpu && m.current.gpu[0]
+        ? Math.round(m.current.gpu[0].memoryTotalMB / 1024) : 0;
+      memGB = m.current && m.current.memory ? m.current.memory.totalGB : 0;
+    } catch { /* 拿不到就按 0 算 */ }
+  }
+
+  const window_ = (ctxState && ctxState.contextWindow) || 8192;
+  const axes = ['质量', '显存余量', '速度', '能力', '性价比'];
+
+  const scored = models.map((m) => {
+    const params = parseParams(m.params);
+    const size = m.sizeGB || 0;
+    const caps = (state.caps || {})[m.name] || [];
+    const quality = Math.min(100, Math.round((params / 32) * 100));
+    const vramRoom = vramGB > 0 ? Math.max(0, Math.min(100, Math.round(((vramGB - size) / vramGB) * 100))) : 0;
+    // 经验值：模型越小，生成越快。1GB 的模型大约 400 t/s，20GB 的大约 25 t/s
+    const speed = Math.max(0, Math.min(100, Math.round((400 / Math.max(1, size)) / 6 * 100)));
+    const capability = Math.min(100, (caps.includes('tools') ? 40 : 0) + (caps.includes('vision') ? 30 : 0) + (caps.includes('thinking') ? 30 : 0));
+    // 性价比：每 GB 磁盘能买到多少参数。1.5 参数/GB 算优秀
+    const perGB = size > 0 ? params / size : 0;
+    const value = Math.max(0, Math.min(100, Math.round((perGB / 1.5) * 100)));
+    const values = [quality, vramRoom, speed, capability, value];
+    const total = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+    return { m, values, total, perGB };
+  }).sort((a, b) => b.total - a.total);
+
+  box.innerHTML = scored.map((s) => `
+    <div class="fitcard">
+      <div class="fc-head"><b>${esc(s.m.name)}</b><span class="fc-total">${s.total} 分</span></div>
+      <div class="fc-radar">${Chart.radar(axes, s.values, { size: 170 })}</div>
+      <div class="fc-meta">${esc(s.m.params || '')} ${esc(s.m.quant || '')} · ${s.m.sizeGB} GB</div>
+    </div>`).join('');
+}
+
 /* ------------------------------------------------- 诊断与维护（网络/清理/报告） */
 
 async function runNetCheck() {
@@ -1293,6 +1401,74 @@ if ($('btnReport')) {
     toast('诊断报告已开始下载');
   });
 }
+
+/* ------------------------------------------------------------ 首次使用引导 */
+
+const TOUR_KEY = 'localai-tour-done';
+
+const TOUR = [
+  {
+    title: '欢迎来到本地 AI 控制台',
+    text: '这里能管模型、聊模型、测模型、修问题。花一分钟看完这四点，以后就不用再问了。',
+  },
+  {
+    title: 'Ctrl+K 打开命令面板',
+    text: '10 个页面、20 多个动作，输入关键字直接跳过去 —— 不用在一堆标签页里翻。',
+  },
+  {
+    title: '「系统概览」先看一眼',
+    text: '显存被模型占了多少、还剩多少，准备打游戏之前来这里确认一下就知道。',
+  },
+  {
+    title: '出问题先别重装',
+    text: '「诊断与维护」能查网络、清理下载残留、导出诊断报告；「修复中心」能一键修好常见问题。',
+  },
+];
+
+let tourIndex = 0;
+
+function tourRender() {
+  const step = TOUR[tourIndex];
+  $('tourStep').textContent = `${tourIndex + 1} / ${TOUR.length}`;
+  $('tourTitle').textContent = step.title;
+  $('tourText').textContent = step.text;
+  $('tourDots').innerHTML = TOUR.map((_, i) =>
+    `<i class="${i === tourIndex ? 'on' : ''}"></i>`).join('');
+  $('tourPrev').disabled = tourIndex === 0;
+  $('tourNext').textContent = tourIndex === TOUR.length - 1 ? '开始使用' : '下一步';
+}
+
+function tourOpen() {
+  tourIndex = 0;
+  $('tourMask').hidden = false;
+  tourRender();
+}
+
+function tourClose() {
+  $('tourMask').hidden = true;
+  try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* ignore */ }
+}
+
+if ($('tourNext')) {
+  $('tourNext').addEventListener('click', () => {
+    if (tourIndex >= TOUR.length - 1) tourClose();
+    else { tourIndex += 1; tourRender(); }
+  });
+}
+if ($('tourPrev')) {
+  $('tourPrev').addEventListener('click', () => {
+    if (tourIndex > 0) { tourIndex -= 1; tourRender(); }
+  });
+}
+if ($('tourSkip')) $('tourSkip').addEventListener('click', tourClose);
+if ($('tourMask')) {
+  $('tourMask').addEventListener('click', (e) => { if (e.target === $('tourMask')) tourClose(); });
+}
+
+// 第一次打开才引导
+try {
+  if (!localStorage.getItem(TOUR_KEY)) setTimeout(tourOpen, 600);
+} catch { /* ignore */ }
 
 /* ---------------------------------------------------------------- 修复中心 */
 
@@ -1829,6 +2005,15 @@ loadState().catch((e) => {
   $('modelList').innerHTML = `<div class="issue error">读取状态失败：${esc(e.message)}</div>`;
 });
 startDashTimer();
+
+// 深链：#context / #settings / #palette / #tour
+{
+  const want = (location.hash || '').replace('#', '');
+  const hit = want && document.querySelector(`#tabs li[data-tab="${want}"]`);
+  if (hit) hit.click();
+  else if (want === 'palette') paletteOpen();
+  else if (want === 'tour') tourOpen();
+}
 
 // 每 5 秒刷新一次状态（服务启停、模型增删后自动跟上）
 setInterval(() => { loadState().catch(() => {}); }, 5000);

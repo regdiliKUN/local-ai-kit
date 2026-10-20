@@ -273,6 +273,7 @@
         <button class="btn ghost" id="btnPlayStop" hidden>停止</button>
       </div>
       <div class="chat-stats" id="chatStats"></div>
+      <div class="chat-stats" id="ctxUsage"></div>
     </section>
 
     <!-- ============ 性能基准 ============ -->
@@ -332,6 +333,7 @@
       </div>
       <div class="row-actions">
         <button class="btn ghost small" id="btnClearBench">清空测速历史</button>
+        <button class="btn ghost small" id="btnCsvBench">导出 CSV</button>
         <span class="row-hint" id="benchHistoryPath"></span>
       </div>
 
@@ -378,6 +380,10 @@
       <div class="compare-grid" id="compareResults">
         <div class="empty">选好模型，点「开始对比」。</div>
       </div>
+
+      <h2 class="sec-h">哪个模型更适合这台机器</h2>
+      <p class="lead">按你现在的显卡、内存和已装模型估的适配度。<b>只是估算</b>，但比凭感觉选靠谱。</p>
+      <div class="fit-grid" id="fitGrid"><div class="loading"><span class="spinner"></span> 计算中…</div></div>
     </section>
 
     <!-- ============ 模型体检 ============ -->
@@ -419,6 +425,7 @@
       </div>
       <div class="row-actions">
         <button class="btn ghost small" id="btnClearHealth">清空体检历史</button>
+        <button class="btn ghost small" id="btnCsvHealth">导出 CSV</button>
         <span class="row-hint" id="healthHistoryPath"></span>
       </div>
 
@@ -578,6 +585,21 @@
     </section>
 
   </main>
+</div>
+
+<!-- 首次使用引导 -->
+<div class="tour-mask" id="tourMask" hidden>
+  <div class="tour" role="dialog" aria-modal="true" aria-label="使用引导">
+    <div class="tour-step" id="tourStep">1 / 4</div>
+    <h2 id="tourTitle">欢迎来到本地 AI 控制台</h2>
+    <p id="tourText">这里能管模型、聊模型、测模型、修问题。花一分钟看完这四点，以后就不用再问了。</p>
+    <div class="tour-dots" id="tourDots"></div>
+    <div class="tour-actions">
+      <button class="btn ghost small" id="tourSkip">跳过</button>
+      <button class="btn ghost small" id="tourPrev">上一步</button>
+      <button class="btn primary small" id="tourNext">下一步</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast" hidden></div>

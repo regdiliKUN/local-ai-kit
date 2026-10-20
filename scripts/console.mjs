@@ -895,6 +895,32 @@ const server = createSafeServer(async (req, res) => {
     return json(res, 200, { kind, items: readList(kind), path: storePath() });
   }
 
+  if (p === '/api/history.csv' && req.method === 'GET') {
+    const kind = String(url.searchParams.get('kind') || 'health');
+    const items = readList(kind);
+    const columns = kind === 'bench'
+      ? ['时间', '模型', '生成速度(t/s)', '读提示词(t/s)', '评级']
+      : ['时间', '模型', '通过', '总数', '通过率', '采样一致性', '耗时(秒)'];
+    const rows = items.map((it) => (kind === 'bench'
+      ? [new Date(it.at).toLocaleString(), it.model, it.gen, it.prompt, it.level]
+      : [new Date(it.at).toLocaleString(), it.model, it.passed, it.total,
+        it.rate == null ? '' : `${Math.round(it.rate * 100)}%`, it.share == null ? '' : `${Math.round(it.share * 100)}%`, it.elapsed]));
+    // 加 BOM：Excel 打开 UTF-8 CSV 不会乱码
+    const csv = '﻿' + [columns, ...rows]
+      .map((r) => r.map((c) => {
+        const s = String(c == null ? '' : c);
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      }).join(',')).join('\r\n');
+    const name = `localai-${kind}-${new Date().toISOString().slice(0, 10)}.csv`;
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${name}"`,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(csv);
+  }
+
   if (p === '/api/history' && req.method === 'DELETE') {
     const kind = String(url.searchParams.get('kind') || 'health');
     if (kind !== 'health' && kind !== 'bench') {
