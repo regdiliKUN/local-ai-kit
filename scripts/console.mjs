@@ -28,6 +28,7 @@ import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem, pidOn
 import { makeLnk } from './make-lnk.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
 import { makeZip } from './zip.mjs';
+import { recordUse, usageReport, forgetModel } from './usage.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
@@ -964,6 +965,8 @@ const server = createSafeServer(async (req, res) => {
     const messages = sanitizeMessages(body.messages);
     if (!messages.length) return json(res, 400, { error: '至少要有一条消息' });
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
+    // 记一笔使用：以后能回答「哪些模型装完就没碰过」
+    try { recordUse(ROOT, model, 'chat'); } catch { /* 记录失败不该影响对话 */ }
     await streamChat(res, { model, messages, options: body.options || {} });
     return;
   }
@@ -998,6 +1001,14 @@ const server = createSafeServer(async (req, res) => {
   }
 
   /* ---------------------------------------------------------- 清理残留 */
+  // 注意不是 /api/usage —— 那个已经被「每天 token 用量」占了
+  if (p === '/api/model-usage' && req.method === 'GET') {
+    const running = !!(await ollamaVersion());
+    const models = running ? (await listModels() || []).map((m) => m.name) : [];
+    const staleDays = Math.max(1, Math.min(365, Number(new URL(req.url, 'http://x').searchParams.get('staleDays')) || 30));
+    return json(res, 200, { running, ...usageReport(ROOT, models, staleDays) });
+  }
+
   if (p === '/api/cleanup' && req.method === 'GET') {
     const dir = resolveModelDir(cfg.modelDir);
     const found = findOrphanBlobs(dir);
@@ -1277,6 +1288,7 @@ const server = createSafeServer(async (req, res) => {
     const model = String(body.model || cfg.model || '').trim();
     if (!isValidModelName(model)) { busy = null; return json(res, 400, { error: '模型名不合法' }); }
     if (!(await ensureOllama())) { busy = null; return json(res, 400, { error: 'Ollama 没在运行' }); }
+    try { recordUse(ROOT, model, 'bench'); } catch { /* ignore */ }
     json(res, 202, { started: true });
     const gpu = (await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir), sampleMs: 0 })).gpu[0];
     runBenchmark({

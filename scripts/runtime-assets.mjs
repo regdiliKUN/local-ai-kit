@@ -15,6 +15,8 @@ export const SCRIPT_FILES = [
   'store.mjs', 'library.mjs', 'netcheck.mjs', 'report.mjs',
   // v1.6.1 新增
   'zip.mjs',
+  // v1.7.3 新增
+  'usage.mjs',
 ];
 
 export function copyRuntime(kitDir, root) {

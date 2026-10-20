@@ -369,6 +369,7 @@ async function loadState() {
     loadCaps();
     if (window.__BOOT__.metrics) renderMetrics(window.__BOOT__.metrics);
     renderChecklist();
+    loadModelUsage();
     return;
   }
   state = await (await fetch('/api/state')).json();
@@ -582,6 +583,33 @@ function askAlias(model) {
   }).catch((e) => toast(e.message));
 }
 
+/* 模型使用情况：哪些装完就没碰过。数据来自 /api/model-usage（落盘的使用记录） */
+let usageMap = {};
+async function loadModelUsage() {
+  try {
+    const r = await (await fetch('/api/model-usage')).json();
+    const next = {};
+    for (const row of r.rows || []) next[row.name] = row;
+    usageMap = next;
+    renderModels();
+  } catch { /* 拿不到就不显示，不影响列表本身 */ }
+}
+
+function useText(name) {
+  const u = usageMap[name];
+  if (!u) return '';
+  if (u.never) return ' · <span style="color:var(--warn)">装完没用过</span>';
+  if (u.daysAgo === 0) return ' · 今天用过';
+  if (u.daysAgo === 1) return ' · 昨天用过';
+  return ` · ${u.daysAgo} 天前用过`;
+}
+
+function staleTag(name) {
+  const u = usageMap[name];
+  if (!u || !u.stale) return '';
+  return `<span class="tag" style="color:var(--warn);border-color:var(--warn)">闲置</span>`;
+}
+
 function renderModels() {
   const all = state.models || [];
   const q = ($('modelSearch') && $('modelSearch').value || '').trim().toLowerCase();
@@ -624,8 +652,8 @@ function renderModels() {
     <div class="mrow${isCurrent ? ' current' : ''}" data-model="${esc(m.name)}">
       <label class="mcheck"><input type="checkbox" data-pick="${esc(m.name)}"></label>
       <div class="mi">
-        <div class="mn">${esc(m.name)}${isCurrent ? '<span class="tag current">使用中</span>' : ''}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}</div>
-        <div class="ms">${esc(m.params || '')} ${esc(m.quant || '')}${m.modified ? ' · ' + esc(String(m.modified).slice(0, 10)) : ''}</div>
+        <div class="mn">${esc(m.name)}${isCurrent ? '<span class="tag current">使用中</span>' : ''}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}${staleTag(m.name)}</div>
+        <div class="ms">${esc(m.params || '')} ${esc(m.quant || '')}${m.modified ? ' · ' + esc(String(m.modified).slice(0, 10)) : ''}${useText(m.name)}</div>
         <div class="msize"><i style="width:${w}%"></i></div>
       </div>
       <div class="mz">${m.sizeGB} GB</div>
