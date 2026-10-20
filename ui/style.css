@@ -1146,6 +1146,63 @@ html[data-theme="dark"] {
   .vs-chart { width: 100%; }
 }
 
+/* ---- 磁盘健康 ---- */
+
+.diskrow {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.diskrow:last-child { border-bottom: 0; }
+.diskrow .dl { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 2px; }
+.diskrow .dl b { font-size: 13px; }
+.diskrow .dm { font-size: 11.5px; color: var(--text-dim); }
+.diskrow .dh { flex: 1; min-width: 160px; display: flex; align-items: center; gap: 8px; }
+.diskrow .dn { font-size: 12px; color: var(--text-dim); }
+.diskrow .dlevel { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 20px; background: var(--border); color: var(--text-dim); }
+.diskrow .dlevel.ok { background: #eefaf1; color: var(--ok); }
+.diskrow .dlevel.warn { background: #fdf6e7; color: var(--warn); }
+.diskrow .dlevel.error { background: #fdeeee; color: var(--err); }
+.diskrow .dmeta { flex: none; display: flex; gap: 10px; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+@media (prefers-color-scheme: dark) {
+  .diskrow .dlevel.ok { background: #12261a; }
+  .diskrow .dlevel.warn { background: #2c2413; }
+  .diskrow .dlevel.error { background: #2c1717; }
+}
+
+/* ---- 模型实测排行 ---- */
+
+.rankrow {
+  display: flex; align-items: center; gap: 14px;
+  padding: 11px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface);
+}
+.rankrow.ok { border-left: 3px solid var(--ok); }
+.rankrow.warn { border-left: 3px solid var(--warn); }
+.rankrow.error { border-left: 3px solid var(--err); }
+.rankrow .rk { font-size: 16px; font-weight: 700; color: var(--text-dim); width: 34px; flex: none; }
+.rankrow .rm { flex: 1; min-width: 0; }
+.rankrow .rn { font-size: 13.5px; font-weight: 600; word-break: break-all; }
+.rankrow .rs { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.rankrow .rp { flex: none; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---- 对话分支 ---- */
+
+.branch-bar {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 9px 12px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: 9px;
+}
+.br-label { font-size: 12px; color: var(--text-dim); }
+.br-chip {
+  font: inherit; font-size: 12px; padding: 3px 10px;
+  border: 1px solid var(--border); border-radius: 20px;
+  background: var(--bg); color: var(--text-dim); cursor: pointer;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.br-chip:hover { border-color: var(--accent); color: var(--accent); }
+.br-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* ---- 上下文占用 ---- */
 
 .ctx-ring { flex: none; }

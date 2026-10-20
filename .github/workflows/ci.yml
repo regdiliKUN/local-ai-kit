@@ -65,6 +65,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           node --input-type=module -e "import fs from 'node:fs'; const m = await import('./scripts/runtime-assets.mjs'); const missing = m.SCRIPT_FILES.filter(f => !fs.existsSync('scripts/' + f)); if (missing.length) { console.error('缺少运行时文件: ' + missing.join(', ')); process.exit(1); } console.log('运行时文件齐全 (' + m.SCRIPT_FILES.length + ' 个)');"
 
+      - name: 界面文案翻译齐全
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = node scripts/extract-i18n.mjs
+          Write-Output $out
+          if ($out -notmatch '待翻译 0 条') {
+            Write-Error ("有界面文案没翻译：`n" + $out)
+          }
+
       - name: 确认批处理文件是 CRLF
         shell: pwsh
         run: |

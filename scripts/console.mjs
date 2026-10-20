@@ -42,6 +42,8 @@ import { diagnose, repair } from './repair.mjs';
 import { compareVersions } from './version.mjs';
 import { appendItem, readList, writeList, clearList, storePath } from './store.mjs';
 import { searchLibrary } from './library.mjs';
+import { diskHealth, diskForPath, diskSummary } from './diskhealth.mjs';
+import { runRanking, rankingAdvice } from './ranking.mjs';
 import { checkNetwork } from './netcheck.mjs';
 import { findOrphanBlobs, cleanupOrphanBlobs } from './space.mjs';
 import { buildReport, strataReport } from './report.mjs';
@@ -1179,6 +1181,53 @@ const server = createSafeServer(async (req, res) => {
     } catch (e) {
       return json(res, 400, { error: String(e.message || e) });
     }
+  }
+
+  /* ------------------------------------------------------ 磁盘健康 */
+  if (p === '/api/disks' && req.method === 'GET') {
+    const items = diskHealth({ refresh: url.searchParams.get('refresh') === '1' });
+    const modelDisk = diskForPath(resolveModelDir(cfg.modelDir));
+    return json(res, 200, { items, summary: diskSummary(items), modelDisk });
+  }
+
+  /* ------------------------------------------------------ 模型实测排行 */
+  if (p === '/api/ranking' && req.method === 'GET') {
+    return json(res, 200, readList('ranking').slice(-1)[0] || { results: [], advice: [] });
+  }
+
+  if (p === '/api/ranking' && req.method === 'POST') {
+    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    const body = await readBody(req);
+    const names = (Array.isArray(body.models) ? body.models : [])
+      .map((m) => String(m || '').trim())
+      .filter((m) => isValidModelName(m));
+    if (!names.length) return json(res, 400, { error: '没有可测的模型' });
+    busy = 'ranking';
+    json(res, 202, { started: true, total: names.length });
+    let stopped = false;
+    runRanking({
+      models: names,
+      onProgress: (ev) => {
+        if (ev.phase === 'model-done') {
+          broadcast({ type: 'ranking-item', model: ev.model, result: ev.result, index: ev.index, total: ev.total });
+        } else if (ev.phase === 'model') {
+          broadcast({ type: 'ranking-progress', model: ev.model, index: ev.index, total: ev.total, percent: ev.percent });
+        }
+      },
+      shouldStop: () => stopped,
+    }).then((out) => {
+      const payload = { results: out.results, advice: rankingAdvice(out.results), at: out.at };
+      writeList('ranking', [payload]);
+      broadcast({ type: 'ranking-done', ...payload });
+    }).catch((e) => {
+      broadcast({ type: 'error', text: `排行失败：${e.message || e}` });
+    }).finally(() => { busy = null; broadcast({ type: 'idle' }); });
+    return;
+  }
+
+  if (p === '/api/ranking/stop' && req.method === 'POST') {
+    broadcast({ type: 'notice', text: '已请求停止排行（当前模型跑完就停）', tone: 'warn' });
+    return json(res, 200, { ok: true });
   }
 
   /* ------------------------------------------------------------ 用量统计 */

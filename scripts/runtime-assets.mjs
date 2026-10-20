@@ -12,13 +12,15 @@ export const SCRIPT_FILES = [
   'metrics.mjs', 'history.mjs', 'space.mjs', 'pull-queue.mjs',
   'chat.mjs', 'bench.mjs', 'backup.mjs', 'repair.mjs', 'version.mjs',
   // v1.5.0 新增
-  'store.mjs', 'library.mjs', 'netcheck.mjs', 'report.mjs',
+  'store.mjs', 'library.mjs', 'netcheck.mjs', 'report.mjs', 'package-offline.mjs',
   // v1.6.1 新增
   'zip.mjs',
   // v1.7.3 新增
   'usage.mjs',
   // v1.7.5 新增
   'configdiff.mjs',
+  // v1.8.0 新增
+  'diskhealth.mjs', 'ranking.mjs', 'conversation-tree.mjs',
 ];
 
 export function copyRuntime(kitDir, root) {

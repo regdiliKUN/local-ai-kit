@@ -61,7 +61,7 @@ for (const li of document.querySelectorAll('#tabs li')) {
     window.scrollTo(0, 0);
     // 概览页的数据是「按需拉」的，切过去才拉，省得后台一直跑 nvidia-smi
     if (li.dataset.tab === 'dashboard') loadDashboard().catch(() => {});
-    if (li.dataset.tab === 'health') loadTrend('health').catch(() => {});
+    if (li.dataset.tab === 'health') { loadTrend('health').catch(() => {}); loadRanking().catch(() => {}); }
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
     if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
     // 显存估算要调 nvidia-smi，只在切到这一页时算
@@ -73,6 +73,46 @@ for (const li of document.querySelectorAll('#tabs li')) {
 
 // 深链（#context / #settings / #palette）的处理放在文件末尾 ——
 // 命令面板等定义在后面，提前调用会撞上 const 的暂时性死区。
+
+/* ------------------------------------------------------------ 多语言 */
+
+/** 界面语言：中文 / English */
+function applyLanguage(id) {
+  if (!window.I18n) return;
+  I18n.setLang(id);
+  I18n.applyI18n(document);
+  // 动态生成的界面重新渲染一遍
+  renderStatus();
+  renderModels();
+  renderSettings();
+  renderConfig();
+  if (ctxState) renderContext();
+  renderQueue(state && state.queue);
+  renderServices();
+  renderHelp();
+  renderShortcuts();
+  // 标题也跟着变
+  document.title = I18n.currentLang() === 'en' ? 'Local AI Console' : '本地 AI 控制台';
+}
+
+if ($('langSelect')) {
+  $('langSelect').innerHTML = (window.I18n ? I18n.langs() : [])
+    .map((l) => `<option value="${esc(l.id)}">${esc(l.label)}</option>`).join('');
+  $('langSelect').value = window.I18n ? I18n.currentLang() : 'zh';
+  $('langSelect').addEventListener('change', (e) => {
+    applyLanguage(e.target.value);
+    toast(I18n.currentLang() === 'en' ? 'Language: English' : '语言：简体中文');
+  });
+}
+
+// 页面一进来就按用户上次的选择换语言
+(function initLanguage() {
+  if (!window.I18n) return;
+  I18n.initI18n();
+  I18n.applyI18n(document);
+  I18n.observeI18n(document.body);
+  document.documentElement.lang = I18n.currentLang() === 'en' ? 'en' : 'zh-CN';
+})();
 
 /* ------------------------------------------------------------------ 主题 */
 
@@ -389,7 +429,7 @@ async function loadState() {
     // 打开页面就接着上次的对话
     if (playSessions.length) {
       const last = playSessions[playSessions.length - 1];
-      if (!playHistory.length) { loadSession(last.id); const sel = $('playSession'); if (sel) sel.value = last.id; }
+      if (!playMessages().length) { loadSession(last.id); const sel = $('playSession'); if (sel) sel.value = last.id; }
     }
   }).catch(() => {});
   // 测速结果也放在 /api/state 里 —— SSE 断了也能拿到结果，界面不会卡在「测速中」
@@ -402,6 +442,7 @@ async function loadState() {
     healthShownAt = state.health.at;
     renderHealthResult(state.health, (state.health.verdicts || []).every((v) => v.ok));
   }
+  loadRanking().catch(() => {});
   // 空间统计和能力标签比较重，不要每 5 秒都重算一遍
   if (Date.now() - lastHeavyAt > 30000) {
     lastHeavyAt = Date.now();
@@ -490,6 +531,7 @@ function renderMetrics(data) {
 
   renderVramBreakdown(m);
   loadUsage().catch(() => {});
+  loadDisks().catch(() => {});
 
   /* ---- 正在跑的模型 ---- */
   const running = (m.ollama && m.ollama.models) || [];
@@ -1191,10 +1233,52 @@ if ($('btnQueueClear')) {
 
 /* ------------------------------------------------------------------ 试用 */
 
-const playHistory = [];        // 完整对话（发给模型）
-let playController = null;     // 用来「停止」
-let playSessions = [];         // 存下来的历史对话
+/**
+ * 对话是一棵树，不是一条线。
+ *
+ * 「重新生成」之后，上一个回答不会被丢掉 —— 它变成同一个问题下的另一个分支，
+ * 点一下就能切回去比较。实现见 ui/conversation-tree.js。
+ */
+let playTree = (window.ConversationTree ? ConversationTree.makeTree() : { children: [] });
+let playPath = [];               // 当前路径（节点 id 数组）
+let playController = null;       // 用来「停止」
+let playSessions = [];           // 存下来的历史对话
 let playSessionId = '';
+let playPending = null;          // 正在生成的那个节点
+
+/** 当前这条路径上的消息（发给模型 / 渲染界面都用它） */
+function playMessages() {
+  if (!window.ConversationTree) return [];
+  return ConversationTree.flatten(playTree, playPath);
+}
+
+/** 清空整棵树，开始新对话 */
+function playReset() {
+  playTree = window.ConversationTree ? ConversationTree.makeTree() : { children: [] };
+  playPath = [];
+  playPending = null;
+}
+
+/** 往树上挂一个节点，返回新路径 */
+function playAppend(role, content) {
+  if (!window.ConversationTree) return playPath;
+  const node = ConversationTree.makeNode(role, content);
+  playPath = ConversationTree.appendNode(playTree, playPath, node);
+  return node;
+}
+
+/** 当前节点在同一问题下的兄弟（重新生成出来的那些回答） */
+function playSiblings() {
+  if (!window.ConversationTree || playPath.length < 2) return [];
+  return ConversationTree.siblingsOf(playTree, playPath);
+}
+
+/** 切到某个兄弟分支 */
+function playSwitchTo(nodeId) {
+  if (!window.ConversationTree || playPath.length < 2) return;
+  playPath = playPath.slice(0, -1).concat([nodeId]);
+  playRender();
+}
 
 /** 拉历史对话列表并把最近一次载入 */
 async function loadSessions() {
@@ -1215,7 +1299,8 @@ async function loadSessions() {
 
 /** 把当前对话存到磁盘 */
 async function saveSession() {
-  const messages = playHistory.filter((m) => m.role === 'user' || m.role === 'assistant')
+  const messages = playMessages()
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({ role: m.role, content: m.content }));
   if (!messages.length) return;
   try {
@@ -1236,24 +1321,45 @@ function loadSession(id) {
   const s = playSessions.find((x) => x.id === id);
   if (!s) return;
   playSessionId = s.id;
-  playHistory.length = 0;
-  for (const m of s.messages || []) playHistory.push({ role: m.role, content: m.content });
+  playReset();
+  for (const m of s.messages || []) playAppend(m.role, m.content);
   playRender();
 }
 
 function playRender() {
   const box = $('chatBox');
+  const list = playMessages();
   renderCtxUsage();
-  if (!playHistory.length) {
+  renderBranches();
+  if (!list.length) {
     box.innerHTML = '<div class="chat-empty" id="chatEmpty">还没开始。问点什么试试 —— 比如「用一句话解释什么是显存」。</div>';
     return;
   }
-  box.innerHTML = playHistory.map((m) => `
+  box.innerHTML = list.map((m) => `
     <div class="msg ${m.role}">
       <div class="msg-role">${m.role === 'user' ? '我' : '模型'}</div>
       <div class="msg-body">${m.pending ? '<span class="typing">正在思考…</span>' : esc(m.content)}</div>
     </div>`).join('');
   box.scrollTop = box.scrollHeight;
+}
+
+/** 分支切换器：同一个问题下有几个回答就摆几个按钮 */
+function renderBranches() {
+  const box = $('playBranches');
+  if (!box) return;
+  const siblings = playSiblings();
+  if (siblings.length < 2) { box.innerHTML = ''; box.hidden = true; return; }
+  box.hidden = false;
+  const current = playPath[playPath.length - 1];
+  box.innerHTML = `<span class="br-label">这条问题有 ${siblings.length} 个回答：</span>`
+    + siblings.map((s, i) => {
+      const on = s.id === current;
+      const text = (s.content || '').replace(/\s+/g, ' ').slice(0, 18) || '（空）';
+      return `<button class="br-chip ${on ? 'on' : ''}" data-branch="${esc(s.id)}" title="${esc(text)}">${i + 1}. ${esc(text)}</button>`;
+    }).join('');
+  for (const b of box.querySelectorAll('[data-branch]')) {
+    b.addEventListener('click', () => playSwitchTo(b.dataset.branch));
+  }
 }
 
 function playModels() {
@@ -1268,24 +1374,33 @@ function playModels() {
   sel.innerHTML = names.map((n) => `<option value="${esc(n)}"${n === cur ? ' selected' : ''}>${esc(n)}</option>`).join('');
 }
 
-async function playSend() {
+/**
+ * 发一条消息（或者重新生成）。
+ *
+ * reuseUser = true 时不再新建「用户提问」节点 —— 路径已经停在那个提问节点上，
+ * 直接挂一个新的回答节点，于是它和上一个回答成了**兄弟分支**。
+ */
+async function playSend(opts = {}) {
+  const reuseUser = !!opts.reuseUser;
   playModels();
   const input = $('playInput');
   const text = input.value.trim();
-  if (!text) return;
+  if (!text && !reuseUser) return;
   const model = $('playModel').value;
   if (!model) { toast('先装一个模型再来聊天'); return; }
 
   const system = $('playSystem').value.trim();
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
-  messages.push(...playHistory.filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role, content: m.content })));
-  messages.push({ role: 'user', content: text });
+  // 当前路径上的历史（重新生成时已经包含那条提问了，别重复加）
+  const history = playMessages().filter((m) => m.role === 'user' || m.role === 'assistant');
+  messages.push(...history.map((m) => ({ role: m.role, content: m.content })));
+  if (!reuseUser) messages.push({ role: 'user', content: text });
 
-  playHistory.push({ role: 'user', content: text });
-  playHistory.push({ role: 'assistant', content: '', pending: true });
-  input.value = '';
+  if (!reuseUser) playAppend('user', text);
+  const answerNode = playAppend('assistant', '');
+  playPending = answerNode;
+  if (!reuseUser) input.value = '';
   playRender();
 
   $('btnPlay').disabled = true;
@@ -1312,8 +1427,6 @@ async function playSend() {
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
-    const last = playHistory[playHistory.length - 1];
-    last.pending = false;
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -1328,12 +1441,12 @@ async function playSend() {
         let ev;
         try { ev = JSON.parse(payload); } catch { continue; }
         if (ev.type === 'chunk') {
-          last.content += ev.content;
+          answerNode.content += ev.content;
           const body = document.querySelector('.msg.assistant:last-of-type .msg-body');
-          if (body) body.textContent = last.content;
+          if (body) body.textContent = answerNode.content;
           $('chatBox').scrollTop = $('chatBox').scrollHeight;
         } else if (ev.type === 'error') {
-          last.content = `（出错：${ev.text}）`;
+          answerNode.content = `（出错：${ev.text}）`;
           toast(ev.text);
         } else if (ev.type === 'done' && ev.stats) {
           const s = ev.stats;
@@ -1352,12 +1465,12 @@ async function playSend() {
         }
       }
     }
-    if (!last.content) last.content = '（模型没有返回内容）';
+    if (!answerNode.content) answerNode.content = '（模型没有返回内容）';
   } catch (e) {
-    const last = playHistory[playHistory.length - 1];
-    if (last) { last.pending = false; if (!last.content) last.content = `（出错：${e.message}）`; }
+    if (answerNode && !answerNode.content) answerNode.content = `（出错：${e.message}）`;
     if (e.name !== 'AbortError') toast(e.message);
   } finally {
+    playPending = null;
     playController = null;
     $('btnPlay').disabled = false;
     $('btnPlayStop').hidden = true;
@@ -1372,15 +1485,16 @@ if ($('btnPlayStop')) {
 }
 if ($('btnPlayRegen')) {
   $('btnPlayRegen').addEventListener('click', async () => {
-    // 重新生成上一条回答：把最后一条助手消息删掉，用同样的问题再问一遍
-    const lastUser = [...playHistory].reverse().find((m) => m.role === 'user');
+    // 重新生成：在同一个问题下挂一个新的回答分支，原来的保留着可以切回去
+    if (!window.ConversationTree || playPath.length < 2) { toast('没有可以重试的问题'); return; }
+    const list = playMessages();
+    const lastUser = [...list].reverse().find((m) => m.role === 'user');
     if (!lastUser) { toast('没有可以重试的问题'); return; }
-    // 去掉最后那轮（用户 + 助手）
-    while (playHistory.length && playHistory[playHistory.length - 1].role !== 'user') playHistory.pop();
-    playHistory.pop();
+    // 退回到「用户提问」那个节点 —— 新的回答会挂在它下面，和上一个回答成为兄弟
+    playPath = playPath.slice(0, -1);
     playRender();
     $('playInput').value = lastUser.content;
-    playSend();
+    await playSend({ reuseUser: true });
   });
 }
 if ($('playSession')) {
@@ -1390,7 +1504,7 @@ if ($('playSession')) {
 }
 if ($('btnPlayNew')) {
   $('btnPlayNew').addEventListener('click', () => {
-    playHistory.length = 0;
+    playReset();
     playSessionId = '';
     playRender();
     $('playSession').value = '';
@@ -1403,7 +1517,7 @@ if ($('btnPlayDel')) {
     if (!id) { toast('先选一段对话'); return; }
     try {
       await fetch(`/api/sessions?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (playSessionId === id) { playHistory.length = 0; playSessionId = ''; playRender(); }
+      if (playSessionId === id) { playReset(); playSessionId = ''; playRender(); }
       await loadSessions();
       toast('已删除');
     } catch (e) { toast(e.message); }
@@ -1686,7 +1800,7 @@ function estimateTokens(text) {
 function renderCtxUsage() {
   const box = $('ctxUsage');
   if (!box) return;
-  const messages = playHistory.filter((m) => m.role === 'user' || m.role === 'assistant');
+  const messages = playMessages().filter((m) => m.role === 'user' || m.role === 'assistant');
   if (!messages.length) { box.innerHTML = ''; return; }
   const tokens = messages.reduce((n, m) => n + estimateTokens(m.content) + 4, 0);
   const window_ = ctxState && ctxState.contextWindow ? ctxState.contextWindow : 8192;
@@ -2258,7 +2372,7 @@ for (const b of document.querySelectorAll('[data-quick]')) {
 /** 把当前对话导成 Markdown */
 function chatMarkdown() {
   const lines = [`# 与 ${$('playModel').value || '本地模型'} 的对话`, '', `> 导出于 ${new Date().toLocaleString()}`, ''];
-  for (const m of playHistory) {
+  for (const m of playMessages()) {
     if (m.role !== 'user' && m.role !== 'assistant') continue;
     lines.push(`**${m.role === 'user' ? '我' : '模型'}**`, '', m.content, '');
   }
@@ -2267,7 +2381,7 @@ function chatMarkdown() {
 
 if ($('btnExportChat')) {
   $('btnExportChat').addEventListener('click', () => {
-    if (!playHistory.length) { toast('还没有对话'); return; }
+    if (!playMessages().length) { toast('还没有对话'); return; }
     const blob = new Blob([chatMarkdown()], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -2282,7 +2396,7 @@ if ($('btnExportChat')) {
 }
 if ($('btnCopyChat')) {
   $('btnCopyChat').addEventListener('click', async () => {
-    if (!playHistory.length) { toast('还没有对话'); return; }
+    if (!playMessages().length) { toast('还没有对话'); return; }
     try {
       await navigator.clipboard.writeText(chatMarkdown());
       toast('已复制到剪贴板');
@@ -2470,6 +2584,96 @@ function renderHelp() {
     </button>`).join('');
   bindGoto(box);
 }
+
+/* --------------------------------------------------------- 磁盘健康 */
+
+async function loadDisks() {
+  const box = $('dashDisks');
+  if (!box) return;
+  try {
+    const r = await (await fetch('/api/disks')).json();
+    const items = r.items || [];
+    if (!items.length) {
+      box.innerHTML = '<div class="chart-empty">系统没有提供磁盘信息（老版本 Windows 或存储服务没开）。</div>';
+      return;
+    }
+    const rows = items.map((d) => `
+      <div class="diskrow ${d.level}">
+        <div class="dl">
+          <b>${esc(d.letter || '')} ${esc(d.name)}</b>
+          <span class="dm">${esc(d.mediaText)}${d.sizeGB ? ` · ${d.sizeGB} GB` : ''}</span>
+        </div>
+        <div class="dh">
+          <span class="dlevel ${d.level}">${d.level === 'error' ? '异常' : d.level === 'warn' ? '注意' : '正常'}</span>
+          <span class="dn">${esc(d.note)}</span>
+        </div>
+        <div class="dmeta">
+          ${d.temp != null ? `<span>${d.temp}°C</span>` : ''}
+          ${d.lifeLeft != null ? `<span>寿命 ${d.lifeLeft}%</span>` : ''}
+          ${d.powerOnHours != null ? `<span>通电 ${Math.round(d.powerOnHours)} 小时</span>` : ''}
+        </div>
+      </div>`).join('');
+    const advice = (r.summary || []).map((s) => `<div class="row"><span class="k">·</span><span class="v">${esc(s)}</span></div>`).join('');
+    const model = r.modelDisk
+      ? `<div class="row"><span class="k">模型所在盘</span><span class="v">${esc(r.modelDisk.letter)} ${esc(r.modelDisk.name)} —— ${esc(r.modelDisk.note)}</span></div>`
+      : '';
+    box.innerHTML = rows + (advice || model ? `<div class="summary" style="margin-top:12px">${advice}${model}</div>` : '');
+  } catch (e) {
+    box.innerHTML = `<div class="chart-empty">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+/* ------------------------------------------------------- 模型实测排行 */
+
+function renderRanking(data) {
+  const box = $('rankingResult');
+  if (!box) return;
+  const results = (data && data.results) || [];
+  if (!results.length) {
+    box.innerHTML = '<div class="empty"><b>还没有排行数据。</b>点「开始实测排行」，用同一套题把已装的模型挨个测一遍。</div>';
+    return;
+  }
+  const rows = results.map((r) => {
+    const ok = r.error ? 'error' : r.passed === r.total ? 'ok' : 'warn';
+    return `<div class="rankrow ${ok}">
+      <div class="rk">#${r.rank || '-'}</div>
+      <div class="rm">
+        <div class="rn">${esc(r.model)}</div>
+        <div class="rs">${r.error ? esc(r.error) : `通过 ${r.passed}/${r.total}${r.share != null ? ` · 采样一致 ${Math.round(r.share * 100)}%` : ''}${r.elapsed ? ` · ${r.elapsed}s` : ''}`}</div>
+      </div>
+      <div class="rp">${r.error ? '—' : `${Math.round((r.rate || 0) * 100)}%`}</div>
+    </div>`;
+  }).join('');
+  const advice = ((data && data.advice) || []).map((a) =>
+    `<div class="row"><span class="k">·</span><span class="v">${esc(a)}</span></div>`).join('');
+  box.innerHTML = rows + (advice ? `<div class="summary" style="margin-top:12px">${advice}</div>` : '');
+}
+
+async function startRanking() {
+  const models = (state.models || []).map((m) => m.name);
+  if (!models.length) { toast('先装一个模型'); return; }
+  $('rankWrap').hidden = false;
+  $('rankBar').style.width = '0%';
+  $('rankPct').textContent = '0%';
+  $('rankTitle').textContent = '准备中…';
+  $('rankingResult').innerHTML = '<div class="loading"><span class="spinner"></span> 开始实测…</div>';
+  try {
+    await post('/api/ranking', { models });
+  } catch (e) {
+    toast(e.message);
+    $('rankWrap').hidden = true;
+  }
+}
+
+/** 打开页面时把上次的排行结果带出来 */
+async function loadRanking() {
+  try {
+    const r = await (await fetch('/api/ranking')).json();
+    if (r && (r.results || []).length) renderRanking(r);
+  } catch { /* ignore */ }
+}
+
+if ($('btnRanking')) $('btnRanking').addEventListener('click', startRanking);
 
 /* ---------------------------------------------------------------- 修复中心 */
 
@@ -2789,6 +2993,18 @@ function connectSSE() {
       $('benchHint').textContent = '测完了。';
       renderBench(ev.result || {});
       loadTrend('bench').catch(() => {});
+    } else if (ev.type === 'ranking-progress') {
+      $('rankWrap').hidden = false;
+      const pct = Math.max(0, Math.min(100, ev.percent || 0));
+      $('rankBar').style.width = `${pct}%`;
+      $('rankPct').textContent = `${pct}%`;
+      $('rankTitle').textContent = `正在测 ${ev.model}（${ev.index + 1}/${ev.total}）`;
+    } else if (ev.type === 'ranking-item') {
+      $('rankTitle').textContent = `已测完 ${ev.index + 1}/${ev.total}`;
+    } else if (ev.type === 'ranking-done') {
+      $('rankWrap').hidden = true;
+      $('rankingHint').textContent = '测完了。';
+      renderRanking({ results: ev.results, advice: ev.advice });
     } else if (ev.type === 'queue') {
       renderQueue(ev.state);
       for (const it of (ev.state && ev.state.items) || []) {

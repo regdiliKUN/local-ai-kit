@@ -127,7 +127,7 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <h3>服务</h3>
 <p>现在有哪些东西在跑，一页看全：Strata 引擎 / WebUI / dsh，以及 Ollama。都能直接启停。<strong>停服务前先看一眼这一页</strong>，别把不该关的关了。</p>
 <h3>服务设置</h3>
-<table><thead><tr><th>开关</th><th>说明</th></tr></thead><tbody><tr><td><strong>开机自动启动工作台</strong></td><td>打开后每次开机自动启动服务并加载模型（会占显存）。想自己控制就别开。</td></tr><tr><td><strong>局域网共享</strong></td><td>把 Ollama 的接口开放给同一个 WiFi 下的手机 / 平板 / 其它电脑。<strong>默认关闭</strong>，打开前必须先在警告里打勾确认。</td></tr><tr><td><strong>Ollama 掉了自动重启</strong></td><td>驱动更新、误关托盘程序、休眠没恢复时自动把它拉起来。<strong>默认关闭</strong> —— 擅自拉起会占显存。</td></tr></tbody></table>
+<table><thead><tr><th>开关</th><th>说明</th></tr></thead><tbody><tr><td><strong>开机自动启动工作台</strong></td><td>打开后每次开机自动启动服务并加载模型（会占显存）。想自己控制就别开。</td></tr><tr><td><strong>局域网共享</strong></td><td>把 Ollama 的接口开放给同一个 WiFi 下的手机 / 平板 / 其它电脑。<strong>默认关闭</strong>，打开前必须先在警告里打勾确认。</td></tr><tr><td><strong>Ollama 掉了自动重启</strong></td><td>驱动更新、误关托盘程序、休眠没恢复时自动把它拉起来。<strong>默认关闭</strong> —— 擅自拉起会占显存。</td></tr><tr><td><strong>界面语言</strong></td><td>中文 / English。切换后立刻生效，下次打开还是这个。</td></tr></tbody></table>
 <p>下面还有「启动工作台」「停止服务并释放显存」「打开安装目录」「打开模型目录」「查看日志」「检查更新」，以及<strong>导出配置 / 导入配置</strong>（把模型、模型目录、上下文、压缩参数和 dsh 的配置打包成一个 JSON，换电脑时带过去导入就能还原）、<strong>配置检查点</strong>（改坏了一键退回来）、<strong>快捷键自定义</strong>、<strong>主题</strong>（跟随系统 / 浅色 / 深色 / 按时段）和一个<strong>卸载</strong>入口。</p>
 <blockquote><p>局域网共享会把 Ollama 暴露到 <code>0.0.0.0:11434</code>。<br>在公共 WiFi、宿舍网、公司网里，同网段的任何人都能用你的显卡跑模型。<br><strong>只在你信任的家庭网络里打开，用完关掉。</strong></p></blockquote>
 <p><strong>引导：</strong>界面不会只说「暂无数据」—— 每个空状态都会告诉你<strong>现在该做什么</strong>。第一次打开会有四步使用引导；另外还有「出问题时怎么排查」和「怎么换模型」两套，在命令面板里输入「引导」就能看到。侧栏铃铛是<strong>通知中心</strong>，下载完成、体检结果、发现的问题都汇总在那里。</p>
@@ -288,6 +288,11 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>  下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</p>
 <hr>
 <h2>更新日志</h2>
+<h3>v1.8.0</h3>
+<p><strong>这一版把四件一直想做但没空做的事做了，另外把界面文案全面国际化了。</strong></p>
+<ul><li><strong>界面语言可切换</strong>（中文 / English）：服务设置页选一下就换，记住选择。537 条界面文案全部翻译；动态生成的文字也会一起翻，但聊天记录、日志这类<strong>用户内容不翻</strong></li><li><strong>模型实测排行</strong>：在<strong>你自己的机器上</strong>用同一套 21 道题挨个测已装的模型，按通过率排名。官网跑分是别人的机器、别人的问题 —— 这个不是</li><li><strong>磁盘健康检测</strong>：系统概览页能看介质类型、剩余寿命、磨损度、温度、通电时间，并标出<strong>模型实际所在的那块盘</strong></li><li><strong>对话分支树</strong>：「重新生成」之后上一个回答不会被丢掉 —— 它变成同一个问题下的另一个分支，点一下就切回去比较</li></ul>
+<p>修掉：磁盘健康误报「剩余寿命 0%」、重新生成不成分支、对话树摊平读不到第二条消息。</p>
+<p>单元测试从 55 个增加到 64 个。</p>
 <h3>v1.7.0</h3>
 <p><strong>这一版把「装」这一端也补上了，再加一堆日常省事的小功能。</strong></p>
 <ul><li><strong>按推荐装</strong>：检测页一个按钮，用推荐值直接开始装，跳过选模型、选盘两步</li><li><strong>装完跑一次体检</strong>：完成页一个按钮，20 秒知道模型能不能用</li><li>试用页<strong>重新生成</strong>；模型管理<strong>批量删除</strong>与<strong>起别名</strong>（不占额外磁盘）</li><li>系统概览新增<strong>用量统计</strong>（每天消耗多少 token）</li><li>服务设置新增<strong>离线安装包</strong>：一键打成 zip，拷到没网的机器上解压就能装</li><li>体检历史可导出 <strong>Markdown</strong>（能直接贴进报告）</li><li>概览页新增 <strong>GPU 温度告警</strong>（过热会降速，容易被误读成「模型变笨了」）</li><li>诊断新增<strong>开机自启体检</strong>：自启项指向的程序被删了，能查出来并一键清掉</li><li>新增<strong>帮助页</strong>：12 张卡片，点一下就跳到对应页面</li></ul>

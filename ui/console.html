@@ -106,6 +106,11 @@
         <div class="panel-b" id="dashUsage"><div class="chart-empty">在「试用」页聊过之后这里会有记录</div></div>
       </div>
 
+      <h2 class="sec-h">磁盘健康</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashDisks"><div class="chart-empty">读取中…</div></div>
+      </div>
+
       <h2 class="sec-h">机器信息</h2>
       <div class="summary" id="dashSystem"></div>
     </section>
@@ -200,7 +205,7 @@
 
       <details class="logbox" id="logBox" hidden>
         <summary>查看详细日志</summary>
-        <pre id="log"></pre>
+        <pre id="log" data-no-i18n></pre>
       </details>
     </section>
 
@@ -320,7 +325,8 @@
         <button class="btn ghost small danger" id="btnPlayDel">删除</button>
         <span class="row-hint" id="playSessionHint">对话会自动保存，关掉浏览器也在。</span>
       </div>
-      <div class="chat" id="chatBox">
+      <div class="branch-bar" id="playBranches" hidden></div>
+      <div class="chat" id="chatBox" data-no-i18n>
         <div class="chat-empty" id="chatEmpty">还没开始。问点什么试试 —— 比如「用一句话解释什么是显存」。</div>
       </div>
 
@@ -505,9 +511,24 @@
         <div class="row"><span class="k">采样稳定性</span><span class="v">同一个问题连问几次，答案是否一致。不一致说明不是「笨」，是采样参数不稳</span></div>
       </div>
 
+      <h2 class="sec-h">模型实测排行</h2>
+      <p class="lead">在<strong>你自己的机器上</strong>用同一套题挨个测一遍 —— 官网跑分是别人的机器、别人的问题。</p>
+      <div class="row-actions">
+        <button class="btn primary" id="btnRanking">开始实测排行</button>
+        <span class="row-hint" id="rankingHint">每个模型都要先加载进显存，5 个模型大概 3~5 分钟。</span>
+      </div>
+      <div class="progress-wrap" id="rankWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="rankTitle">实测中…</span>
+          <span class="progress-pct" id="rankPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="rankBar"></div></div>
+      </div>
+      <div id="rankingResult" class="stack"></div>
+
       <details class="logbox" id="healthLogBox" hidden>
         <summary>查看详细日志</summary>
-        <pre id="healthLog"></pre>
+        <pre id="healthLog" data-no-i18n></pre>
       </details>
     </section>
 
@@ -675,7 +696,7 @@
       <p class="row-hint" id="logPathHint">日志位置：%TEMP%\localai-console.log</p>
       <details class="logbox" id="consoleLogBox" hidden>
         <summary>日志内容（最后 200 行）</summary>
-        <pre id="consoleLog"></pre>
+        <pre id="consoleLog" data-no-i18n></pre>
       </details>
 
       <h2 class="sec-h">服务自愈</h2>
@@ -698,6 +719,17 @@
       <h2 class="sec-h">快捷键</h2>
       <p class="lead">点一下键位再按新键，就能改。改完立刻生效。</p>
       <div id="shortcutList" class="stack"></div>
+
+      <h2 class="sec-h">界面语言</h2>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">Language</div>
+            <div class="s">界面语言。切换后立刻生效，下次打开还是这个。</div>
+          </div>
+          <select id="langSelect" class="ctx-select" style="min-width:160px"></select>
+        </div>
+      </div>
 
       <h2 class="sec-h">界面大小</h2>
       <div class="set-card">
@@ -779,6 +811,8 @@
 
 <script src="charts.js"></script>
 <script src="guidance.js"></script>
+<script src="i18n.js"></script>
+<script src="conversation-tree.js"></script>
 <script src="console.js"></script>
 </body>
 </html>
