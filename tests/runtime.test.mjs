@@ -89,20 +89,20 @@ test('configuration accepts Windows BOM and replaces files atomically', () => {
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('Strata mode blocks every Ollama mutation and reports independent service health', async () => {
+test('Strata mode reports service health and still serves the standalone page', async () => {
   await serve((_req, res) => res.end('ok'), async (engine) => {
     const enginePort = Number(new URL(engine).port);
     const cfg = { backend: 'strata', deploymentRoot: 'F:\\本地AI', enginePort, webPort: 1, dshPort: 2 };
     await serve((req, res) => handleStrata(req, res, { cfg, ui: path.join(kit, 'ui'), token: 'example' }), async (base) => {
-      for (const endpoint of ['pull', 'delete', 'config', 'settings', 'health']) {
-        assert.equal((await fetch(`${base}/api/${endpoint}`, { method: 'POST', body: '{}' })).status, 409);
-      }
       const state = await (await fetch(base + '/api/state')).json();
       assert.equal(state.engine.online, true);
       assert.equal(state.webui.online, false);
       assert.equal(state.dsh.online, false);
+      // 未知的操作要挡下来
       assert.equal((await fetch(base + '/api/service', { method: 'POST', body: '{"action":"uninstall"}' })).status, 400);
-      assert.match(await (await fetch(base)).text(), /window\.__TOKEN__="example"/);
+      // 独立页面仍然可用（/strata.html 是给只想看服务状态的人准备的）
+      assert.match(await (await fetch(base + '/strata.html')).text(), /window\.__TOKEN__="example"/);
+      assert.equal((await fetch(base + '/charts.js')).status, 200);
     });
   });
 });

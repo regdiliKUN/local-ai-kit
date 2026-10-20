@@ -64,7 +64,7 @@ for (const li of document.querySelectorAll('#tabs li')) {
     if (li.dataset.tab === 'health') loadTrend('health').catch(() => {});
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
     if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
-    if (li.dataset.tab === 'settings') loadCheckpoints().catch(() => {});
+    if (li.dataset.tab === 'settings') { loadCheckpoints().catch(() => {}); renderShortcuts(); }
   });
 }
 
@@ -74,18 +74,31 @@ for (const li of document.querySelectorAll('#tabs li')) {
 /* ------------------------------------------------------------------ 主题 */
 
 /**
- * 主题：深色 / 浅色 / 跟随系统。
+ * 主题：深色 / 浅色 / 跟随系统 / 按时段自动。
  *
- * 之前只有「跟随系统」，用户在深色系统里被迫看浅色界面（或反过来），
- * 而且每次打开都恢复原样。现在可以手动切，并且记在 localStorage 里。
+ * 「按时段自动」是给夜里还在折腾的人准备的：白天浅色，晚上自动转深色。
  */
 const THEME_KEY = 'localai-theme';
+const THEMES = [
+  { id: 'auto', label: '跟随系统' },
+  { id: 'light', label: '浅色' },
+  { id: 'dark', label: '深色' },
+  { id: 'schedule', label: '按时段（白天浅 / 晚上深）' },
+];
+
+function scheduledTheme() {
+  const h = new Date().getHours();
+  return (h >= 19 || h < 7) ? 'dark' : 'light';
+}
 
 function applyTheme(theme) {
   const root = document.documentElement;
   if (theme === 'auto') {
     root.removeAttribute('data-theme');
     try { localStorage.removeItem(THEME_KEY); } catch { /* ignore */ }
+  } else if (theme === 'schedule') {
+    root.setAttribute('data-theme', scheduledTheme());
+    try { localStorage.setItem(THEME_KEY, 'schedule'); } catch { /* ignore */ }
   } else {
     root.setAttribute('data-theme', theme);
     try { localStorage.setItem(THEME_KEY, theme); } catch { /* ignore */ }
@@ -98,8 +111,98 @@ function currentTheme() {
 
 (function initTheme() {
   const saved = currentTheme();
-  if (saved !== 'auto') document.documentElement.setAttribute('data-theme', saved);
+  if (saved === 'schedule') {
+    document.documentElement.setAttribute('data-theme', scheduledTheme());
+    // 每 5 分钟看一眼，天色变了自动切
+    setInterval(() => {
+      if (currentTheme() === 'schedule') {
+        const want = scheduledTheme();
+        if (document.documentElement.getAttribute('data-theme') !== want) {
+          document.documentElement.setAttribute('data-theme', want);
+        }
+      }
+    }, 300000);
+  } else if (saved !== 'auto') {
+    document.documentElement.setAttribute('data-theme', saved);
+  }
 })();
+
+/* ------------------------------------------------------- 快捷键自定义 */
+
+const SHORTCUT_KEY = 'localai-shortcuts';
+const SHORTCUT_DEFS = [
+  { id: 'palette', name: '打开命令面板', key: 'k', mod: 'ctrl', label: 'Ctrl+K' },
+  { id: 'refresh', name: '刷新状态', key: 'r', mod: '', label: 'R' },
+  { id: 'search', name: '聚焦模型搜索', key: '/', mod: '', label: '/' },
+  { id: 'help', name: '显示快捷键说明', key: '?', mod: '', label: '?' },
+  { id: 'overview', name: '去系统概览', key: '1', mod: '', label: '1' },
+  { id: 'models', name: '去模型管理', key: '2', mod: '', label: '2' },
+  { id: 'play', name: '去试用', key: '3', mod: '', label: '3' },
+  { id: 'services', name: '去服务', key: '4', mod: '', label: '4' },
+];
+
+/** 读用户改过的快捷键；没改过的用默认值 */
+function loadShortcuts() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(SHORTCUT_KEY) || '{}'); } catch { saved = {}; }
+  return SHORTCUT_DEFS.map((d) => {
+    const s = saved[d.id] || {};
+    const key = s.key || d.key;
+    const mod = s.mod != null ? s.mod : d.mod;
+    return { ...d, key, mod, label: formatShortcut(key, mod) };
+  });
+}
+
+function formatShortcut(key, mod) {
+  const parts = [];
+  if (mod === 'ctrl') parts.push('Ctrl');
+  if (mod === 'alt') parts.push('Alt');
+  if (mod === 'shift') parts.push('Shift');
+  parts.push(key === '/' ? '/' : key.toUpperCase());
+  return parts.join('+');
+}
+
+function saveShortcuts(list) {
+  const obj = {};
+  for (const s of list) obj[s.id] = { key: s.key, mod: s.mod };
+  try { localStorage.setItem(SHORTCUT_KEY, JSON.stringify(obj)); } catch { /* ignore */ }
+}
+
+let shortcutDefs = loadShortcuts();
+
+function renderShortcuts() {
+  const box = $('shortcutList');
+  if (!box) return;
+  box.innerHTML = shortcutDefs.map((s) => `
+    <div class="mrow">
+      <div class="mi"><div class="mn">${esc(s.name)}</div></div>
+      <div class="mz"><kbd class="skbd" data-sk="${esc(s.id)}">${esc(s.label)}</kbd></div>
+    </div>`).join('');
+  for (const k of box.querySelectorAll('[data-sk]')) {
+    k.addEventListener('click', () => {
+      const id = k.dataset.sk;
+      const def = shortcutDefs.find((s) => s.id === id);
+      if (!def) return;
+      const handler = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const key = e.key.length === 1 ? e.key : e.key.toLowerCase();
+        if (key === 'escape') { document.removeEventListener('keydown', handler, true); return; }
+        // 功能键不绑定，免得和浏览器快捷键打架
+        if (['control', 'shift', 'alt', 'meta'].includes(key)) return;
+        def.key = key;
+        def.mod = e.ctrlKey || e.metaKey ? 'ctrl' : (e.altKey ? 'alt' : (e.shiftKey ? 'shift' : ''));
+        def.label = formatShortcut(def.key, def.mod);
+        saveShortcuts(shortcutDefs);
+        document.removeEventListener('keydown', handler, true);
+        renderShortcuts();
+        toast(`「${def.name}」改成了 ${def.label}`);
+      };
+      document.addEventListener('keydown', handler, true);
+      k.textContent = '按下新键…（Esc 取消）';
+    });
+  }
+}
 
 /* ------------------------------------------------------- 键盘与无障碍 */
 
@@ -116,6 +219,26 @@ const KEYMAP = {
 };
 
 document.addEventListener('keydown', (e) => {
+  // 用户自定义过的快捷键优先
+  const custom = shortcutDefs.find((s) => {
+    if (s.mod === 'ctrl' && !(e.ctrlKey || e.metaKey)) return false;
+    if (s.mod === '' && (e.ctrlKey || e.metaKey || e.altKey)) return false;
+    if (s.mod === 'alt' && !e.altKey) return false;
+    if (s.mod === 'shift' && !e.shiftKey) return false;
+    return s.key === (e.key.length === 1 ? e.key : e.key.toLowerCase());
+  });
+  if (custom && custom.id !== 'help') {
+    e.preventDefault();
+    if (custom.id === 'palette') paletteOpen();
+    else if (custom.id === 'refresh') loadState();
+    else if (custom.id === 'search') { const s = $('modelSearch'); if (s) s.focus(); }
+    else if (custom.id === 'overview') gotoTab('dashboard');
+    else if (custom.id === 'models') gotoTab('models');
+    else if (custom.id === 'play') gotoTab('play');
+    else if (custom.id === 'services') gotoTab('services');
+    return;
+  }
+
   if (e.ctrlKey || e.metaKey || e.altKey) {
     // Ctrl+K / Cmd+K 打开命令面板
     if (e.key === 'k' || e.key === 'K') {
@@ -133,7 +256,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'r' || e.key === 'R') { loadState().catch(() => {}); e.preventDefault(); }
   if (e.key === '/') { const s = $('modelSearch'); if (s) { s.focus(); e.preventDefault(); } }
-  if (e.key === '?') { toast('快捷键：1-8 切换页面 · R 刷新 · / 搜索'); }
+  if (e.key === '?') { toast('快捷键：Ctrl+K 命令面板 · 1-0 切换页面 · R 刷新 · / 搜索'); }
 });
 
 /* ------------------------------------------------------------ 引导助手 */
@@ -2012,7 +2135,7 @@ const COMMANDS = [
   { name: '检查更新', hint: '动作', run: () => { gotoTab('settings'); $('btnCheckVersion').click(); } },
   { name: '导出配置', hint: '动作', run: () => { gotoTab('settings'); $('btnExportCfg').click(); } },
   { name: '导入配置', hint: '动作', run: () => { gotoTab('settings'); $('btnImportCfg').click(); } },
-  { name: '切换深色 / 浅色', hint: '动作', run: () => $('btnTheme').click() },
+  { name: '切换主题', hint: '动作', run: () => $('btnTheme').click() },
   { name: '用不上时怎么排查', hint: '引导', run: () => tourOpen('broken') },
   { name: '怎么换模型', hint: '引导', run: () => tourOpen('swap') },
   { name: '重新看一遍使用引导', hint: '引导', run: () => tourOpen('first') },
@@ -2417,10 +2540,11 @@ function setupButtons() {
 
   if ($('btnTheme')) {
     $('btnTheme').addEventListener('click', () => {
-      const cur = document.documentElement.getAttribute('data-theme');
-      const next = cur === 'dark' ? 'light' : 'dark';
-      applyTheme(next);
-      toast(next === 'dark' ? '已切换到深色' : '已切换到浅色');
+      const cur = currentTheme();
+      const idx = THEMES.findIndex((t) => t.id === cur);
+      const next = THEMES[(idx + 1) % THEMES.length];
+      applyTheme(next.id);
+      toast(`主题：${next.label}`);
     });
   }
 

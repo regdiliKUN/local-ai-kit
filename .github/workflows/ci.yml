@@ -30,6 +30,26 @@ jobs:
       - name: 单元测试
         run: npm test
 
+      - name: 界面脚本语法检查
+        run: |
+          node --check ui/guidance.js
+          node --check ui/strata.js
+          node --check scripts/library.mjs
+          node --check scripts/report.mjs
+          node --check scripts/store.mjs
+          node --check scripts/netcheck.mjs
+
+      - name: 图表库自检（不依赖浏览器）
+        run: |
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const src = fs.readFileSync('ui/charts.js', 'utf8');
+            for (const name of ['sparkline','donut','gauge','bars','radar','waterfall','line','heatmap','ring']) {
+              if (!src.includes(name + '(')) { console.error('缺少图表函数: ' + name); process.exit(1); }
+            }
+            console.log('图表函数齐全');
+          "
+
   self-check:
     name: 打包自检
     runs-on: windows-latest
@@ -60,3 +80,19 @@ jobs:
             Write-Error ("这些批处理文件不是 CRLF 结尾，cmd.exe 会出问题：`n" + ($bad -join "`n"))
           }
           Write-Output "批处理文件换行符正确"
+
+      - name: 确认文档里的截图都存在
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $missing = @()
+          Select-String -Path README.md, CHANGELOG.md -Pattern '\]\((docs/[^)]+\.png)\)' -AllMatches |
+            ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique |
+            ForEach-Object {
+              $p = Join-Path (Get-Location) $_
+              if (-not (Test-Path $p)) { $missing += $_ }
+            }
+          if ($missing.Count -gt 0) {
+            Write-Error ("文档引用了不存在的截图：`n" + ($missing -join "`n"))
+          }
+          Write-Output "文档引用的截图都在"

@@ -22,7 +22,7 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
-import { handleStrata, strataState, runStrataAction } from './strata.mjs';
+import { strataState, runStrataAction } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
@@ -157,8 +157,12 @@ async function ensureOllama() {
 /** 模型能力缓存：/api/show 不算慢，但模型多了没必要每次都问一遍 */
 const capsCache = new Map();
 const CAPS_TTL = 5 * 60 * 1000;
+/** 模型列表缓存：页面每 5 秒轮询一次状态，没必要每次都去问 Ollama */
+let modelsCache = { at: 0, items: null };
 
 async function listModels() {
+  const now = Date.now();
+  if (modelsCache.items && now - modelsCache.at < 2500) return modelsCache.items;
   try {
     const r = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(6000) });
     const j = await r.json();
@@ -171,17 +175,12 @@ async function listModels() {
       family: (m.details && m.details.family) || '',
       digest: m.digest || '',
     }));
-    // 能力信息异步补：先返回列表，再把 capabilities 塞回去
-    for (const m of models) {
-      const cached = capsCache.get(m.name);
-      if (cached && Date.now() - cached.at < CAPS_TTL) {
-        m.capabilities = cached.caps;
-        continue;
-      }
-      m.capabilities = null;
-    }
+    modelsCache = { at: now, items: models };
     return models;
-  } catch { return null; }
+  } catch {
+    // 拿不到就沿用上一次的结果，别让列表闪空
+    return modelsCache.items || null;
+  }
 }
 
 /** 单独取某个模型的能力（界面上的标签靠它） */
@@ -606,14 +605,15 @@ function tailLog(lines = 200) {
 }
 
 /** 组装 /api/metrics 的内容（首屏注入和接口共用同一份逻辑与形状） */
-async function buildMetrics() {
+async function buildMetrics({ fast = false } = {}) {
   const now = Date.now();
   // 1 秒内重复请求直接用缓存，省掉一次 nvidia-smi 调用
   let current = null;
   if (now - metricsAt < 1000 && lastMetrics) {
     current = lastMetrics;
   } else {
-    current = await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir) });
+    // 首屏要快：采样 0ms，数字粗糙一点没关系，反正 2 秒后就有准的了
+    current = await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir), sampleMs: fast ? 0 : 200 });
     lastMetrics = current;
     metricHistory.push({
       at: current.at,
@@ -1282,7 +1282,7 @@ const server = createSafeServer(async (req, res) => {
     const boot = {
       state: await buildState(),
       config: await buildConfigPayload(),
-      metrics: await buildMetrics(),
+      metrics: await buildMetrics({ fast: true }),
     };
     const inject = `<script>window.__BOOT__=${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>`
       + `<script>window.__TOKEN__='${TOKEN}';</script>`;

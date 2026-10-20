@@ -102,10 +102,11 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>重启后双击「启动本地AI」即可。</p>
 <hr>
 <h2>本地AI控制台（新）</h2>
-<p>双击桌面上的「<strong>本地AI控制台</strong>」，浏览器会打开一个小网页。v1.5.0 起有十个页面。
-按 <kbd>Ctrl</kbd>+<kbd>K</kbd> 打开<strong>命令面板</strong>，输入关键字就能跳到任何页面或动作。</p>
+<p>双击桌面上的「<strong>本地AI控制台</strong>」，浏览器会打开一个小网页。v1.6.0 起有十一个页面。
+按 <kbd>Ctrl</kbd>+<kbd>K</kbd> 打开<strong>命令面板</strong>，输入关键字就能跳到任何页面或动作（也能搜已装的模型）。</p>
+<blockquote><p><strong>Strata 部署也用同一套界面</strong>：模型管理、测速、体检这些在 Strata 部署下同样可用 —— Strata 走自己的引擎，而 Ollama 那部分功能管的是 Ollama 装着的模型。</p></blockquote>
 <h3>系统概览</h3>
-<ul><li><strong>显存 / CPU / 内存 / 磁盘</strong>的实时占用，带趋势线</li><li>显卡详情：型号、驱动、显存、GPU 占用、温度、功耗</li><li>正在驻留的模型、各占多少显存</li><li>准备打游戏之前先看一眼，确认显存已经还回去了</li></ul>
+<ul><li><strong>显存 / CPU / 内存 / 磁盘</strong>的实时占用，带趋势线</li><li>显卡详情：型号、驱动、显存、GPU 占用、温度、功耗</li><li>正在驻留的模型、各占多少显存</li><li><strong>显存分账</strong>：模型权重 / KV cache / 其它程序 / 空闲。显存被占满时先看这张图 —— 大头如果不是模型占的（游戏、渲染软件、别的 AI），关掉它们比换模型管用得多</li><li><strong>快速操作条</strong>：装模型、跑体检、测速度、聊两句、备份配置、导出报告、修问题</li><li>准备打游戏之前先看一眼，确认显存已经还回去了</li></ul>
 <h3>模型管理</h3>
 <ul><li><strong>看</strong>：已经装了哪些模型、各占多少磁盘、什么量化、有没有「看图 / 工具调用」能力</li><li><strong>搜</strong>：输入关键字过滤，按体积 / 名称 / 时间排序</li><li><strong>删</strong>：点「删除」→ 原地变成「确认删除？」→ 再点一下才真删（不会误删）</li><li><strong>装</strong>：输入模型名（比如 <code>qwen3:8b</code>）点「加入下载队列」—— 可以一次加好几个，排队依次下，每个都有独立进度条，单独能取消</li><li><strong>搜官方模型库</strong>：直接搜 ollama.com，几百个模型里挑。每条带能力标签、尺寸与下载量，点「下载」直接进队列</li><li><strong>空间分析</strong>：算出每个模型真实占用（去重后），还能看出下载中断留下的残留、哪些基础层被多个模型共用</li></ul>
 <h3>试用</h3>
@@ -123,11 +124,14 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>用不上的时候先点「重新检查」，看看是哪一环断了；能自动修的直接一键修，不用重装。</p>
 <h3>诊断与维护</h3>
 <table><thead><tr><th>功能</th><th>干什么</th></tr></thead><tbody><tr><td><strong>检查网络</strong></td><td>探测模型官网 / 模型仓库 / GitHub 通不通，并告诉你是不是代理的问题</td></tr><tr><td><strong>清理下载残留</strong></td><td>找出没人引用的分片，先看能释放多少，再决定删不删</td></tr><tr><td><strong>下载诊断报告</strong></td><td>把环境、配置、日志打包成一个文件（已自动去掉用户名和令牌），发给别人就能直接看到问题</td></tr></tbody></table>
+<h3>服务</h3>
+<p>现在有哪些东西在跑，一页看全：Strata 引擎 / WebUI / dsh，以及 Ollama。都能直接启停。<strong>停服务前先看一眼这一页</strong>，别把不该关的关了。</p>
 <h3>服务设置</h3>
-<table><thead><tr><th>开关</th><th>说明</th></tr></thead><tbody><tr><td><strong>开机自动启动工作台</strong></td><td>打开后每次开机自动启动服务并加载模型（会占显存）。想自己控制就别开。</td></tr><tr><td><strong>局域网共享</strong></td><td>把 Ollama 的接口开放给同一个 WiFi 下的手机 / 平板 / 其它电脑。<strong>默认关闭</strong>，打开前必须先在警告里打勾确认。</td></tr></tbody></table>
-<p>下面还有「启动工作台」「停止服务并释放显存」「打开安装目录」「打开模型目录」「查看日志」「检查更新」，以及<strong>导出配置 / 导入配置</strong>（把模型、模型目录、上下文、压缩参数和 dsh 的配置打包成一个 JSON，换电脑时带过去导入就能还原）和一个<strong>卸载</strong>入口。</p>
+<table><thead><tr><th>开关</th><th>说明</th></tr></thead><tbody><tr><td><strong>开机自动启动工作台</strong></td><td>打开后每次开机自动启动服务并加载模型（会占显存）。想自己控制就别开。</td></tr><tr><td><strong>局域网共享</strong></td><td>把 Ollama 的接口开放给同一个 WiFi 下的手机 / 平板 / 其它电脑。<strong>默认关闭</strong>，打开前必须先在警告里打勾确认。</td></tr><tr><td><strong>Ollama 掉了自动重启</strong></td><td>驱动更新、误关托盘程序、休眠没恢复时自动把它拉起来。<strong>默认关闭</strong> —— 擅自拉起会占显存。</td></tr></tbody></table>
+<p>下面还有「启动工作台」「停止服务并释放显存」「打开安装目录」「打开模型目录」「查看日志」「检查更新」，以及<strong>导出配置 / 导入配置</strong>（把模型、模型目录、上下文、压缩参数和 dsh 的配置打包成一个 JSON，换电脑时带过去导入就能还原）、<strong>配置检查点</strong>（改坏了一键退回来）、<strong>快捷键自定义</strong>、<strong>主题</strong>（跟随系统 / 浅色 / 深色 / 按时段）和一个<strong>卸载</strong>入口。</p>
 <blockquote><p>局域网共享会把 Ollama 暴露到 <code>0.0.0.0:11434</code>。<br>在公共 WiFi、宿舍网、公司网里，同网段的任何人都能用你的显卡跑模型。<br><strong>只在你信任的家庭网络里打开，用完关掉。</strong></p></blockquote>
-<p><strong>小技巧：</strong>快捷键 <code>Ctrl+K</code> 命令面板、<code>1</code>–<code>0</code> 切换页面、<code>R</code> 刷新、<code>/</code> 搜索；深色 / 浅色主题可以手动切换；第一次打开会有四步使用引导；控制台日志在 <code>%TEMP%\localai-console.log</code>，页面上也能直接看和下载。</p>
+<p><strong>引导：</strong>界面不会只说「暂无数据」—— 每个空状态都会告诉你<strong>现在该做什么</strong>。第一次打开会有四步使用引导；另外还有「出问题时怎么排查」和「怎么换模型」两套，在命令面板里输入「引导」就能看到。侧栏铃铛是<strong>通知中心</strong>，下载完成、体检结果、发现的问题都汇总在那里。</p>
+<p><strong>小技巧：</strong>快捷键 <code>Ctrl+K</code> 命令面板、<code>1</code>–<code>0</code> 切换页面、<code>R</code> 刷新、<code>/</code> 搜索；深色 / 浅色 / 按时段主题可以手动切换；控制台日志在 <code>%TEMP%\localai-console.log</code>，页面上也能直接看和下载；打印出来的报告是干净的。</p>
 <hr>
 <h2>想换模型 / 加装模型</h2>
 <p>两种方式都行：</p>
@@ -284,6 +288,10 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>  下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</p>
 <hr>
 <h2>更新日志</h2>
+<h3>v1.6.0</h3>
+<p><strong>这一版让两种部署合一，界面也会「说话」了。</strong></p>
+<ul><li><strong>统一控制台</strong>：Strata 与 Ollama 两种部署共用同一个界面，十一个页面全部可用（以前 Strata 模式会把控制台「接管」掉，模型管理这些全被挡掉）</li><li>新增「服务」页：引擎 / WebUI / dsh / Ollama 的状态与启停</li><li>新增<strong>场景化引导</strong>（第一次用 / 出问题时 / 想换模型）与<strong>空状态引导</strong></li><li>新增<strong>通知中心</strong>（侧栏铃铛）与<strong>错误码表</strong>（9 类常见问题翻译成人话 + 一键跳转）</li><li>新增四个图表：显存分账瀑布图、上下文环形图、体检日历热力图、模型体积对比条</li><li>模型库搜索支持按能力筛选与排序；对话可导出 Markdown</li><li>测速结果与历史最佳对比；配置检查点可一键回滚</li><li>新增服务自愈开关、首页快速操作条、快捷键自定义、按时段主题、打印样式</li><li>修掉 Strata 模式下模型目录认错的问题；首屏打开从 400ms 降到 210ms</li></ul>
+<p>单元测试从 42 个增加到 47 个。</p>
 <h3>v1.5.0</h3>
 <p><strong>这一版让「该用哪个模型」「到底哪里坏了」这两件事有了答案。</strong></p>
 <ul><li>新增「模型对比」页：同一个问题同时问最多 4 个模型，并排看答案与速度</li><li>新增「诊断与维护」页：网络连通性、清理下载残留、下载诊断报告</li><li>可搜索 Ollama 官方模型库（几百个模型，带能力标签与下载量）</li><li>新增命令面板（Ctrl+K），10 个页面 + 20 多个动作</li><li>体检与测速结果存成历史，画成趋势线；可导出 CSV</li><li>试用页的对话自动保存，关掉浏览器能接着聊</li><li>试用页实时显示上下文占用与「还能再聊多少轮」</li><li>新增模型适配度雷达：按你的显卡给已装模型打分</li><li>首次打开有四步使用引导</li></ul>

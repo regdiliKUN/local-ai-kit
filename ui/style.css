@@ -1148,6 +1148,33 @@ html[data-theme="dark"] {
 .ctx-nums { display: flex; flex-direction: column; gap: 5px; }
 .chat-stats:has(.ctx-ring) { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
 
+/* ---- 快捷键 ---- */
+
+.skbd {
+  font: 12px ui-monospace, Consolas, monospace;
+  padding: 3px 9px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--text); cursor: pointer; user-select: none;
+}
+.skbd:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---- 打印友好：把体检报告 / 配置清单打印出来时是干净的 ---- */
+
+@media print {
+  :root { --bg: #fff; --surface: #fff; --text: #000; --text-dim: #444; --border: #ccc; }
+  .sidebar, .footer, .quickbar, .toast, .palette-mask, .tour-mask,
+  .notif-wrap, .row-actions, .btn, .dash-tools { display: none !important; }
+  .app { display: block; padding: 0; }
+  .content { max-width: none; padding: 0; }
+  .view { display: none !important; }
+  .view#view-print { display: block !important; }
+  .panel, .summary, .gauge-card, .mrow, .set-card {
+    break-inside: avoid; box-shadow: none; border-color: #ccc;
+  }
+  .chart-radar, .chart-donut, .chart-line, .chart-bars, .chart-wf { max-width: 100%; }
+  a { color: #000; text-decoration: none; }
+}
+
 /* ---- 快速操作条 ---- */
 
 .quickbar {
