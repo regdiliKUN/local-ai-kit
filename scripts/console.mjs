@@ -15,6 +15,7 @@ import os from 'node:os';
 import {
   createSafeServer, readBody,
   createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath,
+  openEventStream,
 } from './local-http.mjs';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, execSync } from 'node:child_process';
@@ -32,6 +33,9 @@ import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
 import { createPullQueue } from './pull-queue.mjs';
 import { streamChat, sanitizeMessages } from './chat.mjs';
+import { runBenchmark } from './bench.mjs';
+import { exportBundle, importBundle } from './backup.mjs';
+import { diagnose, repair } from './repair.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -68,7 +72,7 @@ let busy = null;            // 当前在忙什么（'pull:模型名' 之类）�
 let eventLog = [];
 
 /** 限流器：GET 宽松（页面要轮询），POST 收紧（会改东西） */
-const rateLimit = createRateLimiter({ getLimit: 240, postLimit: 30 });
+const rateLimit = createRateLimiter({ getLimit: 600, postLimit: 60 });
 
 /**
  * 下载队列。
@@ -88,6 +92,11 @@ let lastMetrics = null;
 let metricsAt = 0;
 
 const cfg = loadConfig(ROOT) || {};
+
+/** 最近一次的测速结果（SSE 断了也能通过 /api/state 拿到） */
+let lastBench = null;
+/** 最近一次的体检结果（同上） */
+let lastHealth = null;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -116,8 +125,9 @@ function json(res, code, body) {
 function broadcast(ev) {
   eventLog.push(ev);
   if (eventLog.length > 400) eventLog.shift();
-  const payload = `data: ${JSON.stringify(ev)}\n\n`;
-  for (const res of clients) { try { res.write(payload); } catch { /* closed */ } }
+  for (const stream of clients) {
+    try { stream.send(ev); } catch { /* 客户端已断开 */ }
+  }
 }
 
 /* ------------------------------------------------------- Ollama 运行状态 */
@@ -488,6 +498,8 @@ function runHealth(quick) {
   const args = [script, '--json'];
   if (quick) args.push('--quick');
 
+  // 逐题记录：用来画「各分类通过率」
+  const byCategory = new Map();
   const child = spawn(process.execPath, args, {
     cwd: ROOT,
     env: { ...process.env, LOCAL_AI_MODEL: cfg.model || '', LOCAL_AI_BASE_URL: `${OLLAMA_BASE}/v1` },
@@ -504,9 +516,24 @@ function runHealth(quick) {
       return;
     }
     if (ev.type === 'log') broadcast({ type: 'health-log', text: ev.text });
-    else if (ev.type === 'item') broadcast({ type: 'health-item', id: ev.id, ok: ev.ok, cat: ev.cat });
-    else if (ev.type === 'done') broadcast({ type: 'health-done', ok: ev.ok, summary: ev.summary });
-    else if (ev.type === 'error') broadcast({ type: 'health-error', text: ev.text });
+    else if (ev.type === 'item') {
+      const cat = ev.cat || '其它';
+      const row = byCategory.get(cat) || { cat, total: 0, passed: 0 };
+      row.total += 1;
+      if (ev.ok) row.passed += 1;
+      byCategory.set(cat, row);
+      broadcast({ type: 'health-item', id: ev.id, ok: ev.ok, cat: ev.cat });
+    } else if (ev.type === 'done') {
+      lastHealth = {
+        ...ev.summary,
+        quick: !!quick,
+        at: Date.now(),
+        categories: [...byCategory.values()].map((r) => ({
+          cat: r.cat, total: r.total, passed: r.passed, rate: r.total ? r.passed / r.total : 0,
+        })),
+      };
+      broadcast({ type: 'health-done', ok: ev.ok, summary: lastHealth });
+    } else if (ev.type === 'error') broadcast({ type: 'health-error', text: ev.text });
   };
 
   child.stdout.on('data', (d) => {
@@ -529,6 +556,48 @@ function runHealth(quick) {
     }
     broadcast({ type: 'idle' });
   });
+}
+
+/* ------------------------------------------------------------------ 日志 */
+
+/** 比较两个版本号：a > b 返回 1，a < b 返回 -1，相等返回 0 */
+export function compareVersions(a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+
+/**
+ * 控制台自己的日志文件。
+ *
+ * 用户报问题时最需要的就是这个：把 %TEMP%\localai-console.log 发过来就行。
+ */
+const LOG_FILE = path.join(os.tmpdir(), 'localai-console.log');
+let logStream = null;
+function initLog() {
+  try {
+    logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+    logStream.write(`\n===== 本地 AI 控制台 ${new Date().toLocaleString()} =====\n`);
+  } catch { logStream = null; }
+}
+function logLine(text) {
+  if (!logStream) return;
+  try { logStream.write(`[${new Date().toLocaleTimeString()}] ${text}\n`); } catch { /* ignore */ }
+}
+
+/** 读日志最后 n 行 */
+function tailLog(lines = 200) {
+  try {
+    const text = fs.readFileSync(LOG_FILE, 'utf8');
+    const all = text.split(/\r?\n/);
+    return all.slice(Math.max(0, all.length - lines)).join('\n');
+  } catch { return '（还没有日志）'; }
 }
 
 /* ------------------------------------------------------------------ 路由 */
@@ -619,6 +688,8 @@ const server = createSafeServer(async (req, res) => {
       modelDirFreeGB: cfg.modelDir ? freeSpaceGB(cfg.modelDir) : null,
       busy,
       queue: pullQueue.snapshot(),
+      bench: lastBench,
+      health: lastHealth,
       logPath: path.join(os.tmpdir(), 'localai-console.log'),
     });
   }
@@ -659,15 +730,11 @@ const server = createSafeServer(async (req, res) => {
   }
 
   if (p === '/api/events') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.write(': connected\n\n');
-    for (const e of eventLog) res.write(`data: ${JSON.stringify(e)}\n\n`);
-    clients.add(res);
-    req.on('close', () => clients.delete(res));
+    let stream = null;
+    stream = openEventStream(res, { onDead: () => { if (stream) clients.delete(stream); } });
+    for (const e of eventLog) stream.send(e);
+    clients.add(stream);
+    req.on('close', () => clients.delete(stream));
     return;
   }
 
@@ -680,6 +747,114 @@ const server = createSafeServer(async (req, res) => {
     if (!messages.length) return json(res, 400, { error: '至少要有一条消息' });
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
     await streamChat(res, { model, messages, options: body.options || {} });
+    return;
+  }
+
+  /* ---------------------------------------------------------------- 日志 */
+  if (p === '/api/logs' && req.method === 'GET') {
+    const n = Math.max(10, Math.min(5000, Number(url.searchParams.get('lines')) || 200));
+    return json(res, 200, { path: LOG_FILE, text: tailLog(n) });
+  }
+
+  if (p === '/api/logs/download' && req.method === 'GET') {
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="localai-console.log"',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(tailLog(5000));
+  }
+
+  /* ------------------------------------------------------------ 版本检查 */
+  if (p === '/api/version-check' && req.method === 'GET') {
+    // 离线也能用：拿不到就只报本地版本
+    let latest = null;
+    let note = '';
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      const r = await fetch('https://api.github.com/repos/regdiliKUN/local-ai-kit/releases/latest', {
+        headers: { 'User-Agent': 'local-ai-kit' },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      if (r.ok) {
+        const j = await r.json();
+        latest = String(j.tag_name || j.name || '').replace(/^v/, '') || null;
+      } else note = `GitHub 返回 ${r.status}`;
+    } catch (e) { note = '连不上 GitHub（离线？）'; }
+    // 注意：GitHub 上最新的 Release 可能比本地还旧（本地是开发版），
+    // 所以要真的比大小，不能只比「不一样」。
+    const newer = latest && compareVersions(latest, KIT_VERSION) > 0;
+    return json(res, 200, { current: KIT_VERSION, latest, note, update: !!newer });
+  }
+
+  /* ---------------------------------------------------------- 诊断与修复 */
+  if (p === '/api/diagnose' && req.method === 'GET') {
+    return json(res, 200, await diagnose({ root: ROOT, cfg, kitDir: ROOT }));
+  }
+  if (p === '/api/repair' && req.method === 'POST') {
+    const body = await readBody(req);
+    const action = String(body.action || '').trim();
+    if (!action) return json(res, 400, { error: '缺少修复动作' });
+    try {
+      const out = await repair(action, { root: ROOT, cfg, kitDir: ROOT });
+      return json(res, 200, { ok: true, ...out, report: await diagnose({ root: ROOT, cfg, kitDir: ROOT }) });
+    } catch (e) {
+      return json(res, 400, { error: String(e.message || e) });
+    }
+  }
+
+  /* ------------------------------------------------------ 配置导出/导入 */
+  if (p === '/api/config/export' && req.method === 'GET') {
+    const bundle = exportBundle(ROOT);
+    const name = `local-ai-config-${new Date().toISOString().slice(0, 10)}.json`;
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${name}"`,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(JSON.stringify(bundle, null, 2));
+  }
+
+  if (p === '/api/config/import' && req.method === 'POST') {
+    const body = await readBody(req, 1024 * 1024);
+    try {
+      const out = importBundle(ROOT, body);
+      for (const key of Object.keys(cfg)) delete cfg[key];
+      Object.assign(cfg, out.config);
+      return json(res, 200, { ok: true, ...out });
+    } catch (e) {
+      return json(res, 400, { error: String(e.message || e) });
+    }
+  }
+
+  /* ------------------------------------------------------------ 性能基准 */
+  if (p === '/api/bench' && req.method === 'POST') {
+    const body = await readBody(req);
+    const model = String(body.model || cfg.model || '').trim();
+    if (!isValidModelName(model)) return json(res, 400, { error: '模型名不合法' });
+    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
+    busy = 'bench';
+    json(res, 202, { started: true });
+    const gpu = (await collectMetrics({ modelDir: cfg.modelDir || '', sampleMs: 0 })).gpu[0];
+    runBenchmark({
+      model,
+      runs: Math.max(1, Math.min(5, Number(body.runs) || 3)),
+      promptTokens: Math.max(200, Math.min(8000, Number(body.promptTokens) || 2000)),
+      vramGB: gpu && gpu.memoryTotalMB ? Math.round(gpu.memoryTotalMB / 1024) : 0,
+      numCtx: Number(body.numCtx) || 0,
+      onProgress: (ev) => broadcast({ type: 'bench', ...ev }),
+    })
+      .then((out) => {
+        // 结果同时存一份：万一 SSE 断了，页面轮询 /api/state 也能拿到
+        lastBench = { ...out, at: Date.now() };
+        broadcast({ type: 'bench-done', result: out });
+      })
+      .catch((e) => broadcast({ type: 'error', text: String(e.message || e) }))
+      .finally(() => { busy = null; broadcast({ type: 'idle' }); });
     return;
   }
 
@@ -824,6 +999,7 @@ function listen(port) {
 }
 
 (async () => {
+  initLog();
   let port = 7790;
   for (; port < 7800; port++) {
     try { await listen(port); break; } catch { /* 换一个 */ }

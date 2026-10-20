@@ -946,6 +946,60 @@ html[data-theme="dark"] {
 .chat-stats .k { color: var(--text-dim); }
 .chat-stats .v { font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* ---- 无障碍：焦点可见 + 减少动效 ---- */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  .spinner { animation: none; border-top-color: var(--accent); }
+}
+
+/* ---- 修复中心 ---- */
+
+.fix-summary {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 14px 18px; border-radius: var(--radius); margin-bottom: 22px;
+  background: var(--surface); border: 1px solid var(--border);
+}
+.fix-summary b { font-size: 14.5px; }
+.fix-summary span { font-size: 12.5px; color: var(--text-dim); }
+.fix-summary.ok { border-left: 3px solid var(--ok); }
+.fix-summary.warn { border-left: 3px solid var(--warn); }
+.fix-summary.error { border-left: 3px solid var(--err); }
+
+.fixrow {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 16px;
+}
+.fixrow .fx { flex: 1; min-width: 0; }
+.fixrow .fx-t { font-size: 13.5px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fixrow .fx-d { font-size: 12.5px; color: var(--text-dim); margin-top: 3px; word-break: break-word; }
+.fixrow .fa { flex: none; }
+
+.fixbadge {
+  font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 20px;
+  background: var(--accent-soft); color: var(--accent);
+}
+.fixbadge.ok { background: #eefaf1; color: var(--ok); }
+.fixbadge.warn { background: #fdf6e7; color: var(--warn); }
+.fixbadge.error { background: #fdeeee; color: var(--err); }
+@media (prefers-color-scheme: dark) {
+  .fixbadge.ok { background: #12261a; }
+  .fixbadge.warn { background: #2c2413; }
+  .fixbadge.error { background: #2c1717; }
+}
+
+/* ---- 体检结果可视化 ---- */
+
+.health-gauge { display: flex; justify-content: center; padding-bottom: 10px; }
+.health-bars { display: flex; justify-content: center; }
+
 /* ==================================================================
    响应式：窗口再窄也不能把界面挤坏
    （实测过 114px 宽的窗口 —— 侧栏会把内容顶出屏幕）

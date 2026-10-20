@@ -22,8 +22,10 @@
       <li data-tab="dashboard" class="active"><span class="dot"></span><span class="label">系统概览</span></li>
       <li data-tab="models"><span class="dot"></span><span class="label">模型管理</span></li>
       <li data-tab="play"><span class="dot"></span><span class="label">试用</span></li>
+      <li data-tab="bench"><span class="dot"></span><span class="label">性能基准</span></li>
       <li data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
       <li data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
+      <li data-tab="fix"><span class="dot"></span><span class="label">修复中心</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
 
@@ -189,6 +191,11 @@
       <h2 class="sec-h">实时检查</h2>
       <div class="summary" id="ctxBudget"></div>
 
+      <h2 class="sec-h">窗口是怎么被分掉的</h2>
+      <div class="panel">
+        <div class="panel-b" id="ctxWaterfall"><div class="chart-empty">改一下上面的数字就能看到</div></div>
+      </div>
+
       <h2 class="sec-h">变更预览</h2>
       <div class="summary" id="ctxDiff"></div>
 
@@ -248,6 +255,63 @@
       <div class="chat-stats" id="chatStats"></div>
     </section>
 
+    <!-- ============ 性能基准 ============ -->
+    <section class="view" id="view-bench" hidden>
+      <h1>性能基准</h1>
+      <div class="guide">
+        <span class="guide-n">量一量</span>
+        <span>「感觉有点慢」到底是<b>生成慢</b>还是<b>读上下文慢</b>？这两种慢的解法完全不一样，这里分开测。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">测哪个模型</div>
+            <div class="s">第一次测会把模型读进显存，可能要等十几秒，属正常。</div>
+          </div>
+          <select id="benchModel" class="ctx-select"></select>
+        </div>
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">重复次数</div>
+            <div class="s">取中位数。次数越多越准，也越慢。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="number" id="benchRuns" class="ctx-input" min="1" max="5" step="1" value="3">
+            <span class="ctx-unit">次</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnBench">开始测速</button>
+        <span class="row-hint" id="benchHint">大约 30 秒。</span>
+      </div>
+
+      <div class="progress-wrap" id="benchWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="benchTitle">测速中…</span>
+          <span class="progress-pct" id="benchPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="benchBar"></div></div>
+      </div>
+
+      <h2 class="sec-h">结果</h2>
+      <div class="summary" id="benchResult">
+        <div class="row"><span class="k">—</span><span class="v">还没有测过</span></div>
+      </div>
+
+      <h2 class="sec-h">和同档显卡比</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchChart"><div class="chart-empty">跑一次就能看到对比</div></div>
+      </div>
+
+      <h2 class="sec-h">这说明什么</h2>
+      <div class="summary" id="benchAdvice">
+        <div class="row"><span class="k">—</span><span class="v">还没有测过</span></div>
+      </div>
+    </section>
+
     <!-- ============ 模型体检 ============ -->
     <section class="view" id="view-health" hidden>
       <h1>模型体检</h1>
@@ -276,10 +340,41 @@
         <div class="row"><span class="k">—</span><span class="v">还没有跑过</span></div>
       </div>
 
+      <h2 class="sec-h">各分类通过率</h2>
+      <div class="panel">
+        <div class="panel-b" id="healthChart"><div class="chart-empty">跑一次就能看到每类题的通过情况</div></div>
+      </div>
+
+      <h2 class="sec-h">怎么读这个结果</h2>
+      <div class="summary" id="healthGuide">
+        <div class="row"><span class="k">质量基线</span><span class="v">21 道机器可判分的题，低于 90% 说明能力真的掉了 —— 该换更高的量化档</span></div>
+        <div class="row"><span class="k">长上下文漂移</span><span class="v">上下文越长答案越容易变。把窗口控制在漂移起点以内就行</span></div>
+        <div class="row"><span class="k">采样稳定性</span><span class="v">同一个问题连问几次，答案是否一致。不一致说明不是「笨」，是采样参数不稳</span></div>
+      </div>
+
       <details class="logbox" id="healthLogBox" hidden>
         <summary>查看详细日志</summary>
         <pre id="healthLog"></pre>
       </details>
+    </section>
+
+    <!-- ============ 修复中心 ============ -->
+    <section class="view" id="view-fix" hidden>
+      <h1>修复中心</h1>
+      <div class="guide">
+        <span class="guide-n">用不上的时候</span>
+        <span>先点「重新检查」，看看是哪一环断了；能自动修的直接一键修，<b>不用重装</b>。</span>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnDiagnose">重新检查</button>
+        <span class="row-hint" id="fixStamp">—</span>
+      </div>
+
+      <div class="fix-summary" id="fixSummary"><div class="loading"><span class="spinner"></span> 检查中…</div></div>
+
+      <h2 class="sec-h">逐项结果</h2>
+      <div class="stack" id="fixList"><div class="loading"><span class="spinner"></span> 检查中…</div></div>
     </section>
 
     <!-- ============ 服务设置 ============ -->
@@ -334,6 +429,19 @@
         <button class="btn ghost small" id="btnReload">刷新状态</button>
       </div>
 
+      <h2 class="sec-h">日志与版本</h2>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnShowLog">查看日志</button>
+        <button class="btn ghost small" id="btnDownloadLog">下载日志</button>
+        <button class="btn ghost small" id="btnCheckVersion">检查更新</button>
+        <button class="btn ghost small" id="btnTheme">切换深色 / 浅色</button>
+      </div>
+      <p class="row-hint" id="logPathHint">日志位置：%TEMP%\localai-console.log</p>
+      <details class="logbox" id="consoleLogBox" hidden>
+        <summary>日志内容（最后 200 行）</summary>
+        <pre id="consoleLog"></pre>
+      </details>
+
       <h2 class="sec-h">卸载</h2>
       <div class="row-actions">
         <button class="btn ghost small danger" id="btnUninstall">卸载本地 AI</button>
@@ -347,6 +455,17 @@
       <div class="summary" id="cfgSummary"></div>
       <p class="row-hint">
         要改模型、上下文长度或压缩参数，去左侧「<b>上下文与模型</b>」页直接改，不用重跑安装向导。
+      </p>
+
+      <h2 class="sec-h">备份与搬家</h2>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnExportCfg">导出配置</button>
+        <button class="btn ghost small" id="btnImportCfg">导入配置</button>
+        <input type="file" id="fileImportCfg" accept="application/json,.json" hidden>
+      </div>
+      <p class="row-hint" id="importHint">
+        导出会把「模型、模型目录、上下文、压缩参数」和 dsh 的两个 profile 一起存成一个 JSON。
+        换电脑时把那个文件带过去，导入就能还原。
       </p>
     </section>
 

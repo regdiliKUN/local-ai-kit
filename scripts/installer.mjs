@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { createSafeServer, readBody, createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath } from './local-http.mjs';
+import { createSafeServer, readBody, createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath, openEventStream } from './local-http.mjs';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -149,8 +149,8 @@ function broadcast(event) {
   else logLine(`[${event.type}] ${JSON.stringify(event).slice(0, 300)}`);
 
   const payload = `data: ${JSON.stringify(event)}\n\n`;
-  for (const res of clients) {
-    try { res.write(payload); } catch { /* 客户端已断开 */ }
+  for (const stream of clients) {
+    try { stream.send(event); } catch { /* 客户端已断开 */ }
   }
 }
 
@@ -330,15 +330,11 @@ const server = createSafeServer(async (req, res) => {
   }
 
   if (p === '/api/events') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    });
-    res.write(': connected\n\n');
-    for (const e of eventLog) res.write(`data: ${JSON.stringify(e)}\n\n`);
-    clients.add(res);
-    req.on('close', () => clients.delete(res));
+    let stream = null;
+    stream = openEventStream(res, { onDead: () => { if (stream) clients.delete(stream); } });
+    for (const e of eventLog) stream.send(e);
+    clients.add(stream);
+    req.on('close', () => clients.delete(stream));
     return;
   }
 

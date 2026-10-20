@@ -10,6 +10,7 @@ async function post(url, body) {
   });
   let data = {};
   try { data = await r.json(); } catch { /* 无内容 */ }
+  if (r.status === 429) throw new Error('操作太频繁了，等几秒再试');
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
 }
@@ -70,6 +71,65 @@ for (const li of document.querySelectorAll('#tabs li')) {
   if (hit) hit.click();
 }
 
+/* ------------------------------------------------------------------ 主题 */
+
+/**
+ * 主题：深色 / 浅色 / 跟随系统。
+ *
+ * 之前只有「跟随系统」，用户在深色系统里被迫看浅色界面（或反过来），
+ * 而且每次打开都恢复原样。现在可以手动切，并且记在 localStorage 里。
+ */
+const THEME_KEY = 'localai-theme';
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'auto') {
+    root.removeAttribute('data-theme');
+    try { localStorage.removeItem(THEME_KEY); } catch { /* ignore */ }
+  } else {
+    root.setAttribute('data-theme', theme);
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* ignore */ }
+  }
+}
+
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch { return 'auto'; }
+}
+
+(function initTheme() {
+  const saved = currentTheme();
+  if (saved !== 'auto') document.documentElement.setAttribute('data-theme', saved);
+})();
+
+/* ------------------------------------------------------- 键盘与无障碍 */
+
+/**
+ * 快捷键。
+ *   1..8  切换左侧标签页
+ *   r     刷新状态
+ *   /     聚焦模型搜索框
+ *   ?     显示快捷键说明
+ */
+const KEYMAP = {
+  '1': 'dashboard', '2': 'models', '3': 'play', '4': 'bench',
+  '5': 'context', '6': 'health', '7': 'fix', '8': 'settings',
+};
+
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+  if (KEYMAP[e.key]) {
+    const li = document.querySelector(`#tabs li[data-tab="${KEYMAP[e.key]}"]`);
+    if (li) { li.click(); e.preventDefault(); }
+    return;
+  }
+  if (e.key === 'r' || e.key === 'R') { loadState().catch(() => {}); e.preventDefault(); }
+  if (e.key === '/') { const s = $('modelSearch'); if (s) { s.focus(); e.preventDefault(); } }
+  if (e.key === '?') { toast('快捷键：1-8 切换页面 · R 刷新 · / 搜索'); }
+});
+
 /* ------------------------------------------------------------------ 状态 */
 
 async function loadState() {
@@ -79,11 +139,30 @@ async function loadState() {
   renderSettings();
   renderConfig();
   await loadContext();
-  loadSpace().catch(() => {});
-  loadCaps();
   renderQueue(state.queue);
   playModels();
+  benchModels();
+  // 测速结果也放在 /api/state 里 —— SSE 断了也能拿到结果，界面不会卡在「测速中」
+  if (state.bench && state.bench.verdict && (!benchShownAt || state.bench.at !== benchShownAt)) {
+    benchShownAt = state.bench.at;
+    renderBench(state.bench);
+    $('benchWrap').hidden = true;
+  }
+  if (state.health && state.health.verdicts && (!healthShownAt || state.health.at !== healthShownAt)) {
+    healthShownAt = state.health.at;
+    renderHealthResult(state.health, (state.health.verdicts || []).every((v) => v.ok));
+  }
+  // 空间统计和能力标签比较重，不要每 5 秒都重算一遍
+  if (Date.now() - lastHeavyAt > 30000) {
+    lastHeavyAt = Date.now();
+    loadSpace().catch(() => {});
+    loadCaps();
+  }
 }
+
+let lastHeavyAt = 0;
+let benchShownAt = 0;
+let healthShownAt = 0;
 
 /* ------------------------------------------------------------- 系统概览 */
 
@@ -180,6 +259,16 @@ function startDashTimer() {
   dashTimer = null;
   if (dashOn) dashTimer = setInterval(() => loadDashboard().catch(() => {}), 2000);
 }
+
+/* 页面在后台时不轮询 —— 省 CPU，也省得把限流器打满 */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (dashTimer) { clearInterval(dashTimer); dashTimer = null; }
+  } else {
+    startDashTimer();
+    loadState().catch(() => {});
+  }
+});
 
 if ($('dashAuto')) {
   $('dashAuto').addEventListener('change', (e) => {
@@ -438,7 +527,28 @@ function renderBudget() {
     <div class="row"><span class="k">实际生效</span>
       <span class="v">窗口 ${ctx} · 输出 ${out} · 余量 ${head}</span></div>`;
 
+  renderWaterfall(ctx, out, head, budget, ok);
   renderDiff(ctx, out, head, ratio);
+}
+
+/** 窗口分配瀑布图：输出 + 余量 + 剩余，三块拼起来正好是整个窗口 */
+function renderWaterfall(ctx, out, head, budget, ok) {
+  const box = $('ctxWaterfall');
+  if (!box) return;
+  const parts = [
+    { label: '输出预算', value: Math.max(0, out), text: `${out}`, tone: 'good' },
+    { label: '压缩余量', value: Math.max(0, head), text: `${head}`, tone: 'warn' },
+    {
+      label: budget >= 0 ? '可用余量' : '超支',
+      value: Math.max(0, budget),
+      text: `${budget}`,
+      tone: budget >= 0 ? '' : 'bad',
+    },
+  ];
+  box.innerHTML = Chart.waterfall(parts, { width: 380, labelW: 84, valueW: 60 })
+    + `<p class="row-hint" style="margin-top:10px">${ok
+      ? '绿色那段就是留给对话的余量 —— 会话涨满它的时候就会触发压缩。'
+      : '余量为负：压缩不会触发，等于被静默禁用。'}</p>`;
 }
 
 function renderDiff(ctx, out, head, ratio) {
@@ -637,6 +747,7 @@ function playModels() {
 }
 
 async function playSend() {
+  playModels();
   const input = $('playInput');
   const text = input.value.trim();
   if (!text) return;
@@ -736,6 +847,123 @@ if ($('playInput')) {
   });
 }
 
+/* ---------------------------------------------------------------- 基准 */
+
+function benchModels() {
+  const sel = $('benchModel');
+  if (!sel) return;
+  const names = (state.models || []).map((m) => m.name);
+  if (!names.length) { sel.innerHTML = '<option value="">（没有已安装的模型）</option>'; return; }
+  const cur = sel.value || (state && state.model) || names[0];
+  sel.innerHTML = names.map((n) => `<option value="${esc(n)}"${n === cur ? ' selected' : ''}>${esc(n)}</option>`).join('');
+}
+
+const BENCH_PHASE = { warmup: '预热（把模型读进显存）', generation: '测生成速度', prompt: '测读长提示词的速度', done: '完成', error: '出错' };
+
+function renderBench(r) {
+  const v = r.verdict || {};
+  const levelCls = { good: 'ctx-good', ok: '', slow: 'ctx-bad', verySlow: 'ctx-bad', unknown: '' };
+  $('benchResult').innerHTML = [
+    ['模型', r.model],
+    ['生成速度', v.genTokensPerSec ? `${v.genTokensPerSec} tokens/秒` : '—'],
+    ['读提示词速度', v.promptTokensPerSec ? `${v.promptTokensPerSec} tokens/秒` : '—'],
+    ['单次耗时', v.avgLoadMs ? `${(v.avgLoadMs / 1000).toFixed(1)} 秒` : '—'],
+    ['同档显卡参考', v.reference ? `${v.reference.gen} tokens/秒` : '—'],
+  ].map(([k, val]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v ${levelCls[v.genLevel] || ''}">${esc(val)}</span></div>`).join('');
+
+  const items = [
+    { label: '生成速度', value: v.genTokensPerSec || 0, text: `${v.genTokensPerSec || 0} t/s`, color: 'var(--chart-1)' },
+    { label: '同档参考', value: v.reference ? v.reference.gen : 0, text: `${v.reference ? v.reference.gen : 0} t/s`, color: 'var(--chart-3)' },
+    { label: '读提示词', value: v.promptTokensPerSec || 0, text: `${v.promptTokensPerSec || 0} t/s`, color: 'var(--chart-2)' },
+    { label: '读提示词参考', value: v.reference ? v.reference.prompt : 0, text: `${v.reference ? v.reference.prompt : 0} t/s`, color: 'var(--chart-3)' },
+  ];
+  $('benchChart').innerHTML = Chart.bars(items, { width: 420, labelW: 108, valueW: 74 });
+
+  $('benchAdvice').innerHTML = (v.advice || []).map((t) =>
+    `<div class="row"><span class="k">·</span><span class="v">${esc(t)}</span></div>`).join('')
+    || '<div class="row"><span class="k">—</span><span class="v">没有建议</span></div>';
+}
+
+async function startBench() {
+  // 先把下拉框刷新一遍：用户可能页面还没加载完就来点了
+  benchModels();
+  const model = $('benchModel').value;
+  if (!model) { toast('先装一个模型再来测速'); return; }
+  $('benchWrap').hidden = false;
+  $('benchBar').style.width = '0%';
+  $('benchPct').textContent = '0%';
+  $('benchTitle').textContent = '准备中…';
+  $('benchHint').textContent = '正在测速…';
+  try {
+    await post('/api/bench', { model, runs: Number($('benchRuns').value) || 3 });
+  } catch (e) {
+    toast(e.message);
+    $('benchWrap').hidden = true;
+  }
+}
+
+if ($('btnBench')) $('btnBench').addEventListener('click', startBench);
+
+/* ---------------------------------------------------------------- 修复中心 */
+
+const FIX_LEVEL = { ok: { text: '正常', cls: 'ok' }, warn: { text: '注意', cls: 'warn' }, error: { text: '有问题', cls: 'error' } };
+
+function renderFix(report) {
+  const list = $('fixList');
+  const summary = $('fixSummary');
+  if (!report) {
+    list.innerHTML = '<div class="empty">没有拿到检查结果</div>';
+    return;
+  }
+  const problems = (report.checks || []).filter((c) => c.level !== 'ok');
+  const level = FIX_LEVEL[report.level] || FIX_LEVEL.ok;
+  summary.className = `fix-summary ${level.cls}`;
+  summary.innerHTML = problems.length
+    ? `<b>发现 ${problems.length} 个问题</b><span>${esc(problems.map((c) => c.label).join('、'))}</span>`
+    : '<b>一切正常</b><span>这套配置现在是可以用的。</span>';
+
+  list.innerHTML = (report.checks || []).map((c) => {
+    const meta = FIX_LEVEL[c.level] || FIX_LEVEL.ok;
+    return `<div class="fixrow ${meta.cls}">
+      <div class="fx">
+        <div class="fx-t">${esc(c.label)}<span class="fixbadge ${meta.cls}">${meta.text}</span></div>
+        <div class="fx-d">${esc(c.detail)}</div>
+      </div>
+      <div class="fa">${c.fixable ? `<button class="btn ghost small" data-fix="${esc(c.fixable)}">修复</button>` : ''}</div>
+    </div>`;
+  }).join('');
+
+  for (const b of document.querySelectorAll('[data-fix]')) {
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      b.textContent = '修复中…';
+      try {
+        const out = await post('/api/repair', { action: b.dataset.fix });
+        toast(out.message || '已修复');
+        renderFix(out.report);
+        loadState().catch(() => {});
+      } catch (e) {
+        toast(e.message);
+        b.disabled = false;
+        b.textContent = '修复';
+      }
+    });
+  }
+}
+
+async function runDiagnose() {
+  $('fixStamp').textContent = '检查中…';
+  try {
+    const report = await (await fetch('/api/diagnose')).json();
+    renderFix(report);
+    $('fixStamp').textContent = `检查于 ${new Date(report.at).toLocaleTimeString()}`;
+  } catch (e) {
+    $('fixStamp').textContent = `检查失败：${e.message}`;
+  }
+}
+
+if ($('btnDiagnose')) $('btnDiagnose').addEventListener('click', runDiagnose);
+
 /* ------------------------------------------------------------------ 体检 */
 
 let healthDone = 0;
@@ -774,6 +1002,26 @@ function renderHealthResult(s, ok) {
   }
   $('healthResult').innerHTML = rows.join('')
     || '<div class="row"><span class="k">—</span><span class="v">没有拿到结果</span></div>';
+
+  // 各分类通过率：条形图 + 总分仪表盘
+  const cats = (s && s.categories) || [];
+  const box = $('healthChart');
+  if (box) {
+    if (!cats.length) {
+      box.innerHTML = '<div class="chart-empty">没有拿到分类明细</div>';
+    } else {
+      const overall = Math.round(cats.reduce((n, c) => n + c.rate, 0) / cats.length * 100);
+      const items = cats.map((c) => ({
+        label: c.cat,
+        value: Math.round(c.rate * 100),
+        text: `${c.passed}/${c.total}`,
+        color: c.rate >= 0.9 ? 'var(--ok)' : c.rate >= 0.6 ? 'var(--warn)' : 'var(--err)',
+      }));
+      box.innerHTML = `
+        <div class="health-gauge">${Chart.gauge(overall, { label: '总体通过率' })}</div>
+        <div class="health-bars">${Chart.bars(items, { width: 340, labelW: 78, valueW: 52 })}</div>`;
+    }
+  }
   toast(ok ? '体检全部达标' : '体检有不达标项，看下面的判据');
 }
 
@@ -803,8 +1051,16 @@ function appendLog(t) {
   pre.scrollTop = pre.scrollHeight;
 }
 
+let sseRetry = 0;
+let sseTimer = null;
+
 function connectSSE() {
+  // 页面跳走时必须显式关掉 SSE：浏览器对同一个源最多只开 6 条 HTTP/1.1 连接，
+  // 留几条僵尸连接下来，后面的 SSE 就会被浏览器排队，页面从此收不到任何事件。
+  if (window.__sse) { try { window.__sse.close(); } catch { /* ignore */ } }
   const es = new EventSource('/api/events');
+  window.__sse = es;
+  es.onopen = () => { sseRetry = 0; };
   es.onmessage = (m) => {
     let ev;
     try { ev = JSON.parse(m.data); } catch { return; }
@@ -832,6 +1088,16 @@ function connectSSE() {
       toast(ev.action === 'delete' ? `${ev.model} 已删除` : `${ev.model} 下载完成`);
       setBusy(false);
       setTimeout(loadState, 400);
+    } else if (ev.type === 'bench') {
+      $('benchWrap').hidden = false;
+      const pct = Math.max(0, Math.min(100, ev.percent || 0));
+      $('benchBar').style.width = `${pct}%`;
+      $('benchPct').textContent = `${pct}%`;
+      $('benchTitle').textContent = BENCH_PHASE[ev.phase] || '测速中…';
+    } else if (ev.type === 'bench-done') {
+      $('benchWrap').hidden = true;
+      $('benchHint').textContent = '测完了。';
+      renderBench(ev.result || {});
     } else if (ev.type === 'queue') {
       renderQueue(ev.state);
     } else if (ev.type === 'health-item') {
@@ -855,8 +1121,28 @@ function connectSSE() {
       setBusy(false);
     }
   };
-  es.onerror = () => { /* 自动重连 */ };
+  es.onerror = () => {
+    // EventSource 自己会重连，但那只在连接「正常断开」时可靠。
+    // 有时连接会被半死不活地卡住（readyState 一直停在 CONNECTING），
+    // 这时自己重建一条更可靠 —— 退避时间逐次拉长，避免把服务打满。
+    if (es.readyState === EventSource.CONNECTING && sseRetry > 2) {
+      sseRetry += 1;
+      clearTimeout(sseTimer);
+      sseTimer = setTimeout(() => connectSSE(), Math.min(15000, 1000 * sseRetry));
+      try { es.close(); } catch { /* ignore */ }
+      return;
+    }
+    if (es.readyState === EventSource.CLOSED) {
+      sseRetry += 1;
+      clearTimeout(sseTimer);
+      sseTimer = setTimeout(() => connectSSE(), Math.min(15000, 1000 * sseRetry));
+    }
+  };
 }
+
+// 页面离开前主动关掉连接，别给浏览器留下僵尸连接
+window.addEventListener('pagehide', () => { if (window.__sse) { try { window.__sse.close(); } catch { /* ignore */ } } });
+window.addEventListener('beforeunload', () => { if (window.__sse) { try { window.__sse.close(); } catch { /* ignore */ } } });
 
 function setBusy(on) {
   $('btnPull').disabled = on;
@@ -950,6 +1236,89 @@ function setupButtons() {
       if (!r.ok) throw new Error(r.error || '打开失败');
       toast('已在新窗口打开卸载程序，按它的提示操作即可');
     } catch (e) { toast(e.message); }
+  });
+
+  /* ---- 日志 / 版本 / 主题 ---- */
+  if ($('btnShowLog')) {
+    $('btnShowLog').addEventListener('click', async () => {
+      try {
+        const r = await (await fetch('/api/logs?lines=200')).json();
+        $('consoleLogBox').hidden = false;
+        $('consoleLog').textContent = r.text || '（日志是空的）';
+        $('logPathHint').textContent = `日志位置：${r.path}`;
+      } catch (e) { toast(e.message); }
+    });
+  }
+
+  if ($('btnDownloadLog')) {
+    $('btnDownloadLog').addEventListener('click', () => {
+      window.open('/api/logs/download', '_blank');
+    });
+  }
+
+  if ($('btnCheckVersion')) {
+    $('btnCheckVersion').addEventListener('click', async () => {
+      const btn = $('btnCheckVersion');
+      btn.disabled = true;
+      btn.textContent = '检查中…';
+      try {
+        const v = await (await fetch('/api/version-check')).json();
+        if (v.update) toast(`有新版本：${v.latest}（当前 ${v.current}）`);
+        else if (v.latest) toast(`已经是最新版本（${v.current}）`);
+        else toast(`检查失败：${v.note || '未知原因'}`);
+      } catch (e) { toast(e.message); }
+      btn.disabled = false;
+      btn.textContent = '检查更新';
+    });
+  }
+
+  if ($('btnTheme')) {
+    $('btnTheme').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme');
+      const next = cur === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      toast(next === 'dark' ? '已切换到深色' : '已切换到浅色');
+    });
+  }
+
+  /* ---- 配置导出 / 导入 ---- */
+  $('btnExportCfg').addEventListener('click', async () => {
+    try {
+      const r = await fetch('/api/config/export');
+      if (!r.ok) throw new Error(`导出失败（HTTP ${r.status}）`);
+      const text = await r.text();
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `local-ai-config-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast('已导出到「下载」目录');
+    } catch (e) { toast(e.message); }
+  });
+
+  $('btnImportCfg').addEventListener('click', () => $('fileImportCfg').click());
+
+  $('fileImportCfg').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const bundle = JSON.parse(await file.text());
+      const out = await post('/api/config/import', bundle);
+      const warn = (out.warnings || []).map((w) => `· ${w}`).join('<br>');
+      $('importHint').innerHTML = `已导入：${esc(out.config.model || '（未设置模型）')} · 窗口 ${out.config.contextWindow || 8192}`
+        + (warn ? `<br><span class="ctx-bad">${warn}</span>` : '')
+        + '<br>重启工作台后生效。';
+      toast('配置已导入');
+      await loadState();
+    } catch (err) {
+      $('importHint').innerHTML = `<span class="ctx-bad">导入失败：${esc(err.message)}</span>`;
+      toast('导入失败：' + err.message);
+    }
   });
 }
 

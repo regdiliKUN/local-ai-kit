@@ -132,11 +132,73 @@ export function createSafeServer(handler) {
       res.end(JSON.stringify({ error: error.statusCode ? error.message : '操作失败，请检查配置和服务日志' }));
     });
   });
-  server.requestTimeout = 15000;
-  // SSE 长连接不能被 requestTimeout 掐断
-  server.setTimeout(0);
+  /*
+   * 超时设置有个坑：
+   * requestTimeout 是「整个请求最多多久」。SSE 是长连接，请求永远不会「结束」，
+   * 所以只要设了它（比如默认 15 秒 / 30 秒），SSE 就会被定期掐断，
+   * 浏览器马上重连 —— 于是变成一个「疯狂重连」的死循环，还能把限流器打满。
+   *
+   * 所以：整体不限时（0），但保留 headersTimeout 防止「慢速发头」的攻击。
+   * 服务只监听 127.0.0.1 且 POST 需要随机令牌，风险可控。
+   */
+  server.requestTimeout = 0;
+  server.timeout = 0;
+  server.headersTimeout = 60000;
   server.keepAliveTimeout = 72000;
   return server;
+}
+
+/**
+ * 打开一条 SSE 通道。
+ *
+ * 顺带做三件小事：
+ *   - 定期发心跳注释（`: ping`），让中间设备别把「看起来闲着」的连接掐了
+ *   - 客户端断开时把心跳定时器清掉，不留后台泄漏
+ *   - 写失败（客户端已经走了但服务端还没察觉）时通知调用方，把它从连接表里摘掉
+ *
+ * 最后这条很重要：浏览器对同一个源最多只开 6 条 HTTP/1.1 连接，
+ * 一旦积累了几条「僵尸」SSE（页面跳走了、连接却还挂着），
+ * 新的 SSE 就会被浏览器排队，页面上的进度条从此再也不动。
+ */
+export function openEventStream(res, { heartbeatMs = 25000, onDead } = {}) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write(': connected\n\n');
+
+  let dead = false;
+  const timer = setInterval(() => {
+    if (dead) return;
+    try { res.write(': ping\n\n'); } catch { markDead(); }
+  }, heartbeatMs);
+  if (typeof timer.unref === 'function') timer.unref();
+
+  function markDead() {
+    if (dead) return;
+    dead = true;
+    clearInterval(timer);
+    if (onDead) { try { onDead(); } catch { /* ignore */ } }
+  }
+
+  res.on('close', markDead);
+  res.on('error', markDead);
+
+  return {
+    get dead() { return dead; },
+    send(obj) {
+      if (dead) return false;
+      try {
+        res.write(`data: ${JSON.stringify(obj)}\n\n`);
+        return true;
+      } catch {
+        markDead();
+        return false;
+      }
+    },
+  };
 }
 
 /**
