@@ -1331,15 +1331,10 @@ async function probeOne(model) {
   return { ok: true, firstMs: Math.round(firstAt), totalMs: total, chars };
 }
 
-/** 把一次快测结果存到后端（失败也记一笔，免得面板显示「没测过」误导） */
+/** 把一次快测结果存到后端（失败也记一笔，免得面板显示「没测过」误导）。
+ *  注意：必须走 post() 助手，它会带 X-LocalAI-Token —— 直接 fetch 会被来源守卫拦掉。 */
 async function saveProbe(model, rec) {
-  try {
-    await fetch('/api/probe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, ...rec }),
-    });
-  } catch { /* 记不进不该崩 */ }
+  try { await post('/api/probe', { model, ...rec }); } catch { /* 记不进不该崩 */ }
 }
 
 /**
@@ -1420,21 +1415,52 @@ async function renderProbes() {
     return;
   }
   const probes = data.probes || {};
-  const rows = (data.models || []).map((m) => {
+  const models = data.models || [];
+
+  // 排序：能出字的按首字快慢排前面，失败的次之，没测过的垫底
+  const rank = (m) => {
     const p = probes[m];
+    if (!p) return [3, 0];
+    if (!p.ok) return [2, 0];
+    return [1, p.firstMs];
+  };
+  const sorted = [...models].sort((a, b) => {
+    const ra = rank(a); const rb = rank(b);
+    return ra[0] - rb[0] || ra[1] - rb[1] || a.localeCompare(b);
+  });
+
+  const okList = models.filter((m) => probes[m] && probes[m].ok);
+  const fastest = okList.length
+    ? okList.reduce((best, m) => (probes[m].firstMs < probes[best].firstMs ? m : best), okList[0])
+    : null;
+  const okCount = okList.length;
+  const failCount = models.filter((m) => probes[m] && !probes[m].ok).length;
+  const untested = models.length - okCount - failCount;
+
+  const rows = sorted.map((m) => {
+    const p = probes[m];
+    const isFastest = m === fastest;
     const status = !p ? '<span class="muted">未测</span>'
-      : p.ok ? '<span style="color:var(--ok)">✓ 出字</span>'
+      : p.ok ? `<span style="color:var(--ok)">✓ 出字</span>${isFastest ? ' <span class="probe-badge">⚡ 最快</span>' : ''}`
         : '<span style="color:var(--err)">✗ 未通过</span>';
     const first = p && p.ok ? `${p.firstMs} ms` : '—';
     const total = p && p.ok ? `${p.totalMs} ms` : '—';
     const chars = p && p.ok ? `${p.chars} 字` : '—';
     const when = p ? new Date(p.at).toLocaleString('zh-CN', { hour12: false }) : '—';
-    return `<tr><td>${esc(m)}</td><td>${status}</td><td>${first}</td>`
+    return `<tr${isFastest ? ' class="probe-best"' : ''}><td>${esc(m)}</td><td>${status}</td><td>${first}</td>`
       + `<td>${total}</td><td>${chars}</td><td class="muted">${when}</td>`
       + `<td><button class="btn ghost small" data-probe="${esc(m)}">测</button></td></tr>`;
   });
+
+  const summary = `<p class="row-hint" style="margin:0 0 8px">共 ${models.length} 个模型：`
+    + `<span style="color:var(--ok)">${okCount} 能出字</span>`
+    + (failCount ? ` · <span style="color:var(--err)">${failCount} 未通过</span>` : '')
+    + (untested ? ` · <span class="muted">${untested} 未测</span>` : '')
+    + (fastest ? ` · 最快：<b>${esc(fastest)}</b>（首字 ${probes[fastest].firstMs} ms）` : '')
+    + '</p>';
+
   box.innerHTML = rows.length
-    ? `<table class="probe-tbl"><thead><tr>`
+    ? summary + `<table class="probe-tbl"><thead><tr>`
       + `<th>模型</th><th>状态</th><th>首字</th><th>总耗时</th><th>字数</th><th>最近一次</th><th></th>`
       + `</tr></thead><tbody>${rows.join('')}</tbody></table>`
     : '<div class="chart-empty">没有可用模型。</div>';
@@ -1443,8 +1469,38 @@ async function renderProbes() {
   });
 }
 
+/** 把对比结果复制成 Markdown 表格，方便贴到群里 / issue 里 */
+async function copyProbes() {
+  let data;
+  try { data = await fetch('/api/probe').then((r) => r.json()); } catch { return toast('读取失败'); }
+  const probes = data.probes || {};
+  const models = data.models || [];
+  const lines = ['| 模型 | 状态 | 首字(ms) | 总耗时(ms) | 字数 |', '|---|---|---|---|---|'];
+  for (const m of models) {
+    const p = probes[m];
+    lines.push(`| ${m} | ${!p ? '未测' : p.ok ? '✓' : '✗'} | ${p && p.ok ? p.firstMs : '—'} | ${p && p.ok ? p.totalMs : '—'} | ${p && p.ok ? p.chars : '—'} |`);
+  }
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'));
+    toast('已复制对比表格');
+  } catch {
+    toast('复制失败，浏览器不允许访问剪贴板');
+  }
+}
+
+/** 清空全部快测记录 */
+async function clearProbes() {
+  try {
+    await post('/api/probe', { clear: true });
+    toast('已清空快测记录');
+    renderProbes();
+  } catch { toast('清空失败'); }
+}
+
 if ($('btnTestCtx')) $('btnTestCtx').addEventListener('click', testCtxModel);
 if ($('btnProbeAll')) $('btnProbeAll').addEventListener('click', testAllProbes);
+if ($('btnProbeCopy')) $('btnProbeCopy').addEventListener('click', copyProbes);
+if ($('btnProbeClear')) $('btnProbeClear').addEventListener('click', clearProbes);
 
 if ($('btnApplyCtx')) {
   $('btnApplyCtx').addEventListener('click', async () => {

@@ -31,7 +31,7 @@ import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } fro
 import { makeZip } from './zip.mjs';
 import { recordUse, usageReport, forgetModel } from './usage.mjs';
 import { diffConfig, labelOf, textOf } from './configdiff.mjs';
-import { recordProbe, readProbes, forgetProbe } from './probe.mjs';
+import { recordProbe, readProbes, forgetProbe, clearProbes } from './probe.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
@@ -1062,6 +1062,7 @@ const server = createSafeServer(async (req, res) => {
   }
   if (p === '/api/probe' && req.method === 'POST') {
     const body = await readBody(req);
+    if (body.clear) { clearProbes(ROOT); return json(res, 200, { ok: true, cleared: true }); }
     const model = String(body.model || '').trim();
     if (!isValidModelName(model)) return json(res, 400, { error: '模型名不合法' });
     recordProbe(ROOT, model, {

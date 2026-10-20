@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const kit = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const { readProbes, recordProbe, forgetProbe } =
+const { readProbes, recordProbe, forgetProbe, clearProbes } =
   await import(pathToFileURL(path.join(kit, 'scripts/probe.mjs')).href);
 
 function tmpRoot() {
@@ -65,5 +65,14 @@ test('非法模型名不写文件', () => {
   const root = tmpRoot();
   recordProbe(root, '', { ok: true, firstMs: 1, totalMs: 2, chars: 1 });
   recordProbe(root, undefined, { ok: true, firstMs: 1, totalMs: 2, chars: 1 });
+  assert.deepEqual(readProbes(root), {});
+});
+
+test('clearProbes 清空全部记录', () => {
+  const root = tmpRoot();
+  recordProbe(root, 'a:1b', { ok: true, firstMs: 1, totalMs: 2, chars: 1 });
+  recordProbe(root, 'b:2b', { ok: false, firstMs: 0, totalMs: 0, chars: 0 });
+  assert.equal(Object.keys(readProbes(root)).length, 2);
+  clearProbes(root);
   assert.deepEqual(readProbes(root), {});
 });

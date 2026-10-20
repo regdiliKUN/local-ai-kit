@@ -63,3 +63,10 @@ export function forgetProbe(root, model) {
     } catch { /* 忽略 */ }
   }
 }
+
+/** 清空全部快测记录 */
+export function clearProbes(root) {
+  try {
+    fs.writeFileSync(fileOf(root), '{}', 'utf-8');
+  } catch { /* 忽略 */ }
+}
