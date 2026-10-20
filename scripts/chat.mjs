@@ -161,7 +161,11 @@ export async function streamChat(res, { model, messages, options = {} }) {
         try { j = JSON.parse(line); } catch { continue; }
         if (j.error) { send({ type: 'error', text: j.error }); return; }
         const content = j.message && j.message.content;
-        if (content) send({ type: 'chunk', content });
+        // 推理模型（qwen3 等）把思考过程放在 thinking 字段，content 在想完之后才出现；
+        // 短测（num_predict 小）时 8 个 token 全花在思考上，content 一直是空的。
+        // 这里把 thinking 也转发出去，否则「试一下」对推理模型会误判成「没出字」。
+        const thinking = j.message && j.message.thinking;
+        if (content || thinking) send({ type: 'chunk', content: content || '', thinking: thinking || '' });
         if (j.done) last = j;
       }
     }

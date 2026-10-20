@@ -21,6 +21,8 @@ export const SCRIPT_FILES = [
   'configdiff.mjs',
   // v1.8.0 新增
   'diskhealth.mjs', 'ranking.mjs', 'conversation-tree.mjs',
+  // v1.7.8 新增
+  'probe.mjs',
 ];
 
 export function copyRuntime(kitDir, root) {

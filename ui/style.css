@@ -927,6 +927,13 @@ html[data-theme="dark"] {
 .panel-b .mrow { padding: 9px 0; border-bottom: 1px solid var(--border); }
 .panel-b .mrow:last-of-type { border-bottom: 0; }
 
+/* 出字快测横向对比表 */
+.probe-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.probe-tbl th, .probe-tbl td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.probe-tbl th { color: var(--text-dim); font-weight: 600; background: var(--bg-soft, #f7f8fa); }
+.probe-tbl tr:hover td { background: var(--bg-soft, #f7f8fa); }
+.probe-tbl td:last-child, .probe-tbl th:last-child { text-align: right; width: 56px; }
+.probe-tbl .muted { color: var(--text-dim); }
 .gpu-head { display: flex; justify-content: center; padding-bottom: 8px; }
 
 .dash-tools { margin-top: 0; margin-bottom: 20px; }

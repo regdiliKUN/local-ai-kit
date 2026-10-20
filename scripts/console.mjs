@@ -31,6 +31,7 @@ import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } fro
 import { makeZip } from './zip.mjs';
 import { recordUse, usageReport, forgetModel } from './usage.mjs';
 import { diffConfig, labelOf, textOf } from './configdiff.mjs';
+import { recordProbe, readProbes, forgetProbe } from './probe.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
@@ -1049,6 +1050,27 @@ const server = createSafeServer(async (req, res) => {
     const models = running ? (await listModels() || []).map((m) => m.name) : [];
     const staleDays = Math.max(1, Math.min(365, Number(new URL(req.url, 'http://x').searchParams.get('staleDays')) || 30));
     return json(res, 200, { running, ...usageReport(ROOT, models, staleDays) });
+  }
+
+  /* ---------------------------------------------------------- 出字快测 */
+  // 把「试一下」的结果存下来，多个模型横向对比。和「模型实测排行」是两回事：
+  // 这里只发一句最短的话，秒级，只看「能不能出字 + 首字多快」。
+  if (p === '/api/probe' && req.method === 'GET') {
+    const running = !!(await ollamaVersion());
+    const models = running ? (await listModels() || []).map((m) => m.name) : [];
+    return json(res, 200, { running, models, probes: readProbes(ROOT) });
+  }
+  if (p === '/api/probe' && req.method === 'POST') {
+    const body = await readBody(req);
+    const model = String(body.model || '').trim();
+    if (!isValidModelName(model)) return json(res, 400, { error: '模型名不合法' });
+    recordProbe(ROOT, model, {
+      ok: !!body.ok,
+      firstMs: Number(body.firstMs) || 0,
+      totalMs: Number(body.totalMs) || 0,
+      chars: Number(body.chars) || 0,
+    });
+    return json(res, 200, { ok: true });
   }
 
   if (p === '/api/cleanup' && req.method === 'GET') {

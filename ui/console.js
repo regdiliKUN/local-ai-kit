@@ -98,7 +98,7 @@ for (const li of document.querySelectorAll('#tabs li')) {
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
     if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
     // 显存估算要调 nvidia-smi，只在切到这一页时算
-    if (li.dataset.tab === 'context') loadVramPlan();
+    if (li.dataset.tab === 'context') { loadVramPlan(); renderProbes(); }
     if (li.dataset.tab === 'settings') { loadCheckpoints().catch(() => {}); renderShortcuts(); }
     if (li.dataset.tab === 'help') renderHelp();
   });
@@ -1267,10 +1267,84 @@ if ($('btnResetCtx')) {
 }
 
 /**
- * 试一下：用当前选中的模型发一句最短的话，确认它真的能出字。
+ * 出字快测核心：用某个模型发一句最短的话，确认它真的能出字，并量出首字耗时。
  *
- * 为什么需要：切了模型要重启工作台才生效，用户重启完才发现这个模型跑不动，
- * 又得改回去再来一遍。这里先用 8 个 token 试一句，几秒钟就知道行不行。
+ * 抽出来是因为「点试一下单测」和「测全部已装模型」都要用同一套逻辑。
+ * 返回 { ok, firstMs, totalMs, chars }；失败会抛错（调用方负责翻译报错）。
+ */
+async function probeOne(model) {
+  const t0 = performance.now();
+  let firstAt = 0;
+  let chars = 0;
+
+  const res = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-localai-token': window.__TOKEN__ || '' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: '说「好」就行' }],
+      options: { numPredict: 8 },
+    }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.error || `HTTP ${res.status}`);
+  }
+
+  // 按 SSE 逐条读，记录首字时间和累计字数
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const obj = JSON.parse(payload);
+        if (obj.error) throw new Error(obj.error);
+        // 真实 SSE 格式：{type:'chunk', content[, thinking]} / {type:'done', stats}
+        // 推理模型把思考放在 thinking 里，content 想完才出现；短测时 content 为空，
+        // 所以 thinking 也要算作「出字」的证据（模型确实在吐 token）。
+        // 兜底兼容历史写法 {message:{content}} / {response}
+        const piece = obj.type === 'chunk' ? (obj.content || obj.thinking || '')
+          : (obj.message && obj.message.content) || obj.response || '';
+        if (piece) {
+          if (!firstAt) firstAt = performance.now() - t0;
+          chars += piece.length;
+        }
+        if (obj.type === 'done') break; // 正常结束，剩下的流不用再等
+      } catch (e) {
+        if (e instanceof SyntaxError) continue;
+        throw e;
+      }
+    }
+  }
+
+  const total = Math.round(performance.now() - t0);
+  if (!chars) throw new Error('模型没有返回任何内容');
+  return { ok: true, firstMs: Math.round(firstAt), totalMs: total, chars };
+}
+
+/** 把一次快测结果存到后端（失败也记一笔，免得面板显示「没测过」误导） */
+async function saveProbe(model, rec) {
+  try {
+    await fetch('/api/probe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, ...rec }),
+    });
+  } catch { /* 记不进不该崩 */ }
+}
+
+/**
+ * 试一下：单模型。结果存下来并刷新横向对比面板。
+ * 痛点：切了模型要重启工作台才生效，重启完才发现这个模型跑不动，又得改回去。
  */
 async function testCtxModel() {
   const sel = $('ctxModel');
@@ -1281,61 +1355,15 @@ async function testCtxModel() {
   const old = btn.textContent;
   btn.disabled = true;
   btn.textContent = '测试中…';
-  const t0 = performance.now();
-  let firstAt = 0;
-  let chars = 0;
 
   try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-localai-token': window.__TOKEN__ || '' },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: '说「好」就行' }],
-        options: { numPredict: 8 },
-      }),
-    });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      throw new Error(j.error || `HTTP ${res.status}`);
-    }
-
-    // 按 SSE 逐条读，记录首字时间和累计字数
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const lines = buf.split('\n');
-      buf = lines.pop() || '';
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue;
-        const payload = line.slice(5).trim();
-        if (!payload || payload === '[DONE]') continue;
-        try {
-          const obj = JSON.parse(payload);
-          if (obj.error) throw new Error(obj.error);
-          const piece = (obj.message && obj.message.content) || obj.response || '';
-          if (piece) {
-            if (!firstAt) firstAt = performance.now() - t0;
-            chars += piece.length;
-          }
-        } catch (e) {
-          if (e instanceof SyntaxError) continue;
-          throw e;
-        }
-      }
-    }
-
-    const total = Math.round(performance.now() - t0);
-    if (!chars) throw new Error('模型没有返回任何内容');
+    const r = await probeOne(model);
     if (hint) {
       hint.innerHTML = `<span style="color:var(--ok)">✓ 能正常出字</span> · `
-        + `首字 ${Math.round(firstAt)} ms · 共 ${total} ms · ${chars} 字`;
+        + `首字 ${r.firstMs} ms · 共 ${r.totalMs} ms · ${r.chars} 字`;
     }
     toast(`${model} 可以正常使用`);
+    await saveProbe(model, r);
   } catch (e) {
     const msg = String(e.message || e);
     // 常见错误直接用引导里的话术翻译一下
@@ -1346,13 +1374,77 @@ async function testCtxModel() {
              + (g.where ? ` <a href="#${esc(g.where)}">去处理</a>` : '') : '');
     }
     toast(`测试失败：${g ? g.title : msg}`);
+    await saveProbe(model, { ok: false, firstMs: 0, totalMs: 0, chars: 0 });
   } finally {
     btn.disabled = false;
     btn.textContent = old;
+    renderProbes();
   }
 }
 
+/** 跑单模型并把结果存 + 刷新面板（「测全部」和行内「测」按钮共用） */
+async function probeOneAndSave(model) {
+  try {
+    const r = await probeOne(model);
+    await saveProbe(model, r);
+  } catch {
+    await saveProbe(model, { ok: false, firstMs: 0, totalMs: 0, chars: 0 });
+  }
+  renderProbes();
+}
+
+/** 测全部已装模型：逐个跑，跑完一个刷新一次面板 */
+async function testAllProbes() {
+  const btn = $('btnProbeAll');
+  const old = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = '测全部中…'; }
+  try {
+    const data = await fetch('/api/probe').then((r) => r.json()).catch(() => ({ models: [] }));
+    for (const m of data.models || []) {
+      await probeOneAndSave(m);
+    }
+    toast('全部模型测完');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+/** 渲染出字快测横向对比面板 */
+async function renderProbes() {
+  const box = $('probeTable');
+  if (!box) return;
+  let data;
+  try { data = await fetch('/api/probe').then((r) => r.json()); } catch { return; }
+  if (!data.running) {
+    box.innerHTML = '<div class="chart-empty">Ollama 没在运行，快测需要先把它启动起来（去「服务」页点启动）。</div>';
+    return;
+  }
+  const probes = data.probes || {};
+  const rows = (data.models || []).map((m) => {
+    const p = probes[m];
+    const status = !p ? '<span class="muted">未测</span>'
+      : p.ok ? '<span style="color:var(--ok)">✓ 出字</span>'
+        : '<span style="color:var(--err)">✗ 未通过</span>';
+    const first = p && p.ok ? `${p.firstMs} ms` : '—';
+    const total = p && p.ok ? `${p.totalMs} ms` : '—';
+    const chars = p && p.ok ? `${p.chars} 字` : '—';
+    const when = p ? new Date(p.at).toLocaleString('zh-CN', { hour12: false }) : '—';
+    return `<tr><td>${esc(m)}</td><td>${status}</td><td>${first}</td>`
+      + `<td>${total}</td><td>${chars}</td><td class="muted">${when}</td>`
+      + `<td><button class="btn ghost small" data-probe="${esc(m)}">测</button></td></tr>`;
+  });
+  box.innerHTML = rows.length
+    ? `<table class="probe-tbl"><thead><tr>`
+      + `<th>模型</th><th>状态</th><th>首字</th><th>总耗时</th><th>字数</th><th>最近一次</th><th></th>`
+      + `</tr></thead><tbody>${rows.join('')}</tbody></table>`
+    : '<div class="chart-empty">没有可用模型。</div>';
+  box.querySelectorAll('[data-probe]').forEach((b) => {
+    b.addEventListener('click', () => probeOneAndSave(b.dataset.probe));
+  });
+}
+
 if ($('btnTestCtx')) $('btnTestCtx').addEventListener('click', testCtxModel);
+if ($('btnProbeAll')) $('btnProbeAll').addEventListener('click', testAllProbes);
 
 if ($('btnApplyCtx')) {
   $('btnApplyCtx').addEventListener('click', async () => {
