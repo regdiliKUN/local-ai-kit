@@ -1558,3 +1558,118 @@ html[data-theme="dark"] {
 }
 .vram-warn.over { border-left-color: var(--err); }
 .vram-ok { margin-top: 10px; font-size: 12.5px; color: var(--text-dim); }
+
+/* ===================== 新增图表（v1.9 可视化增强） ===================== */
+
+/* 全局悬浮提示框 */
+.chart-tip {
+  position: fixed; z-index: 9999; pointer-events: none;
+  max-width: 260px; padding: 6px 9px; border-radius: 6px;
+  background: var(--text); color: var(--surface);
+  font-size: 12px; line-height: 1.5; box-shadow: 0 6px 20px rgba(0,0,0,.22);
+  opacity: .97;
+}
+.chart-tip[hidden] { display: none; }
+
+/* 多序列面积图 */
+.chart-am { width: 100%; }
+.chart-am svg { width: 100%; height: auto; display: block; }
+.am-grid { stroke: var(--chart-grid); stroke-width: 1; }
+.am-grid-v { stroke: var(--chart-grid); stroke-width: 1; stroke-dasharray: 2 3; opacity: .6; }
+.am-tick { fill: var(--text-dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.am-line { stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.am-area { opacity: .12; }
+.am-dot { fill: var(--seg, var(--accent)); }
+.am-dot:hover { r: 4; }
+.am-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 8px; font-size: 12px; color: var(--text-dim); }
+.am-legend .am-lg { display: inline-flex; align-items: center; gap: 6px; }
+.am-legend .am-lg i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+/* 气泡图 */
+.chart-bubble { width: 100%; height: auto; display: block; }
+.bb-circle { fill: var(--seg, var(--accent)); fill-opacity: .55; stroke: var(--seg, var(--accent)); stroke-width: 1.5; transition: fill-opacity .12s; }
+.bb-circle:hover { fill-opacity: .8; }
+.bb-label { fill: var(--text-dim); font-size: 10.5px; }
+.bb-axis { fill: var(--text-dim); font-size: 11px; }
+
+/* 矩形树图 */
+.chart-treemap { width: 100%; height: auto; display: block; }
+.tm-rect { fill: var(--seg, var(--accent)); transition: opacity .12s; }
+.tm-rect:hover { opacity: .82; }
+.tm-label { fill: #fff; font-size: 11px; font-weight: 600; paint-order: stroke; }
+
+/* 直方图 */
+.chart-hist { width: 100%; height: auto; display: block; }
+.hm-bar { fill: var(--seg, var(--accent)); transition: opacity .12s; }
+.hm-bar:hover { opacity: .8; }
+.hm-bar-v { fill: var(--text); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.hm-tick { fill: var(--text-dim); font-size: 10px; }
+
+/* 分组柱状图 */
+.chart-grouped { width: 100%; height: auto; display: block; }
+.gb-bar { fill: var(--seg, var(--accent)); transition: opacity .12s; }
+.gb-bar:hover { opacity: .82; }
+.gb-bar.good { fill: var(--ok); }
+.gb-bar.warn { fill: var(--warn); }
+.gb-bar.bad { fill: var(--err); }
+.gb-v { fill: var(--text); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.gb-tick { fill: var(--text-dim); font-size: 11px; }
+
+/* 雷达叠加 */
+.chart-radar-wrap { display: flex; flex-direction: column; align-items: center; }
+.radar-data2 { fill: var(--seg, var(--chart-3)); fill-opacity: .14; stroke: var(--seg, var(--chart-3)); stroke-width: 1.6; stroke-dasharray: 4 3; }
+.radar-legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 6px; font-size: 12px; color: var(--text-dim); }
+.radar-legend .am-lg { display: inline-flex; align-items: center; gap: 6px; }
+.radar-legend .am-lg i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+/* 数字滚动 / 高亮脉冲 */
+.gv { font-variant-numeric: tabular-nums; }
+.gv.pulse { animation: gvPulse .5s ease; }
+@keyframes gvPulse {
+  0% { color: var(--accent); transform: scale(1.08); }
+  100% { color: var(--text); transform: scale(1); }
+}
+.count-up { font-variant-numeric: tabular-nums; }
+
+/* 系统健康总分卡片 */
+.score-card {
+  display: flex; align-items: center; gap: 18px; padding: 16px 18px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.score-ring { flex: none; }
+.score-main { display: flex; flex-direction: column; gap: 4px; }
+.score-num { font-size: 30px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.score-num small { font-size: 14px; font-weight: 500; color: var(--text-dim); }
+.score-sub { font-size: 12.5px; color: var(--text-dim); }
+.score-bars { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.score-bar-row { display: grid; grid-template-columns: 84px 1fr 38px; align-items: center; gap: 10px; font-size: 12px; color: var(--text-dim); }
+.score-bar-track { height: 7px; border-radius: 4px; background: var(--chart-track); overflow: hidden; }
+.score-bar-fill { height: 100%; border-radius: 4px; background: var(--seg, var(--accent)); }
+.score-bar-val { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+
+/* 模型收藏（星标） */
+.tag.star { color: var(--warn); border-color: var(--warn); cursor: pointer; user-select: none; }
+.tag.star.on { background: var(--warn); color: #fff; border-color: var(--warn); }
+.mrow.starred { box-shadow: inset 3px 0 0 var(--warn); }
+.star-btn {
+  background: none; border: none; cursor: pointer; font-size: 15px; line-height: 1;
+  color: var(--text-dim); padding: 4px 6px; border-radius: 6px;
+}
+.star-btn:hover { background: var(--accent-soft); color: var(--warn); }
+.star-btn.on { color: var(--warn); }
+.list-tools .star-filter { margin-left: auto; }
+
+/* 无障碍：可见焦点环 + 跳到内容链接 */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.skip-link {
+  position: absolute; left: 8px; top: -44px; z-index: 100;
+  background: var(--surface); color: var(--accent); border: 1px solid var(--border);
+  padding: 8px 12px; border-radius: 8px; transition: top .15s;
+}
+.skip-link:focus { top: 8px; }
+
+/* 尊重「减少动画」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .gv.pulse, .am-area, .am-line, .bb-circle, .tm-rect, .hm-bar, .gb-bar { animation: none !important; transition: none !important; }
+  * { scroll-behavior: auto !important; }
+}

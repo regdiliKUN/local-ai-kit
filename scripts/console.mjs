@@ -46,7 +46,7 @@ import { diskHealth, diskForPath, diskSummary } from './diskhealth.mjs';
 import { runRanking, rankingAdvice } from './ranking.mjs';
 import { checkNetwork } from './netcheck.mjs';
 import { findOrphanBlobs, cleanupOrphanBlobs } from './space.mjs';
-import { buildReport, strataReport } from './report.mjs';
+import { buildReport, strataReport, buildAggregateReport } from './report.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -856,6 +856,17 @@ const server = createSafeServer(async (req, res) => {
       'Cache-Control': 'no-store',
     });
     return res.end(text);
+  }
+
+  if (p === '/api/report/aggregate' && req.method === 'GET') {
+    // 把历次基准 / 健康检查 / 排行聚合为一份 JSON，方便二次分析或导出
+    const data = buildAggregateReport();
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(JSON.stringify(data, null, 2));
   }
 
   /* ------------------------------------------------- Strata 服务（并存模式） */

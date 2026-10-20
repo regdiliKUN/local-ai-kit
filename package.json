@@ -1,6 +1,6 @@
 {
   "name": "local-ai-kit",
-  "version": "1.7.7",
+  "version": "1.9.0",
   "description": "一站式基于用户配置配置本地 AI 模型 —— 图形化安装向导 + 本地控制台，零第三方依赖",
   "type": "module",
   "private": true,

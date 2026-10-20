@@ -8,6 +8,8 @@
 </head>
 <body class="console-body">
 
+<a href="#view-dashboard" class="skip-link" id="skipLink">跳到主内容</a>
+
 <div class="app">
   <aside class="sidebar">
     <div class="brand">
@@ -78,11 +80,18 @@
         <button class="btn ghost small" data-quick="fix">修问题</button>
       </div>
 
+      <div id="dashScore"></div>
+
       <div class="gauge-row" id="dashGauges">
         <div class="gauge-card"><div class="gk">显卡显存</div><div class="gv" id="gVram">—</div><div class="gs" id="gVramSub">等待数据</div><div class="gsp" id="gVramSpark"></div></div>
         <div class="gauge-card"><div class="gk">CPU 占用</div><div class="gv" id="gCpu">—</div><div class="gs" id="gCpuSub">等待数据</div><div class="gsp" id="gCpuSpark"></div></div>
         <div class="gauge-card"><div class="gk">内存占用</div><div class="gv" id="gMem">—</div><div class="gs" id="gMemSub">等待数据</div><div class="gsp" id="gMemSpark"></div></div>
         <div class="gauge-card"><div class="gk">磁盘占用</div><div class="gv" id="gDisk">—</div><div class="gs" id="gDiskSub">等待数据</div><div class="gsp" id="gDiskSpark"></div></div>
+      </div>
+
+      <h2 class="sec-h">系统负载走势</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashLoad"><div class="chart-empty">读取中…</div></div>
       </div>
 
       <div class="dash-grid">
@@ -134,6 +143,7 @@
         </select>
         <button class="btn ghost small" id="btnPickIdle" title="勾选所有装完没用过、或超过 30 天没动的模型">勾选闲置</button>
         <button class="btn ghost small" id="btnBatchDel" disabled>批量删除</button>
+        <button class="btn ghost small star-filter" id="btnStarFilter" title="只看收藏的模型">☆ 收藏</button>
         <span class="list-count" id="modelFilterCount"></span>
       </div>
 
@@ -146,6 +156,16 @@
       <p class="lead">看看硬盘到底被什么占了 —— 删掉不用的模型，空间会立刻回来。</p>
       <div class="space-panel" id="spacePanel">
         <div class="loading"><span class="spinner"></span> 正在统计…</div>
+      </div>
+
+      <h2 class="sec-h">体积分布</h2>
+      <div class="panel">
+        <div class="panel-b" id="sizeHist"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">磁盘占用（按占比）</h2>
+      <div class="panel">
+        <div class="panel-b" id="spaceTreemap"><div class="chart-empty">读取中…</div></div>
       </div>
 
       <h2 class="sec-h">加装新模型</h2>
@@ -341,6 +361,7 @@
       <div class="chat-stats" id="ctxUsage"></div>
       <div class="row-actions">
         <button class="btn ghost small" id="btnExportChat">导出对话（Markdown）</button>
+        <button class="btn ghost small" id="btnExportHtml">导出网页</button>
         <button class="btn ghost small" id="btnCopyChat">复制对话</button>
       </div>
     </section>
@@ -394,6 +415,11 @@
       <h2 class="sec-h">和同档显卡比</h2>
       <div class="panel">
         <div class="panel-b" id="benchChart"><div class="chart-empty">跑一次就能看到对比</div></div>
+      </div>
+
+      <h2 class="sec-h">本次 vs 历史最佳 / 平均</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchGroup"><div class="chart-empty">跑一次就能看到</div></div>
       </div>
 
       <h2 class="sec-h">速度变化</h2>
@@ -459,6 +485,12 @@
       <h2 class="sec-h">哪个模型更适合这台机器</h2>
       <p class="lead">按你现在的显卡、内存和已装模型估的适配度。<b>只是估算</b>，但比凭感觉选靠谱。</p>
       <div class="fit-grid" id="fitGrid"><div class="loading"><span class="spinner"></span> 计算中…</div></div>
+
+      <h2 class="sec-h">适配度气泡图</h2>
+      <p class="lead">横轴＝体积(GB)，纵轴＝估算速度，气泡大小＝参数量。<b>右下角的大气泡最划算</b>——小体积、高速度、大参数。</p>
+      <div class="panel">
+        <div class="panel-b" id="fitBubble"><div class="chart-empty">装了模型才能画</div></div>
+      </div>
     </section>
 
     <!-- ============ 模型体检 ============ -->
@@ -492,6 +524,11 @@
       <h2 class="sec-h">各分类通过率</h2>
       <div class="panel">
         <div class="panel-b" id="healthChart"><div class="chart-empty">跑一次就能看到每类题的通过情况</div></div>
+      </div>
+
+      <h2 class="sec-h">各类「通过 / 未通过」数量</h2>
+      <div class="panel">
+        <div class="panel-b" id="healthGroup"><div class="chart-empty">跑一次就能看到</div></div>
       </div>
 
       <h2 class="sec-h">成绩变化</h2>
@@ -571,6 +608,7 @@
       <p class="lead">把环境、配置、日志打包成一个文件，发给别人就能直接看到问题在哪（已自动去掉用户名和令牌）。</p>
       <div class="row-actions">
         <button class="btn ghost small" id="btnReport">下载诊断报告</button>
+        <button class="btn ghost small" id="btnReportAgg">下载聚合报告（JSON）</button>
       </div>
     </section>
 

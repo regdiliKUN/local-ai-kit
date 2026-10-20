@@ -446,7 +446,314 @@ const Chart = (() => {
     </svg>`;
   }
 
-  return { sparkline, donut, gauge, bars, radar, waterfall, line, heatmap, ring, esc };
+  /* ----------------------------------------------------- 全局悬浮提示
+   * 任何带 data-tip 属性的 SVG 元素，鼠标移上去都会浮现一个跟随光标的提示框。
+   * 用事件委托，所以新加的图表只要挂上 data-tip 就能用，不用逐个接事件。
+   */
+  const Tip = (() => {
+    let el = null;
+    function ensure() {
+      if (el) return el;
+      if (typeof document === 'undefined' || !document.body) return null;
+      el = document.createElement('div');
+      el.className = 'chart-tip';
+      el.setAttribute('role', 'tooltip');
+      el.hidden = true;
+      document.body.appendChild(el);
+      document.addEventListener('mouseover', (e) => {
+        const t = e.target.closest && e.target.closest('[data-tip]');
+        if (t) { el.innerHTML = t.getAttribute('data-tip'); el.hidden = false; }
+      });
+      document.addEventListener('mousemove', (e) => {
+        if (el.hidden) return;
+        let x = e.clientX + 14, y = e.clientY + 14;
+        const w = el.offsetWidth || 160, h = el.offsetHeight || 40;
+        if (x + w > window.innerWidth - 8) x = e.clientX - w - 14;
+        if (y + h > window.innerHeight - 8) y = e.clientY - h - 14;
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+      });
+      document.addEventListener('mouseout', (e) => {
+        const t = e.target.closest && e.target.closest('[data-tip]');
+        if (t) el.hidden = true;
+      });
+      return el;
+    }
+    return { ensure };
+  })();
+
+  /**
+   * 多序列面积图（叠加）—— 把几条「随时间变化」的线叠在一起看相关性。
+   * 首页系统负载（显存 / CPU / 内存历史）就是用它。
+   *
+   * @param {{labels:string[], series:{name:string,color?:string,data:(number|null)[]}[]}} series
+   */
+  function areaMulti(series, opts = {}) {
+    const labels = series.labels || [];
+    const list = series.series || [];
+    if (!labels.length || !list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 480;
+    const height = opts.height || 180;
+    const padL = 42, padR = 12, padT = 14, padB = 26;
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
+    const all = [];
+    for (const s of list) for (const v of (s.data || [])) { const n = num(v); if (n != null) all.push(n); }
+    if (!all.length) return '<div class="chart-empty">还没有数据</div>';
+    const rawMin = opts.min != null ? opts.min : Math.min(...all);
+    const rawMax = opts.max != null ? opts.max : Math.max(...all);
+    const min = rawMin - (rawMax - rawMin) * 0.08;
+    const max = rawMax + (rawMax - rawMin) * 0.08;
+    const span = (max - min) || 1;
+    const n = labels.length;
+    const X = (i) => padL + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+    const Y = (v) => padT + plotH - ((num(v) - min) / span) * plotH;
+
+    const ticks = [0, 0.5, 1].map((t) => {
+      const v = min + span * t;
+      const yy = Y(v);
+      return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${width - padR}" y2="${yy.toFixed(1)}" class="am-grid" />
+        <text x="${padL - 6}" y="${(yy + 4).toFixed(1)}" class="am-tick" text-anchor="end">${formatTick(v, opts.unit)}</text>`;
+    }).join('');
+
+    const drawn = list.map((s, si) => {
+      const color = s.color || `var(--chart-${(si % 6) + 1})`;
+      const segs = []; let cur = [];
+      s.data.forEach((v, i) => {
+        const nn = num(v);
+        if (nn == null) { if (cur.length) segs.push(cur); cur = []; return; }
+        cur.push([X(i), Y(nn)]);
+      });
+      if (cur.length) segs.push(cur);
+      const linePath = segs.filter((x) => x.length > 1)
+        .map((x) => `M${x.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join('L')}`).join(' ');
+      const areaPath = segs.filter((x) => x.length > 1).map((x) =>
+        `M${x[0][0].toFixed(1)},${(padT + plotH).toFixed(1)}`
+        + x.map(([px, py]) => `L${px.toFixed(1)},${py.toFixed(1)}`).join('')
+        + `L${x[x.length - 1][0].toFixed(1)},${(padT + plotH).toFixed(1)}Z`).join(' ');
+      const dots = s.data.map((v, i) => {
+        const nn = num(v); if (nn == null) return '';
+        return `<circle cx="${X(i).toFixed(1)}" cy="${Y(nn).toFixed(1)}" r="2.6" class="am-dot" style="--seg:${esc(color)}"
+          data-tip="${esc(s.name)} · ${esc(labels[i] || '')}：${esc(v)}${opts.unit || ''}" />`;
+      }).join('');
+      return `<path d="${areaPath}" class="am-area" style="--seg:${esc(color)}" />
+        <path d="${linePath}" class="am-line" style="--seg:${esc(color)}" fill="none" />${dots}`;
+    }).join('');
+
+    const step = Math.max(1, Math.ceil(n / 5));
+    const xl = labels.map((lb, i) =>
+      (i % step === 0 || i === n - 1)
+        ? `<text x="${X(i).toFixed(1)}" y="${height - 8}" class="am-tick" text-anchor="middle">${esc(lb)}</text>` : '').join('');
+
+    const legend = list.map((s, si) =>
+      `<span class="am-lg"><i style="background:${esc(s.color || `var(--chart-${(si % 6) + 1})`)}"></i>${esc(s.name)}</span>`).join('');
+
+    return `<div class="chart-am"><svg class="chart-area" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">
+      ${ticks}${drawn}${xl}</svg><div class="am-legend">${legend}</div></div>`;
+  }
+
+  /**
+   * 气泡图 —— 二维 + 半径三维。用来一眼看出「体积 / 速度 / 参数量」的关系。
+   * 模型对比页的适配度气泡图就是用这个。
+   *
+   * @param {{x:number,y:number,r:number,label?:string,color?:string}[]} items
+   */
+  function bubble(items, opts = {}) {
+    const list = items || [];
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460, height = opts.height || 280;
+    const padL = 46, padR = 14, padT = 16, padB = 34;
+    const plotW = width - padL - padR, plotH = height - padT - padB;
+    const xs = list.map((i) => num(i.x)).filter((v) => v != null);
+    const ys = list.map((i) => num(i.y)).filter((v) => v != null);
+    const rs = list.map((i) => num(i.r)).filter((v) => v != null);
+    if (!xs.length || !ys.length) return '<div class="chart-empty">还没有数据</div>';
+    const xmin = opts.xmin != null ? opts.xmin : Math.min(...xs);
+    const xmax = opts.xmax != null ? opts.xmax : Math.max(...xs);
+    const ymin = opts.ymin != null ? opts.ymin : Math.min(...ys);
+    const ymax = opts.ymax != null ? opts.ymax : Math.max(...ys);
+    const rmax = Math.max(1, ...rs);
+    const xspan = (xmax - xmin) || 1, yspan = (ymax - ymin) || 1;
+    const X = (v) => padL + ((num(v) - xmin) / xspan) * plotW;
+    const Y = (v) => padT + plotH - ((num(v) - ymin) / yspan) * plotH;
+    const R = (v) => 6 + (num(v) / rmax) * 28;
+
+    const yTicks = [0, 0.5, 1].map((t) => {
+      const v = ymin + yspan * t, yy = Y(v);
+      return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${width - padR}" y2="${yy.toFixed(1)}" class="am-grid" />
+        <text x="${padL - 6}" y="${(yy + 4).toFixed(1)}" class="am-tick" text-anchor="end">${formatTick(v, opts.yunit)}</text>`;
+    }).join('');
+    const xTicks = [0, 0.5, 1].map((t) => {
+      const v = xmin + xspan * t, xx = X(v);
+      return `<line x1="${xx.toFixed(1)}" y1="${padT}" x2="${xx.toFixed(1)}" y2="${padT + plotH}" class="am-grid-v" />
+        <text x="${xx.toFixed(1)}" y="${height - 12}" class="am-tick" text-anchor="middle">${formatTick(v, opts.xunit)}</text>`;
+    }).join('');
+
+    const circles = list.map((it, i) => {
+      const c = it.color || `var(--chart-${(i % 6) + 1})`;
+      const rr = R(it.r);
+      const cx = X(it.x).toFixed(1), cy = Y(it.y).toFixed(1);
+      return `<circle cx="${cx}" cy="${cy}" r="${rr.toFixed(1)}" class="bb-circle" style="--seg:${esc(c)}"
+          data-tip="${esc(it.label || '')} · ${esc(opts.xLabel || 'X')}:${esc(it.x)}${opts.xunit || ''} · ${esc(opts.yLabel || 'Y')}:${esc(it.y)}${opts.yunit || ''} · ${esc(opts.rLabel || 'R')}:${esc(it.r)}" />
+        ${it.label ? `<text x="${cx}" y="${(Y(it.y) + rr + 11).toFixed(1)}" class="bb-label" text-anchor="middle">${esc(it.label)}</text>` : ''}`;
+    }).join('');
+
+    return `<svg class="chart-bubble" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">
+      ${yTicks}${xTicks}${circles}
+      <text x="${padL}" y="11" class="bb-axis">${esc(opts.yLabel || '')} ↑</text>
+      <text x="${width - padR}" y="${height - 1}" class="bb-axis" text-anchor="end">${esc(opts.xLabel || '')} →</text>
+    </svg>`;
+  }
+
+  /**
+   * 矩形树图（一维切片）—— 按数值比例把空间切成一条条。
+   * 模型管理页的「磁盘占用」用这个，比环形图更能看出谁最占地方。
+   *
+   * @param {{label:string,value:number,color?:string}[]} items
+   */
+  function treemap(items, opts = {}) {
+    const list = (items || []).filter((i) => Math.max(0, Number(i.value) || 0) > 0);
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 420, height = opts.height || 64;
+    const total = list.reduce((n, i) => n + Number(i.value), 0);
+    let x = 0; const gap = 2;
+    const rects = list.map((it, i) => {
+      const w = (Number(it.value) / total) * width;
+      const rx = x.toFixed(1);
+      const c = it.color || `var(--chart-${(i % 6) + 1})`;
+      const r = `<g><rect x="${rx}" y="0" width="${Math.max(0, w - gap).toFixed(1)}" height="${height}" rx="3" class="tm-rect"
+          style="--seg:${esc(c)}" data-tip="${esc(it.label)} · ${esc(it.value)}${opts.unit || ''}（${Math.round((Number(it.value) / total) * 100)}%）" />
+        ${w > 56 ? `<text x="${(x + w / 2).toFixed(1)}" y="${height / 2 + 4}" class="tm-label" text-anchor="middle">${esc(it.label)}</text>` : ''}</g>`;
+      x += w;
+      return r;
+    }).join('');
+    return `<svg class="chart-treemap" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${rects}</svg>`;
+  }
+
+  /**
+   * 直方图 —— 把连续量切成几档看分布。模型体积分布就是用这个。
+   *
+   * @param {{label:string,value:number,color?:string}[]} buckets
+   */
+  function histogram(buckets, opts = {}) {
+    const list = buckets || [];
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 420, height = opts.height || 180;
+    const padB = 28, padT = 14, padL = 10;
+    const plotH = height - padB - padT;
+    const max = maxOf(list.map((i) => i.value), 1);
+    const n = list.length;
+    const slot = width / n;
+    const bw = Math.min(slot * 0.7, 42);
+    const bars = list.map((b, i) => {
+      const v = Math.max(0, Number(b.value) || 0);
+      const h = max > 0 ? (v / max) * plotH : 0;
+      const x = i * slot + (slot - bw) / 2;
+      const y = padT + plotH - h;
+      const c = b.color || `var(--chart-${(i % 6) + 1})`;
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" class="hm-bar"
+          style="--seg:${esc(c)}" data-tip="${esc(b.label)}：${esc(v)}${opts.unit || ''}" />
+        <text x="${(x + bw / 2).toFixed(1)}" y="${(y - 4).toFixed(1)}" class="hm-bar-v" text-anchor="middle">${esc(v)}</text>
+        <text x="${(x + bw / 2).toFixed(1)}" y="${height - 10}" class="hm-tick" text-anchor="middle">${esc(b.label)}</text>`;
+    }).join('');
+    return `<svg class="chart-hist" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${bars}</svg>`;
+  }
+
+  /**
+   * 分组柱状图 —— 每个类目下并排摆几根柱子。
+   * 性能基准「本次 vs 历史最佳 vs 平均」、模型体检「各类通过率」都用它。
+   *
+   * @param {{label:string, bars:{value:number,color?:string,text?:string,tone?:string}[]}[]} groups
+   */
+  function barGrouped(groups, opts = {}) {
+    const list = groups || [];
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460, height = opts.height || 200;
+    const padB = 30, padT = 14, padL = 10;
+    const plotH = height - padB - padT;
+    const max = maxOf(list.flatMap((g) => (g.bars || []).map((b) => Number(b.value) || 0)), 1);
+    const n = list.length;
+    const groupW = width / n;
+    const barsPerGroup = Math.max(1, ...list.map((g) => (g.bars || []).length));
+    const bw = Math.min((groupW * 0.8) / barsPerGroup, 34);
+    const gap = 4;
+    const drawn = list.map((g, gi) => {
+      const bars = g.bars || [];
+      const totalBarsW = bars.length * bw + (bars.length - 1) * gap;
+      const gx = gi * groupW + (groupW - totalBarsW) / 2;
+      const inner = bars.map((b, bi) => {
+        const v = Math.max(0, Number(b.value) || 0);
+        const h = max > 0 ? (v / max) * plotH : 0;
+        const x = gx + bi * (bw + gap);
+        const y = padT + plotH - h;
+        const c = b.color || `var(--chart-${(bi % 6) + 1})`;
+        const tone = b.tone ? ` ${b.tone}` : '';
+        return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3" class="gb-bar${tone}"
+            style="--seg:${esc(c)}" data-tip="${esc(g.label)} · ${esc(b.text || b.label || '')}：${esc(v)}${opts.unit || ''}" />
+          ${b.text != null ? `<text x="${(x + bw / 2).toFixed(1)}" y="${(y - 4).toFixed(1)}" class="gb-v" text-anchor="middle">${esc(b.text)}</text>` : ''}`;
+      }).join('');
+      const lbl = `<text x="${(gi * groupW + groupW / 2).toFixed(1)}" y="${height - 10}" class="gb-tick" text-anchor="middle">${esc(g.label)}</text>`;
+      return inner + lbl;
+    }).join('');
+    return `<svg class="chart-grouped" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${drawn}</svg>`;
+  }
+
+  /**
+   * 雷达图（多数据集叠加）—— 把「当前」和「推荐」两套维度叠一起比。
+   *
+   * @param {string[]} axes 轴名
+   * @param {{values:number[],color?:string,label?:string}[]} datasets
+   */
+  function radarMulti(axes, datasets, opts = {}) {
+    const labels = axes || [];
+    const size = opts.size || 220;
+    const pad = opts.pad || 38;
+    const cx = size / 2, cy = size / 2 + 6, r = size / 2 - 34;
+    const n = labels.length;
+    if (!n) return '<div class="chart-empty">暂无数据</div>';
+    const point = (i, ratio) => {
+      const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+      return [cx + Math.cos(angle) * r * ratio, cy + Math.sin(angle) * r * ratio];
+    };
+    const rings = [0.25, 0.5, 0.75, 1].map((ratio) => {
+      const pts = labels.map((_, i) => point(i, ratio).map((v) => v.toFixed(1)).join(',')).join(' ');
+      return `<polygon points="${pts}" class="radar-ring" />`;
+    }).join('');
+    const spokes = labels.map((_, i) => {
+      const [x, y] = point(i, 1);
+      return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="radar-spoke" />`;
+    }).join('');
+    const polys = (datasets || []).map((ds, di) => {
+      const color = ds.color || `var(--chart-${(di % 6) + 1})`;
+      const vals = ds.values || [];
+      const pts = labels.map((_, i) =>
+        point(i, Math.max(0, Math.min(1, (Number(vals[i]) || 0) / 100))).map((v) => v.toFixed(1)).join(',')).join(' ');
+      const dots = labels.map((_, i) => {
+        const [x, y] = point(i, Math.max(0, Math.min(1, (Number(vals[i]) || 0) / 100)));
+        return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.4" class="radar-dot" style="--seg:${esc(color)}" />`;
+      }).join('');
+      const cls = di === 0 ? 'radar-data' : 'radar-data2';
+      return `<polygon points="${pts}" class="${cls}" style="--seg:${esc(color)}" data-tip="${esc(ds.label || '')}" />${dots}`;
+    }).join('');
+    const labelsSvg = labels.map((label, i) => {
+      const [x, y] = point(i, 1.16);
+      const anchor = Math.abs(x - cx) < 6 ? 'middle' : (x > cx ? 'start' : 'end');
+      return `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" class="radar-label" text-anchor="${anchor}">${esc(label)}</text>`;
+    }).join('');
+    const legend = (datasets || []).length > 1
+      ? `<div class="radar-legend">${(datasets || []).map((ds, di) =>
+        `<span class="am-lg"><i style="background:${esc(ds.color || `var(--chart-${(di % 6) + 1})`)}"></i>${esc(ds.label || '')}</span>`).join('')}</div>`
+      : '';
+    return `<div class="chart-radar-wrap"><svg class="chart-radar" viewBox="${-pad} 0 ${size + pad * 2} ${size}" width="${size + pad * 2}" height="${size}" role="img">
+      ${rings}${spokes}${polys}${labelsSvg}</svg>${legend}</div>`;
+  }
+
+  Tip.ensure();
+
+  return {
+    sparkline, donut, gauge, bars, radar, radarMulti, waterfall, line, heatmap, ring,
+    areaMulti, bubble, treemap, histogram, barGrouped, tip: Tip.ensure, esc,
+  };
 })();
 
 window.Chart = Chart;

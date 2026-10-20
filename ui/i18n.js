@@ -737,7 +737,85 @@ const DICT = {
   '日志位置：%TEMP%\\localai-console.log': 'Log file: %TEMP%\\localai-console.log',
   '界面语言': 'Language',
   'GB 闲置': 'GB idle',
+  // ---- 运行时拼出来的文案：按片段翻译 ----
+  'Ollama 运行中': 'Ollama running',
+  '个模型': ' models',
+  '显卡、内存、磁盘现在什么状态，': 'What the GPU, memory and disks look like right now,',
+  '。停服务前先来这里看一眼，能把显存还回去。': '. Check here before stopping so VRAM goes back.',
+  '更新于': 'Updated at',
+  '核': ' cores',
+  '剩余': 'remaining',
+  '上下文': 'context',
+  '显存': 'VRAM',
+  '显存合计': 'VRAM total',
+  '机械硬盘': 'Spinning disk',
+  'NVMe 固态': 'NVMe SSD',
+  'USB 外接': 'USB drive',
+  '固态硬盘': 'SSD',
+  '系统没有提供寿命数据': 'The system does not report lifespan data',
+  '通电': 'Powered for',
+  '小时': ' hours',
+  '所有磁盘状态正常。': 'All disks are healthy.',
+  '固态盘有': 'Solid-state drives:',
+  '—— 模型放固态上加载快得多。': '— models load much faster from an SSD.',
+  '模型所在盘': 'Disk holding the models',
+  '运行中（': 'Running (',
+  '实际占用（去重后）': 'Actual usage (deduplicated)',
+  '模型数量': 'Number of models',
+  '分片文件数': 'Shard files',
+  '输出上限 maxTokens': 'Output limit maxTokens',
+  '压缩余量 headroomTokens': 'Compaction headroom headroomTokens',
+  '压缩阈值 thresholdRatio': 'Compaction threshold thresholdRatio',
+  '当前模型': 'Current model',
+  '安装目录': 'Install folder',
+  'Ollama 服务': 'Ollama service',
+  '模型目录': 'Model folder',
+  '可用。会话涨到约': 'Usable. Compaction triggers around',
+  '窗口': 'Window',
+  '输出': 'Output',
+  '余量': 'Headroom',
+  '保留比例': 'Retain ratio',
+  '实际生效': 'In effect',
+  '通过': 'Passed',
+  '采样一致': 'sampling agreement',
+  '提醒': 'Heads-up',
+  '还是': 'or',
+  '在': 'in',
+  '这里': 'here',
+  '或': 'or',
+  '计算中…': 'Calculating…',
+  '说': 'say',
+  '下一': 'next',
   '不够': 'Not enough',
+  // ---- 剩下的运行时片段 ----
+  '当前上下文 ': 'Current context ',
+  '时触发压缩，压到 ': ' tokens, then compressed to ',
+  'GB 总 / ': ' GB total / ',
+  '可清掉': ' can be cleared',
+  '装完没用过': 'never used',
+  '勾选这些模型': 'Select these models',
+  '这里': 'here',
+  '模型。删除会立刻释放磁盘空间，不影响其它模型。':
+    'model. Deleting frees disk space immediately and does not affect other models.',
+  '留空 = 按窗口自动推导。压缩余量太小会让压缩过于频繁，太大会让压力预算变成负数——那样压缩会被静默禁用，':
+    'Empty = derived from the window. Too small a headroom compacts too often; too large makes the pressure budget negative — compaction is then silently disabled,',
+  '表现就是「聊久了回答越来越短」。下面的实时检查会替你算。':
+    'which shows up as "answers get shorter as the chat goes on". The live check below does the maths for you.',
+  '用得最多的是': ', most used:',
+  '这里只统计「试用」页的对话，工作台里的用量统计不到（那是另一套 API）。':
+    '. Only chats from the "Try it" page are counted — the workbench uses a different API.',
+  '没有检测到独立显卡 —— 模型会跑在 CPU 上，速度会很慢。':
+    'No discrete GPU detected — models will run on the CPU and be slow.',
+  '次对话，': ' chats,',
+  'GB 可用': ' GB usable',
+  'GB 总': ' GB total',
+  '· 总 ': '· total ',
+  '的 100%': ' of the total',
+  '左右': ' or so',
+  '说一句你好': 'Say hello',
+  '不用切到工作台，直接在这里跟模型说两句话 ——':
+    'No need to switch to the workbench — just say something here —',
+  '（5 个，共': '(5 models, ',
   '偏紧': 'Tight',
   '够用': 'Fits',
   '上手清单': 'Getting started checklist',
@@ -943,6 +1021,30 @@ function keysByLength() {
 }
 
 /**
+ * 短语表：含中文、长度 ≥3 的键。
+ *
+ * 分段翻译只认「以中文开头」的片段，但界面上有些句子是「NVMe 固态 · 1863 GB」
+ * 这种以英文开头的 —— 光靠分段匹配不到。所以再走一遍「短语替换」：
+ * 把文本里出现的整个短语直接换掉。
+ */
+let phrases = null;
+function phraseList() {
+  if (!phrases) {
+    phrases = keysByLength().filter((k) => /[一-鿿]/.test(k) && k.length >= 3 && DICT[k]);
+  }
+  return phrases;
+}
+
+function translatePhrases(text) {
+  let out = text;
+  for (const k of phraseList()) {
+    if (out.indexOf(k) < 0) continue;
+    out = out.split(k).join(DICT[k]);
+  }
+  return out;
+}
+
+/**
  * 翻译一段可能混着动态内容的文本。
  *
  * 先试整段匹配（静态文案），不行就**按中文片段逐段翻译**（动态文案）。
@@ -955,7 +1057,7 @@ function translateText(text) {
   const trimmed = text.trim();
   const whole = DICT[trimmed];
   if (whole !== undefined) return text.replace(trimmed, whole);
-  return text.replace(/[一-鿿][^一-鿿\n]{0,80}/g, (seg) => {
+  const segmented = text.replace(/[一-鿿][一-鿿0-9A-Za-z：:，。、（）()「」·%/\-—…\s]{0,80}/g, (seg) => {
     const key = seg.trim();
     if (!key) return seg;
     if (DICT[key] !== undefined) return seg.replace(key, DICT[key]);
@@ -965,6 +1067,8 @@ function translateText(text) {
     }
     return seg;
   });
+  // 分段只认「以中文开头」的片段，英文开头的句子靠短语替换兜底
+  return translatePhrases(segmented);
 }
 
 /**

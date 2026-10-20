@@ -39,6 +39,8 @@ function fmtEta(sec) {
 let toastTimer = null;
 function toast(msg) {
   const t = $('toast');
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-live', 'polite');
   t.textContent = msg;
   t.hidden = false;
   clearTimeout(toastTimer);
@@ -49,6 +51,37 @@ function toast(msg) {
 const QUICK = ['qwen3:8b', 'qwen2.5:7b', 'qwen3:14b', 'qwen2.5:14b', 'qwen3:32b'];
 
 let state = null;
+
+/* --------------------------------------------------- 收藏（星标） */
+let favSet = new Set();
+let starFilterOn = false;
+try { favSet = new Set(JSON.parse(localStorage.getItem('lak_favs') || '[]')); } catch { favSet = new Set(); }
+function saveFavs() { try { localStorage.setItem('lak_favs', JSON.stringify([...favSet])); } catch { /* ignore */ } }
+function toggleFav(name) { if (favSet.has(name)) favSet.delete(name); else favSet.add(name); saveFavs(); renderModels(); }
+
+/* --------------------------------------------------- 数字滚动动画 */
+function animateNum(el, to, render) {
+  const from = Number(el.dataset.v || 0);
+  el.dataset.v = to;
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduced || Math.abs(to - from) < 0.5) { render(to); return; }
+  const dur = 420, t0 = performance.now();
+  function frame(t) {
+    const k = Math.min(1, (t - t0) / dur);
+    const e = 1 - Math.pow(1 - k, 3);
+    render(from + (to - from) * e);
+    if (k < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+function setGaugeNum(id, val, suffix) {
+  const el = $(id);
+  if (!el) return;
+  animateNum(el, val, (v) => { el.innerHTML = `${Math.round(v)}<span class="unit">${suffix}</span>`; });
+}
+
+/* --------------------------------------------------- 指标缓存 */
+let metricsCache = { at: 0, data: null };
 
 /* ------------------------------------------------------------------ 标签 */
 
@@ -80,8 +113,7 @@ for (const li of document.querySelectorAll('#tabs li')) {
 function applyLanguage(id) {
   if (!window.I18n) return;
   I18n.setLang(id);
-  I18n.applyI18n(document);
-  // 动态生成的界面重新渲染一遍
+  // 先按新语言把界面重画一遍
   renderStatus();
   renderModels();
   renderSettings();
@@ -91,6 +123,8 @@ function applyLanguage(id) {
   renderServices();
   renderHelp();
   renderShortcuts();
+  // 再把文案翻过去 —— 放在最后，这样新生成的文字也在里面
+  I18n.applyI18n(document);
   // 标题也跟着变
   document.title = I18n.currentLang() === 'en' ? 'Local AI Console' : '本地 AI 控制台';
 }
@@ -466,12 +500,18 @@ function fmtGB(n) {
 }
 
 async function loadDashboard() {
+  const now = Date.now();
   let data;
-  try {
-    data = await (await fetch('/api/metrics')).json();
-  } catch (e) {
-    $('dashStamp').textContent = `读取失败：${e.message}`;
-    return;
+  if (metricsCache.data && now - metricsCache.at < 1500) {
+    data = metricsCache.data;
+  } else {
+    try {
+      data = await (await fetch('/api/metrics')).json();
+      metricsCache = { at: now, data };
+    } catch (e) {
+      $('dashStamp').textContent = `读取失败：${e.message}`;
+      return;
+    }
   }
   renderMetrics(data);
 }
@@ -485,7 +525,7 @@ function renderMetrics(data) {
   /* ---- 四个仪表盘 ---- */
   const gpu0 = (m.gpu || [])[0];
   const vramPct = gpu0 ? gpu0.memoryPercent : null;
-  $('gVram').innerHTML = vramPct == null ? '—' : `${vramPct}<span class="unit">%</span>`;
+  if (vramPct == null) $('gVram').innerHTML = '—'; else setGaugeNum('gVram', vramPct, '%');
   $('gVramSub').textContent = gpu0
     ? `${(gpu0.memoryUsedMB / 1024).toFixed(1)} / ${(gpu0.memoryTotalMB / 1024).toFixed(1)} GB`
     : '没有检测到独立显卡';
@@ -498,17 +538,17 @@ function renderMetrics(data) {
   }
 
   const cpuPct = m.cpu ? m.cpu.usage : null;
-  $('gCpu').innerHTML = cpuPct == null ? '—' : `${cpuPct}<span class="unit">%</span>`;
+  if (cpuPct == null) $('gCpu').innerHTML = '—'; else setGaugeNum('gCpu', cpuPct, '%');
   $('gCpuSub').textContent = m.cpu ? `${m.cpu.model} · ${m.cpu.cores} 核` : '未知';
   $('gCpuSpark').innerHTML = Chart.sparkline(h.cpu || [], { width: 150, height: 34, min: 0, max: 100 });
 
   const memPct = m.memory ? m.memory.percent : null;
-  $('gMem').innerHTML = memPct == null ? '—' : `${memPct}<span class="unit">%</span>`;
+  if (memPct == null) $('gMem').innerHTML = '—'; else setGaugeNum('gMem', memPct, '%');
   $('gMemSub').textContent = m.memory ? `${fmtGB(m.memory.usedGB)} / ${fmtGB(m.memory.totalGB)}` : '未知';
   $('gMemSpark').innerHTML = Chart.sparkline(h.memory || [], { width: 150, height: 34, min: 0, max: 100 });
 
   const diskPct = m.disk ? m.disk.usedPercent : null;
-  $('gDisk').innerHTML = diskPct == null ? '—' : `${diskPct}<span class="unit">%</span>`;
+  if (diskPct == null) $('gDisk').innerHTML = '—'; else setGaugeNum('gDisk', diskPct, '%');
   $('gDiskSub').textContent = m.disk ? `${m.disk.path} 剩余 ${fmtGB(m.disk.freeGB)} / ${fmtGB(m.disk.totalGB)}` : '未知';
   $('gDiskSpark').innerHTML = Chart.sparkline(h.disk || [], { width: 150, height: 34, min: 0, max: 100 });
 
@@ -558,6 +598,59 @@ function renderMetrics(data) {
     ['Ollama', m.ollama && m.ollama.up ? `运行中（${m.ollama.version || '版本未知'}）` : '未运行'],
     ['Node.js', m.node ? `${m.node.version} · ${m.node.platform}` : '—'],
   ].map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('');
+
+  renderLoad(data);
+  renderScore(m);
+}
+
+/** 系统健康总分：把四项负载百分比合成一个 0~100 的分数，分数越高越轻松 */
+function renderScore(m) {
+  const box = $('dashScore');
+  if (!box) return;
+  const g = (m.gpu || [])[0];
+  const parts = [
+    ['显卡', g ? g.memoryPercent : null],
+    ['CPU', m.cpu ? m.cpu.usage : null],
+    ['内存', m.memory ? m.memory.percent : null],
+    ['磁盘', m.disk ? m.disk.usedPercent : null],
+  ].filter((p) => p[1] != null);
+  if (!parts.length) { box.innerHTML = ''; return; }
+  const score = Math.max(0, Math.min(100, Math.round(100 - parts.reduce((n, p) => n + p[1], 0) / parts.length)));
+  const col = score >= 80 ? 'var(--ok)' : score >= 55 ? 'var(--warn)' : 'var(--err)';
+  const size = 96, thick = 11, r = (size - thick) / 2, cx = size / 2, cy = size / 2, C = 2 * Math.PI * r;
+  const ring = `<svg class="chart-ring" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke-width="${thick}" class="ring-track"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="${thick}" stroke-linecap="round"
+      stroke-dasharray="${(C * score / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>
+    <text x="${cx}" y="${cy - 2}" class="ring-value" text-anchor="middle">${score}</text>
+    <text x="${cx}" y="${cy + 16}" class="ring-label" text-anchor="middle">健康</text></svg>`;
+  const bars = parts.map((p) => {
+    const pc = p[1] >= 90 ? 'var(--err)' : p[1] >= 75 ? 'var(--warn)' : 'var(--ok)';
+    return `<div class="score-bar-row"><span>${p[0]}</span><div class="score-bar-track"><i class="score-bar-fill" style="width:${Math.round(p[1])}%;--seg:${pc}"></i></div><span class="score-bar-val">${Math.round(p[1])}%</span></div>`;
+  }).join('');
+  const sub = score >= 80 ? '负载轻松，跑得动' : score >= 55 ? '有点吃紧，留意显存' : '资源吃紧，建议先关掉别的程序';
+  box.innerHTML = `<div class="score-card">
+    <div class="score-ring">${ring}</div>
+    <div class="score-main"><div class="score-num">${score}<small> 分</small></div><div class="score-sub">${sub}</div></div>
+    <div class="score-bars">${bars}</div></div>`;
+}
+
+/** 系统负载走势：把显存 / CPU / 内存的历史百分比叠成一张面积图 */
+function renderLoad(data) {
+  const box = $('dashLoad');
+  if (!box) return;
+  const h = (data && data.history) || {};
+  const take = (a) => (a || []).slice(-60);
+  const v = take(h.vram), c = take(h.cpu), me = take(h.memory);
+  const len = Math.max(v.length, c.length, me.length);
+  const pad = (arr) => { const o = arr.slice(); while (o.length < len) o.unshift(null); return o; };
+  const labels = Array.from({ length: len }, () => '');
+  if (!len) { box.innerHTML = '<div class="chart-empty">还没有历史数据（开着自动刷新攒一会儿就有）</div>'; return; }
+  box.innerHTML = Chart.areaMulti({ labels, series: [
+    { name: '显存', color: 'var(--chart-1)', data: pad(v) },
+    { name: 'CPU', color: 'var(--chart-2)', data: pad(c) },
+    { name: '内存', color: 'var(--chart-3)', data: pad(me) },
+  ] }, { width: 640, height: 170, unit: '%' });
 }
 
 function startDashTimer() {
@@ -737,6 +830,7 @@ function renderModels() {
 
   let list = all;
   if (q) list = list.filter((m) => m.name.toLowerCase().includes(q));
+  if (starFilterOn) list = list.filter((m) => favSet.has(m.name));
   list = list.slice().sort((a, b) => {
     if (sort === 'name') return a.name.localeCompare(b.name);
     if (sort === 'date') return String(b.modified || '').localeCompare(String(a.modified || ''));
@@ -769,7 +863,7 @@ function renderModels() {
     const w = Math.max(3, Math.round(((m.sizeGB || 0) / maxSize) * 100));
     const isCurrent = state.model && state.model === m.name;
     return `
-    <div class="mrow${isCurrent ? ' current' : ''}" data-model="${esc(m.name)}">
+    <div class="mrow${isCurrent ? ' current' : ''}${favSet.has(m.name) ? ' starred' : ''}" data-model="${esc(m.name)}">
       <label class="mcheck"><input type="checkbox" data-pick="${esc(m.name)}"></label>
       <div class="mi">
         <div class="mn">${esc(m.name)}${isCurrent ? '<span class="tag current">使用中</span>' : ''}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}${staleTag(m.name)}</div>
@@ -778,6 +872,7 @@ function renderModels() {
       </div>
       <div class="mz">${m.sizeGB} GB</div>
       <div class="ma">
+        <button class="star-btn${favSet.has(m.name) ? ' on' : ''}" data-star="${esc(m.name)}" title="收藏 / 取消收藏">${favSet.has(m.name) ? '★' : '☆'}</button>
         <button class="btn ghost small" data-alias="${esc(m.name)}">起别名</button>
         <button class="btn ghost small danger" data-del="${esc(m.name)}">删除</button>
       </div>
@@ -799,6 +894,10 @@ function renderModels() {
         btn.textContent = picked.length ? `批量删除（${picked.length}）` : '批量删除';
       }
     });
+  }
+
+  for (const b of document.querySelectorAll('[data-star]')) {
+    b.addEventListener('click', () => toggleFav(b.dataset.star));
   }
 }
 
@@ -824,10 +923,19 @@ function askDelete(model, btn) {
 }
 
 if ($('modelSearch')) {
-  $('modelSearch').addEventListener('input', () => renderModels());
+  let _st;
+  $('modelSearch').addEventListener('input', () => { clearTimeout(_st); _st = setTimeout(renderModels, 120); });
 }
 if ($('modelSort')) {
   $('modelSort').addEventListener('change', () => renderModels());
+}
+if ($('btnStarFilter')) {
+  $('btnStarFilter').addEventListener('click', () => {
+    starFilterOn = !starFilterOn;
+    const b = $('btnStarFilter');
+    if (b) { b.textContent = starFilterOn ? '★ 收藏' : '☆ 收藏'; b.classList.toggle('on', starFilterOn); }
+    renderModels();
+  });
 }
 
 /** 模型能力标签：单独拉一次，失败就不显示标签（不影响主流程） */
@@ -934,6 +1042,23 @@ async function loadSpace() {
       <div class="row"><span class="k">分片文件数</span><span class="v">${p.blobCount}</span></div>
     </div>
     ${othersHtml}`;
+
+  // 体积分布直方图 + 占比矩形树图（v1.9 可视化增强）
+  const tmBox = $('spaceTreemap');
+  if (tmBox) tmBox.innerHTML = Chart.treemap(segments, { width: 460, height: 72, unit: 'GB' });
+  const hb = $('sizeHist');
+  if (hb) {
+    const bands = [
+      { label: '<2G', lo: 0, hi: 2 }, { label: '2-4G', lo: 2, hi: 4 }, { label: '4-8G', lo: 4, hi: 8 },
+      { label: '8-16G', lo: 8, hi: 16 }, { label: '16-32G', lo: 16, hi: 32 }, { label: '≥32G', lo: 32, hi: Infinity },
+    ];
+    const counts = bands.map((b, i) => ({
+      label: b.label,
+      value: p.models.filter((m) => m.sizeGB >= b.lo && m.sizeGB < b.hi).length,
+      color: `var(--chart-${(i % 6) + 1})`,
+    }));
+    hb.innerHTML = Chart.histogram(counts, { width: 460, height: 170 });
+  }
 }
 
 function renderConfig() {
@@ -1617,6 +1742,27 @@ if ($('playInput')) {
   });
 }
 
+/* 对话导出为独立 HTML（自包含、可双击打开） */
+async function exportChatHtml() {
+  const list = playMessages().filter((m) => m.role === 'user' || m.role === 'assistant');
+  if (!list.length) { toast('还没有对话可导出'); return; }
+  const rows = list.map((m) => `<div class="msg ${m.role}"><div class="role">${m.role === 'user' ? '我' : '模型'}</div><div class="body">${esc(m.content).replace(/\n/g, '<br>')}</div></div>`).join('');
+  const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>本地 AI 对话导出</title>'
+    + '<style>body{font-family:system-ui,-apple-system,sans-serif;max-width:760px;margin:24px auto;padding:0 16px;color:#1a1d21;background:#f6f7f9}'
+    + '.msg{margin:14px 0;padding:12px 14px;border-radius:10px}.user{background:#eaf1fe}.assistant{background:#fff;border:1px solid #e3e6ea}'
+    + '.role{font-size:12px;color:#6b7280;margin-bottom:6px}.body{white-space:pre-wrap;line-height:1.6}</style></head><body>'
+    + '<h2>本地 AI 对话导出</h2>' + rows + '<hr><p style="color:#6b7280;font-size:12px">由 local-ai-kit 导出 · '
+    + new Date().toLocaleString() + '</p></body></html>';
+  const blob = new Blob([html], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `对话-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.html`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('已导出为网页文件');
+}
+if ($('btnExportHtml')) $('btnExportHtml').addEventListener('click', exportChatHtml);
+
 /* ---------------------------------------------------------------- 基准 */
 
 function benchModels() {
@@ -1676,8 +1822,20 @@ async function benchCompare(r) {
     box.innerHTML = [
       `<div class="row"><span class="k">历史最佳</span><span class="v">${best} t/s</span></div>`,
       `<div class="row"><span class="k">历史平均</span><span class="v">${avg} t/s（共 ${items.length} 次）</span></div>`,
-      `<div class="row"><span class="k">这次</span><span class="v ${tone}">${now} t/s（比最佳${diff >= 0 ? '快' : '慢'} ${Math.abs(diff)}%）</span></div>`,
+      `    <div class="row"><span class="k">这次</span><span class="v ${tone}">${now} t/s（比最佳${diff >= 0 ? '快' : '慢'} ${Math.abs(diff)}%）</span></div>`,
     ].join('');
+
+    const gb = $('benchGroup');
+    if (gb) {
+      if (items.length < 2) gb.innerHTML = '<div class="chart-empty">再测一次就能和上次比了</div>';
+      else gb.innerHTML = Chart.barGrouped([
+        { label: '生成速度', bars: [
+          { value: now, color: 'var(--accent)', text: String(now) },
+          { value: best, color: 'var(--ok)', text: String(best) },
+          { value: avg, color: 'var(--chart-3)', text: String(avg) },
+        ] },
+      ], { width: 460, height: 200 });
+    }
   } catch { /* ignore */ }
 }
 
@@ -2074,6 +2232,22 @@ async function renderFitRadar() {
       <div class="fc-radar">${Chart.radar(axes, s.values, { size: 170 })}</div>
       <div class="fc-meta">${esc(s.m.params || '')} ${esc(s.m.quant || '')} · ${s.m.sizeGB} GB</div>
     </div>`).join('');
+
+  // 适配度气泡图：x=体积, y=速度估算, r=参数量（右下角最大最划算）
+  const bb = $('fitBubble');
+  if (bb) {
+    const items = scored.map((s, i) => ({
+      x: s.m.sizeGB || 0,
+      y: s.values[2] || 0,
+      r: parseParams(s.m.params) || 1,
+      label: s.m.name.split(':')[0],
+      color: `var(--chart-${(i % 6) + 1})`,
+    }));
+    if (!items.length) bb.innerHTML = emptyBox('models');
+    else bb.innerHTML = Chart.bubble(items, {
+      width: 620, height: 300, xLabel: '体积', yLabel: '速度(t/s)', rLabel: '参数(B)', xunit: 'G',
+    });
+  }
 }
 
 /* ------------------------------------------------- 诊断与维护（网络/清理/报告） */
@@ -2141,6 +2315,17 @@ if ($('btnReport')) {
   $('btnReport').addEventListener('click', () => {
     window.open('/api/report', '_blank');
     toast('诊断报告已开始下载');
+  });
+}
+if ($('btnReportAgg')) {
+  $('btnReportAgg').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = '/api/report/aggregate';
+    a.download = `localai-aggregate-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    toast('聚合报告已开始下载');
   });
 }
 
@@ -3002,6 +3187,18 @@ function renderHealthResult(s, ok) {
       box.innerHTML = `
         <div class="health-gauge">${Chart.gauge(overall, { label: '总体通过率' })}</div>
         <div class="health-bars">${Chart.bars(items, { width: 340, labelW: 78, valueW: 52 })}</div>`;
+    }
+
+    const gbox = $('healthGroup');
+    if (gbox) {
+      if (!cats.length) gbox.innerHTML = emptyBox('health');
+      else gbox.innerHTML = Chart.barGrouped(cats.map((c) => ({
+        label: c.cat.length > 5 ? c.cat.slice(0, 5) : c.cat,
+        bars: [
+          { value: c.passed, color: 'var(--ok)', text: String(c.passed) },
+          { value: c.total - c.passed, color: 'var(--err)', text: String(c.total - c.passed) },
+        ],
+      })), { width: 460, height: 210 });
     }
   }
   toast(ok ? '体检全部达标' : '体检有不达标项，看下面的判据');

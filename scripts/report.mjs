@@ -11,9 +11,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { loadConfig } from './config.mjs';
 import { KIT_VERSION } from './install.mjs';
+import { readStore, storeDir } from './store.mjs';
 
 /** 敏感信息：路径里的用户名、令牌之类，不该进报告 */
 function scrub(text) {
@@ -134,4 +136,58 @@ export function buildReport(ctx = {}) {
   out += section('隐私说明', '本报告已自动去掉用户名与令牌类信息。');
 
   return scrub(out);
+}
+
+/**
+ * 综合评测报告（JSON）。
+ *
+ * 把「测速历史 + 体检历史 + 模型实测排行」汇总成一个 JSON 文件，方便：
+ *   - 跨机器对比（同一套题、同一套指标，比官网跑分有说服力）
+ *   - 发给别人 / 存档 / 二次画图
+ *
+ * 只读 store.json，不碰任何用户对话或日志。
+ */
+export function buildAggregateReport(ctx = {}) {
+  const store = ctx.store || readStore();
+  const bench = Array.isArray(store.bench) ? store.bench : [];
+  const health = Array.isArray(store.health) ? store.health : [];
+  const ranking = Array.isArray(store.ranking) ? store.ranking : [];
+
+  const genOf = (b) => Number(b.gen || (b.verdict && b.verdict.genTokensPerSec) || 0);
+  const bestGen = bench.length ? Math.max(...bench.map(genOf)) : null;
+  const lastHealth = health.length ? health[health.length - 1] : null;
+  const lastHealthRate = lastHealth
+    ? (lastHealth.rate != null ? lastHealth.rate
+      : (lastHealth.eval ? lastHealth.eval.passed / Math.max(1, lastHealth.eval.total) : null))
+    : null;
+
+  return {
+    meta: {
+      generatedAt: new Date().toISOString(),
+      kitVersion: KIT_VERSION,
+      node: process.versions.node,
+      platform: `${os.platform()} ${os.release()} ${os.arch()}`,
+    },
+    summary: {
+      benchRuns: bench.length,
+      healthRuns: health.length,
+      rankingSnapshots: ranking.length,
+      bestGenTokensPerSec: bestGen == null ? null : Math.round(bestGen * 10) / 10,
+      lastHealthPassRate: lastHealthRate == null ? null : Math.round(lastHealthRate * 1000) / 1000,
+    },
+    bench,
+    health,
+    ranking,
+  };
+}
+
+// 作为脚本直接运行：把综合评测报告写到文件（默认写在 store 旁边）
+const isMain = import.meta.url === pathToFileURL(process.argv[1] || '').href;
+if (isMain) {
+  const out = buildAggregateReport();
+  const file = process.argv.slice(2).find((a) => !a.startsWith('-'))
+    || path.join(storeDir(), `eval-report-${new Date().toISOString().slice(0, 10)}.json`);
+  fs.writeFileSync(file, JSON.stringify(out, null, 2), 'utf8');
+  console.log(`已生成综合评测报告：${file}`);
+  console.log(`  测速 ${out.summary.benchRuns} 次 · 体检 ${out.summary.healthRuns} 次 · 排行快照 ${out.summary.rankingSnapshots} 份`);
 }
