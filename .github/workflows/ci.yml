@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 测试 (Node ${{ matrix.node }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['20', '22', '24']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: 语法检查
+        run: npm run lint
+
+      - name: 单元测试
+        run: npm test
+
+  self-check:
+    name: 打包自检
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 确认运行时文件清单齐全
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --input-type=module -e "import fs from 'node:fs'; const m = await import('./scripts/runtime-assets.mjs'); const missing = m.SCRIPT_FILES.filter(f => !fs.existsSync('scripts/' + f)); if (missing.length) { console.error('缺少运行时文件: ' + missing.join(', ')); process.exit(1); } console.log('运行时文件齐全 (' + m.SCRIPT_FILES.length + ' 个)');"
+
+      - name: 确认批处理文件是 CRLF
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bad = @()
+          Get-ChildItem -Recurse -Include *.cmd,*.bat,*.ps1 | ForEach-Object {
+            $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+              if ($bytes[$i] -eq 10 -and ($i -eq 0 -or $bytes[$i-1] -ne 13)) { $bad += $_.FullName; break }
+            }
+          }
+          if ($bad.Count -gt 0) {
+            Write-Error ("这些批处理文件不是 CRLF 结尾，cmd.exe 会出问题：`n" + ($bad -join "`n"))
+          }
+          Write-Output "批处理文件换行符正确"

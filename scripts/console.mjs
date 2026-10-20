@@ -36,6 +36,7 @@ import { streamChat, sanitizeMessages } from './chat.mjs';
 import { runBenchmark } from './bench.mjs';
 import { exportBundle, importBundle } from './backup.mjs';
 import { diagnose, repair } from './repair.mjs';
+import { compareVersions } from './version.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -560,19 +561,6 @@ function runHealth(quick) {
 
 /* ------------------------------------------------------------------ 日志 */
 
-/** 比较两个版本号：a > b 返回 1，a < b 返回 -1，相等返回 0 */
-export function compareVersions(a, b) {
-  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const x = pa[i] || 0;
-    const y = pb[i] || 0;
-    if (x !== y) return x > y ? 1 : -1;
-  }
-  return 0;
-}
-
 /**
  * 控制台自己的日志文件。
  *
@@ -600,6 +588,78 @@ function tailLog(lines = 200) {
   } catch { return '（还没有日志）'; }
 }
 
+/** 组装 /api/metrics 的内容（首屏注入和接口共用同一份逻辑与形状） */
+async function buildMetrics() {
+  const now = Date.now();
+  // 1 秒内重复请求直接用缓存，省掉一次 nvidia-smi 调用
+  let current = null;
+  if (now - metricsAt < 1000 && lastMetrics) {
+    current = lastMetrics;
+  } else {
+    current = await collectMetrics({ modelDir: cfg.modelDir || '' });
+    lastMetrics = current;
+    metricHistory.push({
+      at: current.at,
+      cpu: current.cpu.usage,
+      memory: current.memory.percent,
+      gpu: current.gpu[0] ? current.gpu[0].utilization : null,
+      vram: current.gpu[0] ? current.gpu[0].memoryPercent : null,
+      disk: current.disk ? current.disk.usedPercent : null,
+    });
+    metricsAt = now;
+  }
+  return {
+    current,
+    history: {
+      cpu: metricHistory.series('cpu'),
+      memory: metricHistory.series('memory'),
+      gpu: metricHistory.series('gpu'),
+      vram: metricHistory.series('vram'),
+      disk: metricHistory.series('disk'),
+      at: metricHistory.series('at'),
+    },
+  };
+}
+
+/** 组装 /api/config（GET）的内容（首屏注入和接口复用同一份逻辑） */
+async function buildConfigPayload() {
+  const cs = readContextState();
+  const running = !!(await ollamaVersion());
+  const models = running ? await listModels() : [];
+  return {
+    ...cs,
+    models: (models || []).map((m) => m.name),
+    limits: { min: CTX_MIN, max: CTX_MAX },
+    presets: CTX_PRESETS,
+    kitVersion: KIT_VERSION,
+    dshHome: process.env.DSH_HOME || path.join(os.homedir(), '.dsh'),
+  };
+}
+
+/** 组装 /api/state 的内容（首屏注入和接口复用同一份逻辑） */
+async function buildState() {
+  const running = !!(await ollamaVersion());
+  const models = running ? await listModels() : [];
+  const settings = readSettings();
+  const disks = detectDisks();
+  return {
+    root: ROOT,
+    model: cfg.model || '',
+    modelDir: cfg.modelDir || '',
+    contextWindow: cfg.contextWindow || 8192,
+    running,
+    models: models || [],
+    settings,
+    disks: disks.map((d) => ({ letter: d.letter, freeGB: d.freeGB, totalGB: d.totalGB })),
+    modelDirFreeGB: cfg.modelDir ? freeSpaceGB(cfg.modelDir) : null,
+    busy,
+    queue: pullQueue.snapshot(),
+    bench: lastBench,
+    health: lastHealth,
+    logPath: path.join(os.tmpdir(), 'localai-console.log'),
+  };
+}
+
 /* ------------------------------------------------------------------ 路由 */
 
 const server = createSafeServer(async (req, res) => {
@@ -620,35 +680,7 @@ const server = createSafeServer(async (req, res) => {
   /* ---------------------------------------------------------- 系统概览 */
   // 只读接口，放在 Strata 适配器之前 —— 两种部署模式都要能看机器状态。
   if (p === '/api/metrics') {
-    const now = Date.now();
-    // 1 秒内重复请求直接用缓存，省掉一次 nvidia-smi 调用
-    let current = null;
-    if (now - metricsAt < 1000 && lastMetrics) {
-      current = lastMetrics;
-    } else {
-      current = await collectMetrics({ modelDir: cfg.modelDir || '' });
-      lastMetrics = current;
-      metricHistory.push({
-        at: current.at,
-        cpu: current.cpu.usage,
-        memory: current.memory.percent,
-        gpu: current.gpu[0] ? current.gpu[0].utilization : null,
-        vram: current.gpu[0] ? current.gpu[0].memoryPercent : null,
-        disk: current.disk ? current.disk.usedPercent : null,
-      });
-      metricsAt = now;
-    }
-    return json(res, 200, {
-      current,
-      history: {
-        cpu: metricHistory.series('cpu'),
-        memory: metricHistory.series('memory'),
-        gpu: metricHistory.series('gpu'),
-        vram: metricHistory.series('vram'),
-        disk: metricHistory.series('disk'),
-        at: metricHistory.series('at'),
-      },
-    });
+    return json(res, 200, await buildMetrics());
   }
 
   if (cfg.backend === 'strata') return handleStrata(req, res, { cfg, root: ROOT, ui: UI, token: TOKEN });
@@ -672,40 +704,11 @@ const server = createSafeServer(async (req, res) => {
   }
 
   if (p === '/api/state') {
-    const running = !!(await ollamaVersion());
-    const models = running ? await listModels() : [];
-    const settings = readSettings();
-    const disks = detectDisks();
-    return json(res, 200, {
-      root: ROOT,
-      model: cfg.model || '',
-      modelDir: cfg.modelDir || '',
-      contextWindow: cfg.contextWindow || 8192,
-      running,
-      models: models || [],
-      settings,
-      disks: disks.map((d) => ({ letter: d.letter, freeGB: d.freeGB, totalGB: d.totalGB })),
-      modelDirFreeGB: cfg.modelDir ? freeSpaceGB(cfg.modelDir) : null,
-      busy,
-      queue: pullQueue.snapshot(),
-      bench: lastBench,
-      health: lastHealth,
-      logPath: path.join(os.tmpdir(), 'localai-console.log'),
-    });
+    return json(res, 200, await buildState());
   }
 
   if (p === '/api/config' && req.method === 'GET') {
-    const cs = readContextState();
-    const running = !!(await ollamaVersion());
-    const models = running ? await listModels() : [];
-    return json(res, 200, {
-      ...cs,
-      models: (models || []).map((m) => m.name),
-      limits: { min: CTX_MIN, max: CTX_MAX },
-      presets: CTX_PRESETS,
-      kitVersion: KIT_VERSION,
-      dshHome: process.env.DSH_HOME || path.join(os.homedir(), '.dsh'),
-    });
+    return json(res, 200, await buildConfigPayload());
   }
 
   if (p === '/api/config' && req.method === 'POST') {
@@ -974,7 +977,14 @@ const server = createSafeServer(async (req, res) => {
     return res.end('404');
   }
   if (file === 'console.html') {
-    const inject = `<script>window.__TOKEN__='${TOKEN}';</script>`;
+    // 首屏数据直接注入，省掉一次往返 —— 页面一打开就有内容，不闪「加载中」
+    const boot = {
+      state: await buildState(),
+      config: await buildConfigPayload(),
+      metrics: await buildMetrics(),
+    };
+    const inject = `<script>window.__BOOT__=${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>`
+      + `<script>window.__TOKEN__='${TOKEN}';</script>`;
     const html = fs.readFileSync(full, 'utf8').replace('<script src="console.js"></script>', `${inject}\n<script src="console.js"></script>`);
     applySecurityHeaders(res);
     res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' });

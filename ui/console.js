@@ -133,6 +133,23 @@ document.addEventListener('keydown', (e) => {
 /* ------------------------------------------------------------------ 状态 */
 
 async function loadState() {
+  // 首屏数据是服务端注入的（window.__BOOT__），先直接用，省一次往返也避免闪白
+  if (window.__BOOT__ && window.__BOOT__.state && !state) {
+    state = window.__BOOT__.state;
+    ctxState = window.__BOOT__.config || null;
+    renderStatus();
+    renderModels();
+    renderSettings();
+    renderConfig();
+    if (ctxState) renderContext();
+    renderQueue(state.queue);
+    playModels();
+    benchModels();
+    loadSpace().catch(() => {});
+    loadCaps();
+    if (window.__BOOT__.metrics) renderMetrics(window.__BOOT__.metrics);
+    return;
+  }
   state = await (await fetch('/api/state')).json();
   renderStatus();
   renderModels();
@@ -182,8 +199,13 @@ async function loadDashboard() {
     $('dashStamp').textContent = `读取失败：${e.message}`;
     return;
   }
-  const m = data.current || {};
-  const h = data.history || {};
+  renderMetrics(data);
+}
+
+/** 把指标画出来（首屏注入和轮询共用） */
+function renderMetrics(data) {
+  const m = (data && data.current) || {};
+  const h = (data && data.history) || {};
   $('dashStamp').textContent = `更新于 ${new Date(m.at || Date.now()).toLocaleTimeString()}`;
 
   /* ---- 四个仪表盘 ---- */

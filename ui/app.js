@@ -212,6 +212,43 @@ function renderDetect(d) {
 
   const errs = d.issues.filter((i) => i.level === 'error').length;
   footerMsg(errs ? '有必须先解决的问题，请看上面的红框' : '检测完成 —— 点右下角「继续」');
+
+  renderRadar(d);
+}
+
+/**
+ * 硬件雷达图：把「这台电脑」和「推荐配置」放一起比。
+ *
+ * 用户最关心的其实是「我这样够不够」—— 一张图比一堆数字直观。
+ * 参考值取 README 里写的推荐档：24G 显存 / 64G 内存 / 50G 空闲盘 / 16 核。
+ */
+function renderRadar(d) {
+  const box = $('detectRadar');
+  if (!box) return;
+  const sys = d.system || { cores: 0, memoryGB: 0 };
+  const bestDisk = Math.max(0, ...d.disks.map((x) => x.freeGB));
+  const pct = (value, target) => Math.max(0, Math.min(100, Math.round((value / target) * 100)));
+
+  const axes = ['显存', '内存', '空闲盘', 'CPU 核数', 'Node'];
+  const values = [
+    pct(d.gpu.vramGB || 0, 24),
+    pct(sys.memoryGB || 0, 64),
+    pct(bestDisk, 50),
+    pct(sys.cores || 0, 16),
+    d.node.ok ? 100 : 40,
+  ];
+
+  const items = axes.map((label, i) => ({
+    label,
+    value: values[i],
+    text: `${values[i]}%`,
+    color: values[i] >= 85 ? 'var(--ok)' : values[i] >= 50 ? 'var(--warn)' : 'var(--err)',
+  }));
+
+  box.innerHTML = `
+    <div class="wizard-radar">${Chart.radar(axes, values, { size: 230 })}</div>
+    <div class="wizard-bars">${Chart.bars(items, { width: 300, labelW: 70, valueW: 48 })}</div>
+    <p class="row-hint">参考值：24G 显存 / 64G 内存 / 50G 空闲盘 / 16 核 CPU。<b>不达标也能装</b>，只是能跑的模型更小、速度更慢。</p>`;
 }
 
 function renderEnvBadge(d) {
@@ -342,6 +379,7 @@ function paintContext() {
   if (est == null) {
     $('ctxInfo').innerHTML = `上下文 <b>${label}</b>`
       + (info ? '' : '（手动输入的模型不知道体积，先保守取 8K）');
+    renderVramChart(d, info, vram);
     return;
   }
   const ratio = vram ? est / vram : 0;
@@ -350,6 +388,37 @@ function paintContext() {
       : ratio > 0.85 ? '<span class="ctx-flag tight">偏紧</span>'
         : '<span class="ctx-flag ok">够用</span>';
   $('ctxInfo').innerHTML = `上下文 <b>${label}</b> · 预计占用 <b>${est} GB</b> / 显存 ${vram} GB ${flag}`;
+
+  renderVramChart(d, info, vram);
+}
+
+/** 各上下文档位的显存占用，和显卡实际显存对比 */
+function renderVramChart(d, info, vram) {
+  const box = $('ctxVramChart');
+  if (!box) return;
+  if (!info || !info.vramEstimate) {
+    box.innerHTML = '<div class="chart-empty">手动输入的模型不知道体积，先保守取 8K。</div>';
+    return;
+  }
+  const opts = d.contextOptions || [];
+  const items = opts.map((o) => {
+    const need = info.vramEstimate[o.value];
+    const over = vram ? need > vram : false;
+    return {
+      label: o.label,
+      value: need,
+      text: `${need} GB`,
+      color: over ? 'var(--err)' : (vram && need / vram > 0.85 ? 'var(--warn)' : 'var(--chart-1)'),
+    };
+  });
+  items.push({
+    label: '你的显存',
+    value: vram || 0,
+    text: `${vram} GB`,
+    color: 'var(--chart-3)',
+  });
+  box.innerHTML = Chart.bars(items, { width: 340, labelW: 74, valueW: 62 })
+    + '<p class="row-hint">红色那档表示模型可能装不进显存 —— 选小一档的上下文更稳。</p>';
 }
 
 /* ------------------------------------------------------------ 存放位置 */

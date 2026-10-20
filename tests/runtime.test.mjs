@@ -81,7 +81,11 @@ test('configuration accepts Windows BOM and replaces files atomically', () => {
     assert.equal(loadConfig(root).model, 'first');
     saveConfig(root, { model: 'second' });
     assert.equal(loadConfig(root).model, 'second');
-    assert.deepEqual(fs.readdirSync(root), ['配置.json']);
+    // 写配置前会留一份带时间戳的备份（最多 3 份），所以目录里不止一个文件
+    const files = fs.readdirSync(root);
+    assert.ok(files.includes('配置.json'));
+    assert.ok(files.some((f) => f.startsWith('配置.json.') && f.endsWith('.bak')), '应该留有备份');
+    assert.ok(!files.some((f) => f.endsWith('.tmp')), '不该留下临时文件');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -946,6 +946,22 @@ html[data-theme="dark"] {
 .chat-stats .k { color: var(--text-dim); }
 .chat-stats .v { font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* ---- 安装向导里的图表 ---- */
+
+.wizard-viz {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px; margin: 18px 0;
+  display: flex; gap: 22px; align-items: center; flex-wrap: wrap;
+}
+.wizard-radar { flex: none; }
+.wizard-bars { flex: 1; min-width: 260px; }
+.wizard-viz .row-hint { flex: 1 1 100%; margin: 6px 0 0; }
+
+@media (max-width: 640px) {
+  .wizard-viz { flex-direction: column; align-items: center; }
+  .wizard-bars { width: 100%; }
+}
+
 /* ---- 无障碍：焦点可见 + 减少动效 ---- */
 
 :focus-visible {

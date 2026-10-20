@@ -203,6 +203,7 @@ const Chart = (() => {
   function radar(axes, values, opts = {}) {
     const labels = axes || [];
     const size = opts.size || 220;
+    const pad = opts.pad || 38;          // 留给轴标签的空间
     const cx = size / 2;
     const cy = size / 2 + 6;
     const r = size / 2 - 34;
@@ -231,12 +232,13 @@ const Chart = (() => {
     }).join('');
 
     const labelsSvg = labels.map((label, i) => {
-      const [x, y] = point(i, 1.19);
+      const [x, y] = point(i, 1.16);
       const anchor = Math.abs(x - cx) < 6 ? 'middle' : (x > cx ? 'start' : 'end');
       return `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" class="radar-label" text-anchor="${anchor}">${esc(label)}</text>`;
     }).join('');
 
-    return `<svg class="chart-radar" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img">
+    // viewBox 左右各留出 pad，轴标签才不会被裁掉
+    return `<svg class="chart-radar" viewBox="${-pad} 0 ${size + pad * 2} ${size}" width="${size + pad * 2}" height="${size}" role="img">
       ${rings}${spokes}
       <polygon points="${dataPts}" class="radar-data" />
       ${dots}${labelsSvg}

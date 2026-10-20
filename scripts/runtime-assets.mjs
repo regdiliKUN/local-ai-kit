@@ -8,6 +8,9 @@ export const SCRIPT_FILES = [
   'console.mjs', 'uninstall.mjs', 'install.mjs', 'yamlpatch.mjs',
   'preset-standard.patch.yml', 'local-http.mjs', 'runtime-assets.mjs', 'strata.mjs',
   'strata-process.ps1',
+  // v1.4.0 新增
+  'metrics.mjs', 'history.mjs', 'space.mjs', 'pull-queue.mjs',
+  'chat.mjs', 'bench.mjs', 'backup.mjs', 'repair.mjs', 'version.mjs',
 ];
 
 export function copyRuntime(kitDir, root) {

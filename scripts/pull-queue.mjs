@@ -9,13 +9,60 @@
  *   - 同一时间只跑一个下载（Ollama 本身也只支持这样，并发反而互相拖慢）
  *   - 队列状态随时可以取，界面直接照着画
  *   - 事件通过回调抛出去，console.mjs 负责转成 SSE
+ *   - 下载动作可以注入（测试用），默认走 Ollama 的 /api/pull
  */
 
 import { OLLAMA_BASE } from './ollama.mjs';
 
 const MAX_QUEUE = 20;
 
-export function createPullQueue({ emit } = {}) {
+/**
+ * 默认的下载实现：把 Ollama 的 NDJSON 流翻译成统一的回调。
+ *
+ * @param {string} model
+ * @param {(update:object)=>void} onUpdate  {got,total}
+ * @param {AbortSignal} signal
+ */
+export async function defaultPull(model, onUpdate, signal) {
+  const r = await fetch(`${OLLAMA_BASE}/api/pull`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, stream: true }),
+    signal,
+  });
+  if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+
+  const dec = new TextDecoder();
+  let buf = '';
+  const parts = new Map();
+
+  const handle = (line) => {
+    const s = line.trim();
+    if (!s) return;
+    let j;
+    try { j = JSON.parse(s); } catch { return; }
+    if (j.error) throw new Error(j.error);
+    if (j.total) {
+      const id = j.digest || j.status;
+      const cur = parts.get(id) || { got: 0, total: 0 };
+      if (j.total > 0) cur.total = j.total;
+      cur.got = Math.max(cur.got, Math.min(j.completed || 0, cur.total || j.completed || 0));
+      parts.set(id, cur);
+      let got = 0; let total = 0;
+      for (const p of parts.values()) { got += p.got; total += p.total; }
+      onUpdate({ got, total });
+    }
+  };
+
+  for await (const chunk of r.body) {
+    buf += dec.decode(chunk, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
+  }
+  if (buf.trim()) handle(buf);
+}
+
+export function createPullQueue({ emit, pull = defaultPull } = {}) {
   /** @type {Array<{model:string,status:string,percent:number,got:number,total:number,speed:number,eta:number,error:string}>} */
   const items = [];
   let running = false;
@@ -125,38 +172,14 @@ export function createPullQueue({ emit } = {}) {
     };
 
     try {
-      const r = await fetch(`${OLLAMA_BASE}/api/pull`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: item.model, stream: true }),
-        signal: controller.signal,
-      });
-      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
-
-      const dec = new TextDecoder();
-      let buf = '';
-      const handle = (line) => {
-        const s = line.trim();
-        if (!s) return;
-        let j;
-        try { j = JSON.parse(s); } catch { return; }
-        if (j.error) throw new Error(j.error);
-        if (j.total) {
-          const id = j.digest || j.status;
-          const cur = parts.get(id) || { got: 0, total: 0 };
-          if (j.total > 0) cur.total = j.total;
-          cur.got = Math.max(cur.got, Math.min(j.completed || 0, cur.total || j.completed || 0));
-          parts.set(id, cur);
-          flush();
-        }
-      };
-
-      for await (const chunk of r.body) {
-        buf += dec.decode(chunk, { stream: true });
-        let i;
-        while ((i = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
-      }
-      if (buf.trim()) handle(buf);
+      await pull(item.model, (u) => {
+        const id = 'all';
+        const cur = parts.get(id) || { got: 0, total: 0 };
+        cur.got = u.got;
+        if (u.total > 0) cur.total = u.total;
+        parts.set(id, cur);
+        flush();
+      }, controller.signal);
 
       flush(true);
       update(item.model, { status: 'done', percent: 100, speed: 0, eta: 0 });

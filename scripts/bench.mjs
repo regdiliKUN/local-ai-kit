@@ -47,6 +47,7 @@ export function extractRates(final) {
     genTokensPerSec: evalNs > 0 ? Math.round((tokens / evalNs) * 1e9) : null,
     promptTokensPerSec: promptNs > 0 ? Math.round((promptTokens / promptNs) * 1e9) : null,
     loadMs: Math.round((Number(final.total_duration) || 0) / 1e6),
+    totalMs: Math.round((Number(final.total_duration) || 0) / 1e6),
   };
 }
 

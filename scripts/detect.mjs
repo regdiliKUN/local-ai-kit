@@ -121,8 +121,18 @@ export function driverAdvice(driver) {
   return { level: 'ok', text: `显卡驱动 ${driver}`, hint: '', driver };
 }
 
-export function detectDisks() {
-  const out = [];
+/** 机器整体情况：CPU 核数、内存大小。界面上的雷达图要用。 */
+export function detectSystem() {
+  const cpus = os.cpus() || [];
+  return {
+    cpuModel: (cpus[0] && cpus[0].model ? cpus[0].model : 'CPU').trim(),
+    cores: cpus.length,
+    memoryGB: Math.round((os.totalmem() / 1073741824) * 10) / 10,
+    freeMemoryGB: Math.round((os.freemem() / 1073741824) * 10) / 10,
+  };
+}
+
+export function detectDisks() {  const out = [];
   for (let c = 67; c <= 90; c++) {
     const letter = String.fromCharCode(c);
     const root = `${letter}:\\`;
@@ -252,6 +262,7 @@ export async function detectAll() {
   const elevated = isElevated();
   const root = pickInstallRoot();
   const driver = gpu.vendor === 'nvidia' ? driverAdvice(gpu.driver) : null;
+  const system = detectSystem();
 
   const cfgPath = root ? path.join(root, '配置.json') : null;
   let saved = null;
@@ -311,6 +322,7 @@ export async function detectAll() {
     disks,
     ollama,
     elevated,
+    system,
     install: {
       root,
       exists: !!(root && fs.existsSync(path.join(root, 'dsh-runtime'))),

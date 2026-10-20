@@ -50,6 +50,9 @@
         <div class="loading"><span class="spinner"></span> 检测中...</div>
       </div>
 
+      <h2 class="sec-h">这台电脑离「推荐配置」有多远</h2>
+      <div class="wizard-viz" id="detectRadar"></div>
+
       <div class="row-actions">
         <button class="btn ghost small" id="btnRedetect">重新检测</button>
         <span class="row-hint">刚装了显卡驱动 / Ollama？点这里重新检测一次。</span>
@@ -86,6 +89,9 @@
         <div class="seg" id="ctxSeg"></div>
         <p class="ctx-hint">越大能记住的对话内容越多，但也越吃显存。拿不准就用默认值。</p>
       </div>
+
+      <h2 class="sec-h">显存够不够</h2>
+      <div class="wizard-viz" id="ctxVramChart"></div>
     </section>
 
     <!-- 3. 存放位置 -->
@@ -243,6 +249,7 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="charts.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
