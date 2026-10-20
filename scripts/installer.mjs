@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { createSafeServer, readBody, tokenMatches } from './local-http.mjs';
+import { createSafeServer, readBody, createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath } from './local-http.mjs';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,8 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.ico': 'image/x-icon',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8',
 };
 
 const TOKEN = crypto.randomBytes(24).toString('hex');
@@ -51,6 +53,9 @@ let ollamaInstalling = false;
 let eventLog = [];
 let lastInstall = null;      // 上一次的安装参数：装完 Ollama 后自动续装、失败后一键重试用
 let lastSummary = null;
+
+/** 限流：安装向导的流量很小，额度给得比较宽松，只挡异常脚本 */
+const rateLimit = createRateLimiter({ getLimit: 120, postLimit: 30 });
 
 /* -------------------------------------------------------------- 日志文件 */
 
@@ -73,16 +78,18 @@ function logLine(s) {
 }
 function logPath() { return LOG_FILE; }
 
+let guard = null;
+function originGuard() {
+  if (!guard) guard = createOriginGuard({ port: PORT, token: TOKEN });
+  return guard;
+}
+
 function hostOk(req) {
-  const h = String(req.headers.host || '').toLowerCase();
-  return h === `127.0.0.1:${PORT}` || h === `localhost:${PORT}`;
+  return originGuard().hostOk(req);
 }
 
 function postOk(req) {
-  const origin = req.headers.origin;
-  if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}`) return false;
-  const t = String(req.headers['x-localai-token'] || '');
-  return tokenMatches(t, TOKEN);
+  return originGuard().postOk(req);
 }
 
 /** 校验安装参数；返回 { error } 或规范化后的参数 */
@@ -148,9 +155,7 @@ function broadcast(event) {
 }
 
 function json(res, code, body) {
-  const s = JSON.stringify(body);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(s);
+  jsonResponse(res, code, body);
 }
 
 
@@ -307,12 +312,15 @@ function startInstall(params) {
 
 const server = createSafeServer(async (req, res) => {
   if (!hostOk(req)) {
+    applySecurityHeaders(res);
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('forbidden');
   }
   if (req.method !== 'GET' && !postOk(req)) {
     return json(res, 403, { error: '请求来源不可信' });
   }
+  const limit = rateLimit(req);
+  if (!limit.ok) return json(res, 429, { error: '请求太频繁，请稍候再试' });
 
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
@@ -426,8 +434,9 @@ const server = createSafeServer(async (req, res) => {
 
   // 静态文件
   let file = p === '/' ? 'index.html' : p.replace(/^\/+/, '');
-  const full = path.join(UI, file);
-  if (!full.startsWith(UI + path.sep) || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
+  const full = resolveStaticPath(UI, file);
+  if (!full || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
+    applySecurityHeaders(res);
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('404');
   }
@@ -437,10 +446,12 @@ const server = createSafeServer(async (req, res) => {
     const data = await detectCached();
     const inject = `<script>window.__DETECT__=${JSON.stringify(data).replace(/</g, '\\u003c')};window.__TOKEN__='${TOKEN}';</script>`;
     const html = fs.readFileSync(full, 'utf8').replace('<script src="app.js"></script>', `${inject}\n<script src="app.js"></script>`);
+    applySecurityHeaders(res);
     res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' });
     return res.end(html);
   }
 
+  applySecurityHeaders(res);
   res.writeHead(200, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream' });
   fs.createReadStream(full).pipe(res);
 });

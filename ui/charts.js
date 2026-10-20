@@ -1,0 +1,282 @@
+/*
+ * 轻量 SVG 图表。
+ *
+ * 为什么自己写而不引第三方库：整个项目承诺「零第三方依赖、只用 Node」，
+ * 安装包要能被离线分发，一个 charting 库动辄几百 KB。
+ * 这里用最朴素的办法：所有图表都吐 SVG 字符串，配色走 CSS 变量，
+ * 这样深色模式自动跟随主题，不用在 JS 里判断。
+ *
+ * 用法：Chart.sparkline([1,2,3])  →  直接 innerHTML 进去
+ */
+
+const Chart = (() => {
+  const NS = 'http://www.w3.org/2000/svg';
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const num = (v) => (Number.isFinite(v) ? v : null);
+
+  /** 取一组数里的最大值；全都不是数字时返回 1（避免除零） */
+  function maxOf(values, fallback = 1) {
+    const nums = values.map(num).filter((v) => v != null);
+    if (!nums.length) return fallback;
+    const m = Math.max(...nums);
+    return m > 0 ? m : fallback;
+  }
+
+  function minOf(values, fallback = 0) {
+    const nums = values.map(num).filter((v) => v != null);
+    if (!nums.length) return fallback;
+    return Math.min(...nums);
+  }
+
+  /**
+   * 折线图（迷你趋势线）。
+   * @param {number[]} values 数据点，可含 null（断点）
+   */
+  function sparkline(values, opts = {}) {
+    const w = opts.width || 160;
+    const h = opts.height || 40;
+    const pad = opts.pad ?? 3;
+    const cls = opts.className || 'spark';
+    const points = (values || []).map(num);
+    const finite = points.filter((v) => v != null);
+
+    if (!finite.length) {
+      return `<svg class="${cls}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="暂无数据">
+        <line x1="0" y1="${h / 2}" x2="${w}" y2="${h / 2}" class="spark-base" /></svg>`;
+    }
+
+    const min = opts.min != null ? opts.min : Math.min(...finite);
+    const max = opts.max != null ? opts.max : maxOf(finite);
+    const span = max - min || 1;
+    const stepX = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0;
+
+    const coords = [];
+    points.forEach((v, i) => {
+      if (v == null) return;
+      const x = pad + i * stepX;
+      const y = h - pad - ((v - min) / span) * (h - pad * 2);
+      coords.push([x, y]);
+    });
+
+    // 断点处不连线：按连续段分别生成 path
+    const segments = [];
+    let current = [];
+    points.forEach((v, i) => {
+      if (v == null) { if (current.length) segments.push(current); current = []; return; }
+      current.push([pad + i * stepX, h - pad - ((v - min) / span) * (h - pad * 2)]);
+    });
+    if (current.length) segments.push(current);
+
+    const linePath = segments
+      .filter((s) => s.length > 1)
+      .map((s) => `M${s.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join('L')}`)
+      .join(' ');
+
+    const areaPath = segments.length
+      ? segments.filter((s) => s.length > 1).map((s) => {
+        const up = `M${s[0][0].toFixed(1)},${h - pad}` +
+          s.map(([x, y]) => `L${x.toFixed(1)},${y.toFixed(1)}`).join('') +
+          `L${s[s.length - 1][0].toFixed(1)},${h - pad}Z`;
+        return up;
+      }).join(' ')
+      : '';
+
+    const last = coords[coords.length - 1];
+    const dot = last ? `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.4" class="spark-dot" />` : '';
+
+    return `<svg class="${cls}" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" preserveAspectRatio="none" role="img" aria-label="趋势">
+      ${areaPath ? `<path d="${areaPath}" class="spark-area" />` : ''}
+      ${linePath ? `<path d="${linePath}" class="spark-line" fill="none" />` : ''}
+      ${dot}
+    </svg>`;
+  }
+
+  /**
+   * 环形图。
+   * @param {{label:string,value:number,color?:string}[]} segments
+   */
+  function donut(segments, opts = {}) {
+    const size = opts.size || 160;
+    const thickness = opts.thickness || 22;
+    const r = (size - thickness) / 2;
+    const cx = size / 2;
+    const cy = size / 2;
+    const circumference = 2 * Math.PI * r;
+    const total = (segments || []).reduce((n, s) => n + (Math.max(0, Number(s.value) || 0)), 0);
+
+    if (!total) {
+      return `<svg class="chart-donut" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="暂无数据">
+        <circle cx="${cx}" cy="${cy}" r="${r}" class="donut-track" fill="none" stroke-width="${thickness}" />
+        <text x="${cx}" y="${cy}" class="donut-center" text-anchor="middle" dominant-baseline="middle">0</text></svg>`;
+    }
+
+    let offset = 0;
+    const arcs = (segments || []).map((s, i) => {
+      const value = Math.max(0, Number(s.value) || 0);
+      const frac = value / total;
+      const len = frac * circumference;
+      const dash = `${len.toFixed(2)} ${(circumference - len).toFixed(2)}`;
+      const rot = -90 + (offset / circumference) * 360;
+      offset += len;
+      return `<circle cx="${cx}" cy="${cy}" r="${r}" class="donut-seg" fill="none" stroke-width="${thickness}"
+        stroke-dasharray="${dash}" stroke-dashoffset="${(-offset + len).toFixed(2)}"
+        transform="rotate(${rot.toFixed(2)} ${cx} ${cy})" style="--seg:${esc(s.color || `var(--chart-${(i % 6) + 1})`)}"
+        data-label="${esc(s.label)}"><title>${esc(s.label)} ${value}</title></circle>`;
+    }).join('');
+
+    const centerText = opts.centerText != null ? esc(opts.centerText) : String(total);
+    const centerSub = opts.centerSub ? `<text x="${cx}" y="${cy + 16}" class="donut-sub" text-anchor="middle">${esc(opts.centerSub)}</text>` : '';
+
+    return `<svg class="chart-donut" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="占比">
+      <circle cx="${cx}" cy="${cy}" r="${r}" class="donut-track" fill="none" stroke-width="${thickness}" />
+      ${arcs}
+      <text x="${cx}" y="${cy - (centerSub ? 6 : 0)}" class="donut-center" text-anchor="middle" dominant-baseline="middle">${centerText}</text>
+      ${centerSub}
+    </svg>`;
+  }
+
+  /**
+   * 半环形仪表盘。
+   * @param {number} percent 0~100
+   */
+  function gauge(percent, opts = {}) {
+    const w = opts.width || 180;
+    const h = opts.height || 104;
+    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+    const cx = w / 2;
+    const cy = h - 12;
+    const r = Math.min(w / 2 - 12, cy - 12);
+    const circumference = Math.PI * r;      // 半圆
+    const len = (pct / 100) * circumference;
+
+    const level = pct >= 90 ? 'err' : pct >= 75 ? 'warn' : 'ok';
+
+    return `<svg class="chart-gauge" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="${pct}%">
+      <path d="M${cx - r},${cy} A${r},${r} 0 0 1 ${cx + r},${cy}" class="gauge-track" fill="none" stroke-width="9" stroke-linecap="round" />
+      <path d="M${cx - r},${cy} A${r},${r} 0 0 1 ${cx + r},${cy}" class="gauge-fill ${level}" fill="none" stroke-width="9"
+        stroke-linecap="round" stroke-dasharray="${len.toFixed(1)} ${circumference.toFixed(1)}" />
+      <text x="${cx}" y="${cy - 12}" class="gauge-value" text-anchor="middle">${Math.round(pct)}<tspan class="gauge-unit">%</tspan></text>
+      ${opts.label ? `<text x="${cx}" y="${cy + 4}" class="gauge-label" text-anchor="middle">${esc(opts.label)}</text>` : ''}
+    </svg>`;
+  }
+
+  /**
+   * 横向条形图。
+   * @param {{label:string,value:number,unit?:string,hint?:string}[]} items
+   */
+  function bars(items, opts = {}) {
+    const list = items || [];
+    if (!list.length) return '<div class="chart-empty">暂无数据</div>';
+    const max = opts.max != null ? opts.max : maxOf(list.map((i) => i.value), 1);
+    const width = opts.width || 260;
+    const rowH = opts.rowH || 26;
+    const labelW = opts.labelW || 78;
+    const valueW = opts.valueW || 56;
+    const barW = Math.max(20, width - labelW - valueW - 8);
+    const height = list.length * rowH;
+
+    const rows = list.map((it, i) => {
+      const v = Math.max(0, Number(it.value) || 0);
+      const w = max > 0 ? Math.min(barW, (v / max) * barW) : 0;
+      const y = i * rowH;
+      const color = it.color ? ` style="--seg:${esc(it.color)}"` : '';
+      return `<g class="bar-row">
+        <text x="0" y="${y + rowH / 2 + 4}" class="bar-label">${esc(it.label)}</text>
+        <rect x="${labelW}" y="${y + 5}" width="${barW}" height="${rowH - 12}" rx="4" class="bar-track" />
+        <rect x="${labelW}" y="${y + 5}" width="${w.toFixed(1)}" height="${rowH - 12}" rx="4" class="bar-fill"${color} />
+        <text x="${width}" y="${y + rowH / 2 + 4}" class="bar-value" text-anchor="end">${esc(it.text != null ? it.text : `${v}${it.unit || ''}`)}</text>
+        ${it.hint ? `<title>${esc(it.hint)}</title>` : ''}
+      </g>`;
+    }).join('');
+
+    return `<svg class="chart-bars" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${rows}</svg>`;
+  }
+
+  /**
+   * 雷达图 —— 用来一眼看出「这台机器离推荐配置差多少」。
+   * @param {string[]} axes 轴名
+   * @param {number[]} values 每个轴的达成度 0~100
+   */
+  function radar(axes, values, opts = {}) {
+    const labels = axes || [];
+    const size = opts.size || 220;
+    const cx = size / 2;
+    const cy = size / 2 + 6;
+    const r = size / 2 - 34;
+    const n = labels.length;
+    if (!n) return '<div class="chart-empty">暂无数据</div>';
+
+    const point = (i, ratio) => {
+      const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+      return [cx + Math.cos(angle) * r * ratio, cy + Math.sin(angle) * r * ratio];
+    };
+
+    const rings = [0.25, 0.5, 0.75, 1].map((ratio) => {
+      const pts = labels.map((_, i) => point(i, ratio).map((v) => v.toFixed(1)).join(',')).join(' ');
+      return `<polygon points="${pts}" class="radar-ring" />`;
+    }).join('');
+
+    const spokes = labels.map((_, i) => {
+      const [x, y] = point(i, 1);
+      return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="radar-spoke" />`;
+    }).join('');
+
+    const dataPts = labels.map((_, i) => point(i, Math.max(0, Math.min(1, (Number(values[i]) || 0) / 100))).map((v) => v.toFixed(1)).join(',')).join(' ');
+    const dots = labels.map((_, i) => {
+      const [x, y] = point(i, Math.max(0, Math.min(1, (Number(values[i]) || 0) / 100)));
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="radar-dot" />`;
+    }).join('');
+
+    const labelsSvg = labels.map((label, i) => {
+      const [x, y] = point(i, 1.19);
+      const anchor = Math.abs(x - cx) < 6 ? 'middle' : (x > cx ? 'start' : 'end');
+      return `<text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}" class="radar-label" text-anchor="${anchor}">${esc(label)}</text>`;
+    }).join('');
+
+    return `<svg class="chart-radar" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img">
+      ${rings}${spokes}
+      <polygon points="${dataPts}" class="radar-data" />
+      ${dots}${labelsSvg}
+    </svg>`;
+  }
+
+  /**
+   * 瀑布图：把一个总量拆成几块，看每块占多少、剩多少。
+   * @param {{label:string,value:number,tone?:string}[]} parts
+   */
+  function waterfall(parts, opts = {}) {
+    const list = parts || [];
+    const width = opts.width || 320;
+    const rowH = opts.rowH || 30;
+    const labelW = opts.labelW || 96;
+    const valueW = opts.valueW || 64;
+    const barW = Math.max(20, width - labelW - valueW - 8);
+    const height = list.length * rowH;
+    const total = list.reduce((n, p) => n + Math.max(0, Number(p.value) || 0), 0);
+
+    let cursor = 0;
+    const rows = list.map((p, i) => {
+      const v = Math.max(0, Number(p.value) || 0);
+      const w = total > 0 ? (v / total) * barW : 0;
+      const y = i * rowH;
+      const tone = p.tone ? ` ${p.tone}` : '';
+      const row = `<g class="wf-row">
+        <text x="0" y="${y + rowH / 2 + 4}" class="bar-label">${esc(p.label)}</text>
+        <rect x="${labelW}" y="${y + 6}" width="${barW}" height="${rowH - 14}" rx="4" class="bar-track" />
+        <rect x="${(labelW + cursor).toFixed(1)}" y="${y + 6}" width="${w.toFixed(1)}" height="${rowH - 14}" rx="4" class="bar-fill${tone}" />
+        <text x="${width}" y="${y + rowH / 2 + 4}" class="bar-value" text-anchor="end">${esc(p.text != null ? p.text : String(v))}</text>
+      </g>`;
+      cursor += w;
+      return row;
+    }).join('');
+
+    return `<svg class="chart-wf" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${rows}</svg>`;
+  }
+
+  return { sparkline, donut, gauge, bars, radar, waterfall, esc };
+})();
+
+window.Chart = Chart;

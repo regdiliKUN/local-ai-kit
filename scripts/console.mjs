@@ -12,7 +12,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { createSafeServer, readBody, tokenMatches } from './local-http.mjs';
+import {
+  createSafeServer, readBody,
+  createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath,
+} from './local-http.mjs';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -24,6 +27,8 @@ import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs
 import { makeLnk } from './make-lnk.mjs';
 import { saveConfig } from './config.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
+import { collectMetrics } from './metrics.mjs';
+import { createHistory } from './history.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -47,6 +52,9 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.ico': 'image/x-icon',
   '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8',
+  '.woff2': 'font/woff2',
 };
 
 const TOKEN = crypto.randomBytes(24).toString('hex');
@@ -56,27 +64,39 @@ const clients = new Set();
 let busy = null;            // 当前在忙什么（'pull:模型名' 之类），避免并发操作
 let eventLog = [];
 
+/** 限流器：GET 宽松（页面要轮询），POST 收紧（会改东西） */
+const rateLimit = createRateLimiter({ getLimit: 240, postLimit: 30 });
+
+/** 指标历史：概览页的曲线靠它 */
+const metricHistory = createHistory(120);
+/** 上一次采到的完整指标（缓存用，别把历史点当完整数据返回） */
+let lastMetrics = null;
+/** 上一次采指标的时间，用来限流（不需要 1 秒采一次） */
+let metricsAt = 0;
+
 const cfg = loadConfig(ROOT) || {};
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---------------------------------------------------------------- 基础 */
 
+let guard = null;
+/** 端口要等 listen 之后才知道，所以守卫延迟创建 */
+function originGuard() {
+  if (!guard) guard = createOriginGuard({ port: PORT, token: TOKEN });
+  return guard;
+}
+
 function hostOk(req) {
-  const h = String(req.headers.host || '').toLowerCase();
-  return h === `127.0.0.1:${PORT}` || h === `localhost:${PORT}`;
+  return originGuard().hostOk(req);
 }
 
 function postOk(req) {
-  const origin = req.headers.origin;
-  if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}`) return false;
-  const t = String(req.headers['x-localai-token'] || '');
-  return tokenMatches(t, TOKEN);
+  return originGuard().postOk(req);
 }
 
 function json(res, code, body) {
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(body));
+  jsonResponse(res, code, body);
 }
 
 
@@ -477,13 +497,53 @@ function runHealth(quick) {
 
 const server = createSafeServer(async (req, res) => {
   if (!hostOk(req)) {
+    applySecurityHeaders(res);
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('forbidden');
   }
   if (req.method !== 'GET' && !postOk(req)) return json(res, 403, { error: '请求来源不可信' });
 
+  // 限流：正常页面轮询远低于额度，超了说明有别的东西在猛打这个服务
+  const limit = rateLimit(req);
+  if (!limit.ok) return json(res, 429, { error: '请求太频繁，请稍候再试' });
+
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
+
+  /* ---------------------------------------------------------- 系统概览 */
+  // 只读接口，放在 Strata 适配器之前 —— 两种部署模式都要能看机器状态。
+  if (p === '/api/metrics') {
+    const now = Date.now();
+    // 1 秒内重复请求直接用缓存，省掉一次 nvidia-smi 调用
+    let current = null;
+    if (now - metricsAt < 1000 && lastMetrics) {
+      current = lastMetrics;
+    } else {
+      current = await collectMetrics({ modelDir: cfg.modelDir || '' });
+      lastMetrics = current;
+      metricHistory.push({
+        at: current.at,
+        cpu: current.cpu.usage,
+        memory: current.memory.percent,
+        gpu: current.gpu[0] ? current.gpu[0].utilization : null,
+        vram: current.gpu[0] ? current.gpu[0].memoryPercent : null,
+        disk: current.disk ? current.disk.usedPercent : null,
+      });
+      metricsAt = now;
+    }
+    return json(res, 200, {
+      current,
+      history: {
+        cpu: metricHistory.series('cpu'),
+        memory: metricHistory.series('memory'),
+        gpu: metricHistory.series('gpu'),
+        vram: metricHistory.series('vram'),
+        disk: metricHistory.series('disk'),
+        at: metricHistory.series('at'),
+      },
+    });
+  }
+
   if (cfg.backend === 'strata') return handleStrata(req, res, { cfg, root: ROOT, ui: UI, token: TOKEN });
 
   if (p === '/api/state') {
@@ -632,17 +692,20 @@ const server = createSafeServer(async (req, res) => {
 
   // 静态文件
   const file = p === '/' ? 'console.html' : p.replace(/^\/+/, '');
-  const full = path.join(UI, file);
-  if (!full.startsWith(UI + path.sep) || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
+  const full = resolveStaticPath(UI, file);
+  if (!full || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
+    applySecurityHeaders(res);
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('404');
   }
   if (file === 'console.html') {
     const inject = `<script>window.__TOKEN__='${TOKEN}';</script>`;
     const html = fs.readFileSync(full, 'utf8').replace('<script src="console.js"></script>', `${inject}\n<script src="console.js"></script>`);
+    applySecurityHeaders(res);
     res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' });
     return res.end(html);
   }
+  applySecurityHeaders(res);
   res.writeHead(200, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream' });
   fs.createReadStream(full).pipe(res);
 });

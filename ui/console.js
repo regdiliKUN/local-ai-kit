@@ -58,6 +58,8 @@ for (const li of document.querySelectorAll('#tabs li')) {
     $(`view-${li.dataset.tab}`).hidden = false;
     if (location.hash !== `#${li.dataset.tab}`) history.replaceState(null, '', `#${li.dataset.tab}`);
     window.scrollTo(0, 0);
+    // 概览页的数据是「按需拉」的，切过去才拉，省得后台一直跑 nvidia-smi
+    if (li.dataset.tab === 'dashboard') loadDashboard().catch(() => {});
   });
 }
 
@@ -78,6 +80,111 @@ async function loadState() {
   renderConfig();
   await loadContext();
 }
+
+/* ------------------------------------------------------------- 系统概览 */
+
+let dashTimer = null;
+let dashOn = true;
+
+function fmtGB(n) {
+  if (n == null || !Number.isFinite(n)) return '—';
+  return `${n} GB`;
+}
+
+async function loadDashboard() {
+  let data;
+  try {
+    data = await (await fetch('/api/metrics')).json();
+  } catch (e) {
+    $('dashStamp').textContent = `读取失败：${e.message}`;
+    return;
+  }
+  const m = data.current || {};
+  const h = data.history || {};
+  $('dashStamp').textContent = `更新于 ${new Date(m.at || Date.now()).toLocaleTimeString()}`;
+
+  /* ---- 四个仪表盘 ---- */
+  const gpu0 = (m.gpu || [])[0];
+  const vramPct = gpu0 ? gpu0.memoryPercent : null;
+  $('gVram').innerHTML = vramPct == null ? '—' : `${vramPct}<span class="unit">%</span>`;
+  $('gVramSub').textContent = gpu0
+    ? `${(gpu0.memoryUsedMB / 1024).toFixed(1)} / ${(gpu0.memoryTotalMB / 1024).toFixed(1)} GB`
+    : '没有检测到独立显卡';
+  $('gVramSpark').innerHTML = Chart.sparkline(h.vram || [], { width: 150, height: 34, min: 0, max: 100 });
+
+  const cpuPct = m.cpu ? m.cpu.usage : null;
+  $('gCpu').innerHTML = cpuPct == null ? '—' : `${cpuPct}<span class="unit">%</span>`;
+  $('gCpuSub').textContent = m.cpu ? `${m.cpu.model} · ${m.cpu.cores} 核` : '未知';
+  $('gCpuSpark').innerHTML = Chart.sparkline(h.cpu || [], { width: 150, height: 34, min: 0, max: 100 });
+
+  const memPct = m.memory ? m.memory.percent : null;
+  $('gMem').innerHTML = memPct == null ? '—' : `${memPct}<span class="unit">%</span>`;
+  $('gMemSub').textContent = m.memory ? `${fmtGB(m.memory.usedGB)} / ${fmtGB(m.memory.totalGB)}` : '未知';
+  $('gMemSpark').innerHTML = Chart.sparkline(h.memory || [], { width: 150, height: 34, min: 0, max: 100 });
+
+  const diskPct = m.disk ? m.disk.usedPercent : null;
+  $('gDisk').innerHTML = diskPct == null ? '—' : `${diskPct}<span class="unit">%</span>`;
+  $('gDiskSub').textContent = m.disk ? `${m.disk.path} 剩余 ${fmtGB(m.disk.freeGB)} / ${fmtGB(m.disk.totalGB)}` : '未知';
+  $('gDiskSpark').innerHTML = Chart.sparkline(h.disk || [], { width: 150, height: 34, min: 0, max: 100 });
+
+  /* ---- 显卡详情 ---- */
+  if (!gpu0) {
+    $('dashGpu').innerHTML = '<div class="chart-empty">没有检测到独立显卡 —— 模型会跑在 CPU 上，速度会很慢。</div>';
+  } else {
+    const rows = [
+      ['型号', gpu0.name],
+      ['驱动', gpu0.driver || '—'],
+      ['显存占用', `${(gpu0.memoryUsedMB / 1024).toFixed(1)} / ${(gpu0.memoryTotalMB / 1024).toFixed(1)} GB`],
+      ['GPU 占用', gpu0.utilization == null ? '—' : `${gpu0.utilization}%`],
+      ['温度', gpu0.temperature == null ? '—' : `${gpu0.temperature} °C`],
+      ['功耗', gpu0.powerWatts == null ? '—' : `${gpu0.powerWatts} W`],
+    ];
+    $('dashGpu').innerHTML =
+      `<div class="gpu-head">${Chart.gauge(vramPct || 0, { label: '显存占用' })}</div>` +
+      rows.map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('');
+  }
+
+  /* ---- 正在跑的模型 ---- */
+  const running = (m.ollama && m.ollama.models) || [];
+  if (!running.length) {
+    $('dashModels').innerHTML = '<div class="chart-empty">现在没有模型驻留显存。<br>这说明显存已经全部还给游戏 / 渲染软件了。</div>';
+  } else {
+    const totalVram = running.reduce((n, r) => n + (r.sizeVramGB || 0), 0);
+    $('dashModels').innerHTML = running.map((r) => `
+      <div class="mrow">
+        <div class="mi">
+          <div class="mn">${esc(r.name)}</div>
+          <div class="ms">${r.processor ? esc(r.processor) : 'GPU'} · 上下文 ${r.contextLength || '—'}</div>
+        </div>
+        <div class="mz">${r.sizeVramGB != null ? `${r.sizeVramGB} GB 显存` : `${r.sizeGB} GB`}</div>
+      </div>`).join('') +
+      `<div class="row" style="padding-top:10px"><span class="k">显存合计</span><span class="v">${totalVram.toFixed(1)} GB</span></div>`;
+  }
+
+  /* ---- 机器信息 ---- */
+  $('dashSystem').innerHTML = [
+    ['CPU', m.cpu ? `${m.cpu.model}（${m.cpu.cores} 核${m.cpu.speedMHz ? ` / ${m.cpu.speedMHz} GHz` : ''}）` : '—'],
+    ['内存', m.memory ? `${fmtGB(m.memory.totalGB)} 总 / ${fmtGB(m.memory.freeGB)} 可用` : '—'],
+    ['系统盘', m.disk ? `${m.disk.path} · 总 ${fmtGB(m.disk.totalGB)} · 剩余 ${fmtGB(m.disk.freeGB)}` : '—'],
+    ['Ollama', m.ollama && m.ollama.up ? `运行中（${m.ollama.version || '版本未知'}）` : '未运行'],
+    ['Node.js', m.node ? `${m.node.version} · ${m.node.platform}` : '—'],
+  ].map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('');
+}
+
+function startDashTimer() {
+  if (dashTimer) clearInterval(dashTimer);
+  dashTimer = null;
+  if (dashOn) dashTimer = setInterval(() => loadDashboard().catch(() => {}), 2000);
+}
+
+if ($('dashAuto')) {
+  $('dashAuto').addEventListener('change', (e) => {
+    dashOn = e.target.checked;
+    startDashTimer();
+    if (dashOn) loadDashboard();
+  });
+}
+if ($('btnDashRefresh')) $('btnDashRefresh').addEventListener('click', () => loadDashboard());
 
 function renderStatus() {
   const s = state;
@@ -563,6 +670,7 @@ connectSSE();
 loadState().catch((e) => {
   $('modelList').innerHTML = `<div class="issue error">读取状态失败：${esc(e.message)}</div>`;
 });
+startDashTimer();
 
 // 每 5 秒刷新一次状态（服务启停、模型增删后自动跟上）
 setInterval(() => { loadState().catch(() => {}); }, 5000);
