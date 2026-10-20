@@ -1405,6 +1405,8 @@ async function testAllProbes() {
 }
 
 /** 渲染出字快测横向对比面板 */
+let lastFastest = null; // 上一次渲染出的「最快模型」，供「设为最快」按钮用
+
 async function renderProbes() {
   const box = $('probeTable');
   if (!box) return;
@@ -1436,6 +1438,7 @@ async function renderProbes() {
   const okCount = okList.length;
   const failCount = models.filter((m) => probes[m] && !probes[m].ok).length;
   const untested = models.length - okCount - failCount;
+  lastFastest = fastest;
 
   const rows = sorted.map((m) => {
     const p = probes[m];
@@ -1497,10 +1500,29 @@ async function clearProbes() {
   } catch { toast('清空失败'); }
 }
 
+/** 把快测里最快的模型选中到上面的「模型」下拉，闭环：测 → 选 → 应用 */
+function applyFastestProbe() {
+  if (!lastFastest) return toast('先测一遍，才有最快模型可选');
+  const sel = $('ctxModel');
+  if (!sel) return;
+  // 万一这个模型不在下拉里（理论上不会），补一个 option
+  if (!Array.from(sel.options).some((o) => o.value === lastFastest)) {
+    const opt = document.createElement('option');
+    opt.value = lastFastest; opt.textContent = lastFastest;
+    sel.appendChild(opt);
+  }
+  sel.value = lastFastest;
+  sel.dispatchEvent(new Event('change', { bubbles: true })); // 触发预算/差异预览刷新
+  toast(`已选中 ${lastFastest}，点「应用配置」生效`);
+  const btn = $('btnApplyCtx');
+  if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 if ($('btnTestCtx')) $('btnTestCtx').addEventListener('click', testCtxModel);
 if ($('btnProbeAll')) $('btnProbeAll').addEventListener('click', testAllProbes);
 if ($('btnProbeCopy')) $('btnProbeCopy').addEventListener('click', copyProbes);
 if ($('btnProbeClear')) $('btnProbeClear').addEventListener('click', clearProbes);
+if ($('btnProbeUse')) $('btnProbeUse').addEventListener('click', applyFastestProbe);
 
 if ($('btnApplyCtx')) {
   $('btnApplyCtx').addEventListener('click', async () => {
