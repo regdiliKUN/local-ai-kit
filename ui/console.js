@@ -1141,6 +1141,94 @@ if ($('btnResetCtx')) {
   });
 }
 
+/**
+ * 试一下：用当前选中的模型发一句最短的话，确认它真的能出字。
+ *
+ * 为什么需要：切了模型要重启工作台才生效，用户重启完才发现这个模型跑不动，
+ * 又得改回去再来一遍。这里先用 8 个 token 试一句，几秒钟就知道行不行。
+ */
+async function testCtxModel() {
+  const sel = $('ctxModel');
+  const model = sel && sel.value;
+  if (!model) return toast('先选一个模型');
+  const btn = $('btnTestCtx');
+  const hint = $('ctxApplyHint');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '测试中…';
+  const t0 = performance.now();
+  let firstAt = 0;
+  let chars = 0;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-localai-token': window.__TOKEN__ || '' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: '说「好」就行' }],
+        options: { numPredict: 8 },
+      }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `HTTP ${res.status}`);
+    }
+
+    // 按 SSE 逐条读，记录首字时间和累计字数
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const obj = JSON.parse(payload);
+          if (obj.error) throw new Error(obj.error);
+          const piece = (obj.message && obj.message.content) || obj.response || '';
+          if (piece) {
+            if (!firstAt) firstAt = performance.now() - t0;
+            chars += piece.length;
+          }
+        } catch (e) {
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
+      }
+    }
+
+    const total = Math.round(performance.now() - t0);
+    if (!chars) throw new Error('模型没有返回任何内容');
+    if (hint) {
+      hint.innerHTML = `<span style="color:var(--ok)">✓ 能正常出字</span> · `
+        + `首字 ${Math.round(firstAt)} ms · 共 ${total} ms · ${chars} 字`;
+    }
+    toast(`${model} 可以正常使用`);
+  } catch (e) {
+    const msg = String(e.message || e);
+    // 常见错误直接用引导里的话术翻译一下
+    const g = window.Guidance && Guidance.explain ? Guidance.explain(msg) : null;
+    if (hint) {
+      hint.innerHTML = `<span style="color:var(--err)">✗ ${esc(msg)}</span>`
+        + (g ? `<br><b>${esc(g.title)}</b>：${esc(g.fix)}`
+             + (g.where ? ` <a href="#${esc(g.where)}">去处理</a>` : '') : '');
+    }
+    toast(`测试失败：${g ? g.title : msg}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+if ($('btnTestCtx')) $('btnTestCtx').addEventListener('click', testCtxModel);
+
 if ($('btnApplyCtx')) {
   $('btnApplyCtx').addEventListener('click', async () => {
     const f = ctxForm();

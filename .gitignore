@@ -4,6 +4,7 @@
 配置.json.*.tmp
 配置.json.broken
 配置.json.stratabak
+使用记录.json
 dsh-runtime/
 ui/index.html.bak
 healthcheck/check_out/
