@@ -32,7 +32,7 @@ import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { createShortcuts, findDesktop } from './make-shortcuts.mjs';
-import { saveConfig } from './config.mjs';
+import { mergeConfig } from './config.mjs';
 import {
   isUp, servesDir, killOllama, spawnServe, waitUp, ollamaEnv, persistOllamaVars, modelCapabilities,
   hasModel, OLLAMA_BASE,
@@ -909,7 +909,9 @@ async function stepConfig(opts, emit) {
   }
 
   try {
-    saveConfig(root, { model, modelDir: opts.modelDir, contextWindow });
+    // 必须合并而不是整份覆盖：Strata 部署时配置里还有 backend / enginePort / strataHome，
+    // 整份覆盖会把它们抹掉，控制台直接退回 ollama 模式、服务页消失。
+    mergeConfig(root, { model, modelDir: opts.modelDir, contextWindow });
 
     const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
     const presetText = readPresetStandard(kitDir);

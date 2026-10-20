@@ -127,7 +127,8 @@ export async function handleStrata(req, res, { cfg, root, ui, token, metrics }) 
   // 那些功能对 Ollama 那部分是真的有用。
 
   // 独立访问 /strata.html 时仍然提供这页（给只想看服务状态的人用）
-  if (req.method === 'GET' && ['/strata.html', '/strata.js', '/charts.js'].includes(pathname)) {
+  // 必须包含 '/'：用户从快捷方式打开就是访问根路径，漏了会直接看到 {"error":"not found"}
+  if (req.method === 'GET' && ['/', '/strata.html', '/strata.js', '/charts.js'].includes(pathname)) {
     const file = pathname === '/' ? 'strata.html' : pathname.replace(/^\/+/, '');
     const full = resolveStaticPath(ui, file);
     if (!full || !fs.existsSync(full)) return json(res, 404, { error: 'not found' });

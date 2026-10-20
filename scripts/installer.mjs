@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { createSafeServer, readBody, createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath, openEventStream } from './local-http.mjs';
+import { pipeFile, createSafeServer, readBody, createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath, openEventStream } from './local-http.mjs';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -448,11 +448,10 @@ const server = createSafeServer(async (req, res) => {
   }
 
   applySecurityHeaders(res);
-  res.writeHead(200, {
+  pipeFile(res, full, {
     'Content-Type': MIME[path.extname(full)] || 'application/octet-stream',
     'Cache-Control': 'no-store',
   });
-  fs.createReadStream(full).pipe(res);
 });
 
 /* ------------------------------------------------------------------ 启动 */

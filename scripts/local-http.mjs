@@ -9,6 +9,7 @@
  */
 
 import http from 'node:http';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 
@@ -228,6 +229,27 @@ export function openEventStream(res, { heartbeatMs = 25000, onDead } = {}) {
  * 路径穿越（../../etc/passwd）在这里被挡住：先把请求里的分隔符统一成 /，
  * 拒绝含 .. 的片段，再拼路径并校验最终路径确实在 UI 目录里。
  */
+/**
+ * 把文件流式发给响应。
+ *
+ * 不能直接 createReadStream(...).pipe(res)：existsSync 和真正 open 之间有个窗口，
+ * 文件被删掉或被杀软短暂锁定就会 emit 'error'，没人接的话整个进程直接退出
+ * —— 安装向导在安装中途崩掉就是这么来的。
+ */
+export function pipeFile(res, full, headers = {}) {
+  const stream = fs.createReadStream(full);
+  stream.once('error', (err) => {
+    if (res.headersSent) { res.destroy(); return; }
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ error: `读取文件失败：${err.code || err.message}` }));
+  });
+  stream.once('open', () => {
+    res.writeHead(200, headers);
+    stream.pipe(res);
+  });
+  return stream;
+}
+
 export function resolveStaticPath(uiDir, relative) {
   const clean = String(relative || '').replace(/\\/g, '/');
   if (!clean || clean.includes('\0')) return null;

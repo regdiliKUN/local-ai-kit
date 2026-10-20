@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {
-  createSafeServer, readBody,
+  createSafeServer, readBody, pipeFile,
   createOriginGuard, createRateLimiter, jsonResponse, applySecurityHeaders, resolveStaticPath,
   openEventStream,
 } from './local-http.mjs';
@@ -74,6 +74,9 @@ let PORT = 0;
 
 const clients = new Set();
 let busy = null;            // 当前在忙什么（'pull:模型名' 之类），避免并发操作
+// Strata 启停单独一把锁：它跑的是外部进程，和上面 busy 管的模型操作互不相干，
+// 但同样不能被双击穿透（strata.mjs 里那个互斥只存在于 handleStrata，线上不走那条路）
+let strataBusy = null;
 let eventLog = [];
 
 /** 限流器：GET 宽松（页面要轮询），POST 收紧（会改东西） */
@@ -809,17 +812,20 @@ const server = createSafeServer(async (req, res) => {
       return json(res, 200, await strataState(cfg));
     }
     if (p === '/api/strata/service' && req.method === 'POST') {
-      const body = await readBody(req);
-      const action = String(body.action || '').trim();
+      // 必须自己加锁：strata.mjs 里那个 operation 互斥只存在于 handleStrata，
+      // 线上走的是这里，双击按钮会真的同时跑两个外部进程去 Launch 引擎。
+      if (strataBusy) return json(res, 409, { error: `正在${strataBusy}，请稍候` });
+      const action = String((await readBody(req)).action || '').trim();
       if (!['engine', 'webui', 'workbench', 'stop'].includes(action)) {
         return json(res, 400, { error: '未知操作' });
       }
+      strataBusy = action === 'stop' ? '停止服务' : '启动服务';
       try {
         const result = await runStrataAction(cfg, action);
         return json(res, result.ok ? 200 : 409, result);
       } catch (e) {
         return json(res, 400, { error: String(e.message || e) });
-      }
+      } finally { strataBusy = null; }
     }
     // 这两件事在 Strata 部署下会写坏东西，直接挡住并说清楚原因
     if (p === '/api/config' && req.method === 'POST') {
@@ -871,8 +877,9 @@ const server = createSafeServer(async (req, res) => {
 
   if (p === '/api/health' && req.method === 'POST') {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    const body = await readBody(req);
+    // 先占位再 await：readBody 期间第二个请求会从上面那行检查溜过去
     busy = 'health';
+    const body = await readBody(req);
     runHealth(!!(body && body.quick));
     return json(res, 202, { started: true });
   }
@@ -1117,11 +1124,12 @@ const server = createSafeServer(async (req, res) => {
 
   /* ------------------------------------------------------------ 性能基准 */
   if (p === '/api/bench' && req.method === 'POST') {
+    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    busy = 'bench';
     const body = await readBody(req);
     const model = String(body.model || cfg.model || '').trim();
-    if (!isValidModelName(model)) return json(res, 400, { error: '模型名不合法' });
-    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
-    busy = 'bench';
+    if (!isValidModelName(model)) { busy = null; return json(res, 400, { error: '模型名不合法' }); }
+    if (!(await ensureOllama())) { busy = null; return json(res, 400, { error: 'Ollama 没在运行' }); }
     json(res, 202, { started: true });
     const gpu = (await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir), sampleMs: 0 })).gpu[0];
     runBenchmark({
@@ -1292,12 +1300,11 @@ const server = createSafeServer(async (req, res) => {
     return res.end(html);
   }
   applySecurityHeaders(res);
-  res.writeHead(200, {
+  pipeFile(res, full, {
     'Content-Type': MIME[path.extname(full)] || 'application/octet-stream',
     // 本地工具，缓存只会带来「改了代码但页面还是老的」这种困惑，一律不缓存
     'Cache-Control': 'no-store',
   });
-  fs.createReadStream(full).pipe(res);
 });
 
 /* ------------------------------------------------------------------ 启动 */
