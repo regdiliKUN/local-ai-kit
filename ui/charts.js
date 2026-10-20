@@ -183,10 +183,11 @@ const Chart = (() => {
       const w = max > 0 ? Math.min(barW, (v / max) * barW) : 0;
       const y = i * rowH;
       const color = it.color ? ` style="--seg:${esc(it.color)}"` : '';
+      const tone = it.tone ? ` ${it.tone}` : '';
       return `<g class="bar-row">
         <text x="0" y="${y + rowH / 2 + 4}" class="bar-label">${esc(it.label)}</text>
         <rect x="${labelW}" y="${y + 5}" width="${barW}" height="${rowH - 12}" rx="4" class="bar-track" />
-        <rect x="${labelW}" y="${y + 5}" width="${w.toFixed(1)}" height="${rowH - 12}" rx="4" class="bar-fill"${color} />
+        <rect x="${labelW}" y="${y + 5}" width="${w.toFixed(1)}" height="${rowH - 12}" rx="4" class="bar-fill${tone}"${color} />
         <text x="${width}" y="${y + rowH / 2 + 4}" class="bar-value" text-anchor="end">${esc(it.text != null ? it.text : `${v}${it.unit || ''}`)}</text>
         ${it.hint ? `<title>${esc(it.hint)}</title>` : ''}
       </g>`;
@@ -748,11 +749,282 @@ const Chart = (() => {
       ${rings}${spokes}${polys}${labelsSvg}</svg>${legend}</div>`;
   }
 
+  /**
+   * 子弹图（bullet）—— 一根横条 + 目标刻度线 + 分段背景。
+   *
+   * 「实际值 vs 目标 vs 上限」一张图说完，比仪表盘更省地方。
+   * 显存用量 vs 上限、上下文预算 vs 压力上限都用它。
+   *
+   * @param {{label:string, value:number, target?:number, max?:number, unit?:string, text?:string}[]} items
+   */
+  function bullet(items, opts = {}) {
+    const list = (items || []).filter((i) => i && Number(i.value) >= 0);
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460;
+    const rowH = opts.rowH || 34, padL = opts.padL || 96, padR = 16, padT = 6;
+    const height = padT * 2 + list.length * rowH;
+    const gMax = maxOf(list.map((i) => Math.max(Number(i.value) || 0, Number(i.target) || 0, Number(i.max) || 0)), 1);
+    const scale = (v) => (gMax > 0 ? (Number(v) / gMax) * (width - padL - padR) : 0);
+    const rows = list.map((it, i) => {
+      const y = padT + i * rowH;
+      const barH = 16;
+      const by = y + (rowH - barH) / 2;
+      const w = scale(it.value);
+      const c = it.color || `var(--chart-${(i % 6) + 1})`;
+      const over = it.max != null && Number(it.value) > Number(it.max);
+      const tgtX = it.target != null ? padL + scale(it.target) : null;
+      const segs = [40, 70, 100].map((p) => {
+        const x0 = padL + scale((gMax * p) / 100);
+        const cls = p === 40 ? 'bl-lo' : p === 70 ? 'bl-mid' : 'bl-hi';
+        return `<rect x="${x0.toFixed(1)}" y="${by.toFixed(1)}" width="${(scale((gMax * 30) / 100)).toFixed(1)}" height="${barH}" class="bl-band ${cls}" />`;
+      }).join('');
+      const label = `<text x="${padL - 10}" y="${by + barH / 2 + 4}" class="bl-label" text-anchor="end">${esc(it.label)}</text>`;
+      const bar = `<rect x="${padL}" y="${by.toFixed(1)}" width="${w.toFixed(1)}" height="${barH}" rx="3" class="bl-bar${over ? ' over' : ''}"
+          style="--seg:${esc(c)}" data-tip="${esc(it.label)}：${esc(it.text || it.value)}${esc(it.unit || opts.unit || '')}${it.target != null ? `（目标 ${it.target}${esc(it.unit || opts.unit || '')}）` : ''}" />`;
+      const tgt = tgtX != null
+        ? `<line x1="${tgtX.toFixed(1)}" y1="${(by - 3).toFixed(1)}" x2="${tgtX.toFixed(1)}" y2="${(by + barH + 3).toFixed(1)}" class="bl-target" />`
+        : '';
+      const val = `<text x="${(padL + w + 6).toFixed(1)}" y="${by + barH / 2 + 4}" class="bl-val">${esc(it.text || it.value)}${esc(it.unit || opts.unit || '')}</text>`;
+      return label + segs + bar + tgt + val;
+    }).join('');
+    return `<svg class="chart-bullet" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${rows}</svg>`;
+  }
+
+  /**
+   * 堆叠横条 —— 一条条横着的 100% 占比条。
+   * 「这块盘被谁占了」「各模型空间占比」用它最直观，比饼图好读。
+   *
+   * @param {{label:string, segments:{value:number,label?:string,color?:string}[]}[]} items
+   */
+  function stackedBar(items, opts = {}) {
+    const list = items || [];
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460;
+    const rowH = opts.rowH || 30, padL = opts.padL || 96, padR = 14, padT = 4;
+    const height = padT * 2 + list.length * rowH;
+    const barH = opts.barH || 18;
+    const rows = list.map((it, i) => {
+      const segs = it.segments || [];
+      const total = segs.reduce((n, s) => n + (Number(s.value) || 0), 0) || 1;
+      const y = padT + i * rowH;
+      const by = y + (rowH - barH) / 2;
+      const avail = width - padL - padR;
+      let x = padL;
+      const bars = segs.map((s, si) => {
+        const v = Number(s.value) || 0;
+        const w = (v / total) * avail;
+        const c = s.color || `var(--chart-${(si % 6) + 1})`;
+        const rect = `<rect x="${x.toFixed(1)}" y="${by.toFixed(1)}" width="${Math.max(0, w).toFixed(1)}" height="${barH}" class="sb-seg"
+            style="--seg:${esc(c)}" data-tip="${esc(it.label)} · ${esc(s.label || '')}：${esc(v)}（${Math.round((v / total) * 100)}%）" />`;
+        x += w;
+        return rect;
+      }).join('');
+      const label = `<text x="${padL - 10}" y="${by + barH / 2 + 4}" class="sb-label" text-anchor="end">${esc(it.label)}</text>`;
+      const tot = `<text x="${width - padR}" y="${by + barH / 2 + 4}" class="sb-total" text-anchor="end">${esc(total)}${esc(opts.unit || '')}</text>`;
+      return label + bars + tot;
+    }).join('');
+    const legend = opts.legend !== false && (list[0].segments || []).length > 1
+      ? `<div class="am-legend">${(list[0].segments || []).map((s, si) =>
+        `<span class="am-lg"><i style="background:${esc(s.color || `var(--chart-${(si % 6) + 1})`)}"></i>${esc(s.label || '')}</span>`).join('')}</div>`
+      : '';
+    return `<div class="chart-sb">${`<svg class="chart-stacked" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${rows}</svg>`}${legend}</div>`;
+  }
+
+  /**
+   * 漏斗图 —— 每一步一条居中横条，宽度按占首步的比例。
+   * 「装完向导的人有多少走到最后一步」这类逐级流失的场景。
+   *
+   * @param {{label:string, value:number, text?:string}[]} steps
+   */
+  function funnel(steps, opts = {}) {
+    const list = (steps || []).filter((s) => s && Number(s.value) > 0);
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460;
+    const rowH = opts.rowH || 34, padT = 6;
+    const height = padT * 2 + list.length * rowH;
+    const top = maxOf(list.map((s) => Number(s.value) || 0), 1);
+    const rows = list.map((s, i) => {
+      const v = Number(s.value) || 0;
+      const w = (v / top) * (width - 20);
+      const x = (width - w) / 2;
+      const y = padT + i * rowH;
+      const c = s.color || `var(--chart-${(i % 6) + 1})`;
+      const pct = Math.round((v / top) * 100);
+      const prev = i > 0 ? (Number(list[i - 1].value) || 0) : 0;
+      const drop = i > 0 && prev > 0 ? Math.round(((prev - v) / prev) * 100) : 0;
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${rowH - 10}" rx="4" class="fn-seg"
+          style="--seg:${esc(c)}" data-tip="${esc(s.label)}：${esc(s.text || v)}${esc(opts.unit || '')}（${pct}%）${drop ? ` · 上一步流失 ${drop}%` : ''}" />
+        <text x="${width / 2}" y="${(y + (rowH - 10) / 2 + 4).toFixed(1)}" class="fn-v" text-anchor="middle">${esc(s.label)} · ${esc(s.text || v)}</text>
+        <text x="${width - 4}" y="${(y + (rowH - 10) / 2 + 4).toFixed(1)}" class="fn-pct" text-anchor="end">${pct}%</text>`;
+    }).join('');
+    return `<svg class="chart-funnel" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${rows}</svg>`;
+  }
+
+  /**
+   * 矩阵热力表 —— 行 × 列的网格，格子颜色深浅表示数值。
+   * 「模型 × 能力」「磁盘 × 指标」这种二维对照。
+   *
+   * @param {{row:string, cells:{value:number, text?:string, tone?:string}[]}[]} rows
+   */
+  function matrix(rowsIn, opts = {}) {
+    const rows = (rowsIn || []).filter((r) => r && r.cells && r.cells.length);
+    if (!rows.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460;
+    const rowH = opts.rowH || 28, padL = opts.padL || 110, padT = 26, padR = 10;
+    const cols = Math.max(...rows.map((r) => r.cells.length));
+    const height = padT + rows.length * rowH + padR;
+    const cellW = (width - padL - padR) / cols;
+    const all = rows.flatMap((r) => r.cells.map((c) => Number(c.value) || 0));
+    const mx = maxOf(all, 1), mn = minOf(all, 0);
+    const alpha = (v) => (mx > mn ? 0.12 + ((v - mn) / (mx - mn)) * 0.88 : 0.5);
+    const head = (opts.cols || []).slice(0, cols).map((c, i) =>
+      `<text x="${(padL + i * cellW + cellW / 2).toFixed(1)}" y="${padT - 9}" class="mx-head" text-anchor="middle">${esc(c)}</text>`).join('');
+    const body = rows.map((r, ri) => {
+      const y = padT + ri * rowH;
+      const cells = r.cells.slice(0, cols).map((c, ci) => {
+        const v = Number(c.value) || 0;
+        const x = padL + ci * cellW;
+        const tone = c.tone ? ` ${c.tone}` : '';
+        return `<rect x="${(x + 1).toFixed(1)}" y="${(y + 1).toFixed(1)}" width="${(cellW - 2).toFixed(1)}" height="${rowH - 2}" rx="3"
+            class="mx-cell${tone}" style="--a:${alpha(v).toFixed(2)}" data-tip="${esc(r.row)} · ${esc((opts.cols || [])[ci] || '')}：${esc(c.text != null ? c.text : v)}" />
+          <text x="${(x + cellW / 2).toFixed(1)}" y="${(y + rowH / 2 + 4).toFixed(1)}" class="mx-v" text-anchor="middle">${esc(c.text != null ? c.text : v)}</text>`;
+      }).join('');
+      return `<text x="${padL - 8}" y="${(y + rowH / 2 + 4).toFixed(1)}" class="mx-label" text-anchor="end">${esc(r.row)}</text>` + cells;
+    }).join('');
+    return `<svg class="chart-matrix" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${head}${body}</svg>`;
+  }
+
+  /**
+   * 时间轴 / 甘特 —— 每个条目一段起止横条。
+   * 「下载队列谁在排队、各自等多久」「服务跑了多长时间」。
+   *
+   * @param {{label:string, start:number, end:number, color?:string, text?:string}[]} items
+   */
+  function timeline(items, opts = {}) {
+    const list = (items || []).filter((i) => i && Number.isFinite(Number(i.start)));
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460;
+    const rowH = opts.rowH || 26, padL = opts.padL || 96, padR = 14, padT = 18, padB = 20;
+    const height = padT + list.length * rowH + padB;
+    const lo = minOf(list.map((i) => Number(i.start)), 0);
+    const hi = maxOf(list.map((i) => Math.max(Number(i.end) || 0, Number(i.start))), 1);
+    const span = hi - lo || 1;
+    const avail = width - padL - padR;
+    const px = (v) => padL + ((Number(v) - lo) / span) * avail;
+    const ticks = 4;
+    const axis = Array.from({ length: ticks + 1 }, (_, i) => {
+      const v = lo + (span * i) / ticks;
+      const x = px(v);
+      return `<line x1="${x.toFixed(1)}" y1="${padT - 6}" x2="${x.toFixed(1)}" y2="${height - padB + 2}" class="tl-grid" />
+        <text x="${x.toFixed(1)}" y="${height - 6}" class="tl-tick" text-anchor="middle">${esc(fmtDur(v - lo))}</text>`;
+    }).join('');
+    const rows = list.map((it, i) => {
+      const s = Number(it.start), e = Math.max(Number(it.end) || s, s);
+      const x0 = px(s), x1 = px(e);
+      const y = padT + i * rowH;
+      const c = it.color || `var(--chart-${(i % 6) + 1})`;
+      const dur = fmtDur(e - s);
+      return `<text x="${padL - 8}" y="${(y + rowH / 2 + 4).toFixed(1)}" class="tl-label" text-anchor="end">${esc(it.label)}</text>
+        <rect x="${x0.toFixed(1)}" y="${(y + 3).toFixed(1)}" width="${Math.max(2, x1 - x0).toFixed(1)}" height="${rowH - 10}" rx="3" class="tl-bar"
+          style="--seg:${esc(c)}" data-tip="${esc(it.label)}：${esc(it.text || dur)}" />`;
+    }).join('');
+    return `<svg class="chart-timeline" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${axis}${rows}</svg>`;
+  }
+
+  function fmtDur(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return `${s}秒`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}分${s % 60 ? `${s % 60}秒` : ''}`;
+    const h = Math.floor(m / 60);
+    return `${h}时${m % 60 ? `${m % 60}分` : ''}`;
+  }
+
+  /**
+   * KPI 卡片组 —— 一行数据卡，每张带大数字、副标题和迷你趋势线。
+   * 概览页顶部放一排，比四个仪表盘更快读到重点。
+   *
+   * @param {{label:string, value:string|number, sub?:string, unit?:string, trend?:number[], tone?:string, icon?:string}[]} items
+   */
+  function kpiCards(items, opts = {}) {
+    const list = (items || []).filter(Boolean);
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const cards = list.map((it, i) => {
+      const tone = it.tone ? ` ${it.tone}` : '';
+      const spark = Array.isArray(it.trend) && it.trend.length > 1
+        ? `<div class="kpi-spark">${sparkline(it.trend, { width: 92, height: 26, color: it.color || `var(--chart-${(i % 6) + 1})` })}</div>`
+        : '';
+      const delta = Array.isArray(it.trend) && it.trend.length > 1
+        ? (() => {
+          const a = it.trend[0], b = it.trend[it.trend.length - 1];
+          const d = b - a;
+          if (!isFinite(d) || d === 0) return '';
+          const cls = d > 0 ? 'up' : 'down';
+          const arrow = d > 0 ? '▲' : '▼';
+          return `<span class="kpi-delta ${cls}">${arrow} ${Math.abs(Math.round(d * 10) / 10)}</span>`;
+        })()
+        : '';
+      return `<div class="kpi-card${tone}">
+        <div class="kpi-top"><span class="kpi-label">${it.icon ? `${esc(it.icon)} ` : ''}${esc(it.label)}</span>${delta}</div>
+        <div class="kpi-value">${esc(it.value)}${it.unit ? `<span class="kpi-unit">${esc(it.unit)}</span>` : ''}</div>
+        ${it.sub ? `<div class="kpi-sub">${esc(it.sub)}</div>` : ''}
+        ${spark}
+      </div>`;
+    }).join('');
+    return `<div class="kpi-row${opts.compact ? ' compact' : ''}">${cards}</div>`;
+  }
+
+  /**
+   * 斜率图 —— 左右两列各一个点，中间连线，一眼看出「涨了还是跌了」。
+   * 「上次 vs 本次」这种两时点对比，比表格好懂得多。
+   *
+   * @param {{label:string, before:number, after:number, beforeText?:string, afterText?:string, invert?:boolean}[]} items
+   */
+  function slope(items, opts = {}) {
+    const list = (items || []).filter((i) => i && Number.isFinite(Number(i.before)) && Number.isFinite(Number(i.after)));
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const width = opts.width || 460;
+    const padT = 16, padB = 30, padL = 92, padR = 92;
+    const plotH = opts.height || 200;
+    const height = plotH + padT + padB;
+    const all = list.flatMap((i) => [Number(i.before), Number(i.after)]);
+    const mx = maxOf(all, 1), mn = minOf(all, 0);
+    const span = mx - mn || 1;
+    const y = (v) => padT + plotH - ((Number(v) - mn) / span) * plotH;
+    const grid = [0, 0.5, 1].map((p) => {
+      const gy = padT + plotH - p * plotH;
+      return `<line x1="${padL}" y1="${gy.toFixed(1)}" x2="${width - padR}" y2="${gy.toFixed(1)}" class="sl-grid" />`;
+    }).join('');
+    const rows = list.map((it, i) => {
+      const b = Number(it.before), a = Number(it.after);
+      const better = it.invert ? b > a : a > b;
+      const worse = it.invert ? a > b : b > a;
+      const tone = better ? ' good' : worse ? ' bad' : '';
+      const c = it.color || `var(--chart-${(i % 6) + 1})`;
+      const y0 = y(b), y1 = y(a);
+      return `<line x1="${padL}" y1="${y0.toFixed(1)}" x2="${width - padR}" y2="${y1.toFixed(1)}" class="sl-line${tone}" stroke="${esc(c)}"
+          data-tip="${esc(it.label)}：${esc(it.beforeText || b)} → ${esc(it.afterText || a)}" />
+        <circle cx="${padL}" cy="${y0.toFixed(1)}" r="4.5" fill="${esc(c)}" />
+        <circle cx="${width - padR}" cy="${y1.toFixed(1)}" r="4.5" fill="${esc(c)}" />
+        <text x="${padL - 8}" y="${(y0 + 4).toFixed(1)}" class="sl-v" text-anchor="end">${esc(it.beforeText || b)}</text>
+        <text x="${width - padR + 8}" y="${(y1 + 4).toFixed(1)}" class="sl-v ${better ? 'good' : worse ? 'bad' : ''}">${esc(it.afterText || a)}</text>`;
+    }).join('');
+    const labels = list.map((it, i) => {
+      const mid = (y(it.before) + y(it.after)) / 2;
+      return `<text x="${width / 2}" y="${(mid + 4).toFixed(1)}" class="sl-label" text-anchor="middle">${esc(it.label)}</text>`;
+    }).join('');
+    const heads = `<text x="${padL}" y="10" class="mx-head" text-anchor="start">${esc(opts.beforeLabel || '之前')}</text>
+      <text x="${width - padR}" y="10" class="mx-head" text-anchor="end">${esc(opts.afterLabel || '现在')}</text>`;
+    return `<svg class="chart-slope" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${grid}${heads}${rows}${labels}</svg>`;
+  }
+
   Tip.ensure();
 
   return {
     sparkline, donut, gauge, bars, radar, radarMulti, waterfall, line, heatmap, ring,
-    areaMulti, bubble, treemap, histogram, barGrouped, tip: Tip.ensure, esc,
+    areaMulti, bubble, treemap, histogram, barGrouped,
+    bullet, stackedBar, funnel, matrix, timeline, kpiCards, slope,
+    tip: Tip.ensure, esc, fmtDur,
   };
 })();
 

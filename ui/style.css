@@ -1570,6 +1570,7 @@ html[data-theme="dark"] {
 }
 .vram-warn.over { border-left-color: var(--err); }
 .vram-ok { margin-top: 10px; font-size: 12.5px; color: var(--text-dim); }
+.vram-bullet { margin-top: 12px; }
 
 /* ===================== 新增图表（v1.9 可视化增强） ===================== */
 
@@ -1680,8 +1681,86 @@ html[data-theme="dark"] {
 }
 .skip-link:focus { top: 8px; }
 
+/* ============ v1.10.0 新图表：子弹图 / 堆叠横条 / 漏斗 / 矩阵 / 时间轴 / KPI / 斜率 ============ */
+
+.chart-bullet, .chart-stacked, .chart-funnel, .chart-matrix, .chart-timeline, .chart-slope {
+  width: 100%; height: auto; display: block; overflow: visible;
+}
+
+/* 子弹图 */
+.bl-band { fill: var(--chart-track); }
+.bl-band.bl-lo { opacity: .55; }
+.bl-band.bl-mid { opacity: .75; }
+.bl-band.bl-hi { opacity: .95; }
+.bl-bar { fill: var(--seg, var(--accent)); transition: opacity .12s; }
+.bl-bar:hover { opacity: .85; }
+.bl-bar.over { fill: var(--err); }
+.bl-target { stroke: var(--text); stroke-width: 2; stroke-dasharray: 3 2; }
+.bl-label, .sb-label, .tl-label, .mx-label { fill: var(--text-dim); font-size: 11px; }
+.bl-val { fill: var(--text); font-size: 11px; font-weight: 600; }
+
+/* 堆叠横条 */
+.chart-sb { display: flex; flex-direction: column; }
+.sb-seg { fill: var(--seg, var(--accent)); transition: opacity .12s; cursor: default; }
+.sb-seg:hover { opacity: .82; }
+.sb-total { fill: var(--text-dim); font-size: 11px; }
+
+/* 漏斗图 */
+.fn-seg { fill: var(--seg, var(--accent)); transition: opacity .12s; }
+.fn-seg:hover { opacity: .85; }
+.fn-v { fill: var(--text); font-size: 12px; font-weight: 600; pointer-events: none; }
+.fn-pct { fill: var(--text-dim); font-size: 11px; }
+
+/* 矩阵热力表 */
+.mx-cell { fill: color-mix(in srgb, var(--accent) calc(var(--a, .5) * 100%), var(--surface)); transition: opacity .12s; }
+.mx-cell.good { fill: color-mix(in srgb, var(--ok) calc(var(--a, .5) * 100%), var(--surface)); }
+.mx-cell.warn { fill: color-mix(in srgb, var(--warn) calc(var(--a, .5) * 100%), var(--surface)); }
+.mx-cell.bad { fill: color-mix(in srgb, var(--err) calc(var(--a, .5) * 100%), var(--surface)); }
+.mx-cell:hover { opacity: .8; }
+.mx-head { fill: var(--text-dim); font-size: 11px; font-weight: 600; }
+.mx-v { fill: var(--text); font-size: 11px; pointer-events: none; }
+
+/* 时间轴 */
+.tl-grid { stroke: var(--chart-grid, var(--border)); stroke-width: 1; }
+.tl-bar { fill: var(--seg, var(--accent)); transition: opacity .12s; }
+.tl-bar:hover { opacity: .82; }
+.tl-tick { fill: var(--text-dim); font-size: 10px; }
+
+/* KPI 卡片组 */
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.kpi-row.compact { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.kpi-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r, 10px);
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.kpi-card.good { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.kpi-card.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.kpi-card.bad { border-color: color-mix(in srgb, var(--err) 45%, var(--border)); }
+.kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kpi-label { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi-delta { font-size: 11px; font-weight: 600; white-space: nowrap; }
+.kpi-delta.up { color: var(--ok); }
+.kpi-delta.down { color: var(--err); }
+.kpi-value { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.15; font-variant-numeric: tabular-nums; }
+.kpi-unit { font-size: 12px; font-weight: 500; color: var(--text-dim); margin-left: 2px; }
+.kpi-sub { font-size: 11px; color: var(--text-dim); }
+.kpi-spark { margin-top: 2px; }
+.kpi-spark svg { display: block; width: 100%; height: 26px; }
+
+/* 斜率图 */
+.sl-grid { stroke: var(--chart-grid, var(--border)); stroke-width: 1; }
+.sl-line { stroke-width: 2; opacity: .85; transition: opacity .12s; fill: none; }
+.sl-line:hover { opacity: 1; stroke-width: 3; }
+.sl-line.good { stroke: var(--ok) !important; }
+.sl-line.bad { stroke: var(--err) !important; }
+.sl-v { fill: var(--text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sl-v.good { fill: var(--ok); font-weight: 600; }
+.sl-v.bad { fill: var(--err); font-weight: 600; }
+.sl-label { fill: var(--text-dim); font-size: 11px; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+
 /* 尊重「减少动画」偏好 */
 @media (prefers-reduced-motion: reduce) {
-  .gv.pulse, .am-area, .am-line, .bb-circle, .tm-rect, .hm-bar, .gb-bar { animation: none !important; transition: none !important; }
+  .gv.pulse, .am-area, .am-line, .bb-circle, .tm-rect, .hm-bar, .gb-bar,
+  .bl-bar, .sb-seg, .fn-seg, .mx-cell, .tl-bar, .sl-line { animation: none !important; transition: none !important; }
   * { scroll-behavior: auto !important; }
 }

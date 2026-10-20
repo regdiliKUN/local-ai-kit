@@ -514,6 +514,7 @@ async function loadDashboard() {
     }
   }
   renderMetrics(data);
+  renderKpi(data);
 }
 
 /** 把指标画出来（首屏注入和轮询共用） */
@@ -651,6 +652,67 @@ function renderLoad(data) {
     { name: 'CPU', color: 'var(--chart-2)', data: pad(c) },
     { name: '内存', color: 'var(--chart-3)', data: pad(me) },
   ] }, { width: 640, height: 170, unit: '%' });
+}
+
+/**
+ * KPI 卡片行 —— 一眼看完「现在最该知道的几个数」。
+ * 带迷你趋势线和环比变化，比四个仪表盘更快读到重点。
+ */
+function renderKpi(data) {
+  const box = $('dashKpi');
+  if (!box) return;
+  const m = (data && data.current) || {};
+  const h = (data && data.history) || {};
+  const gpu0 = (m.gpu || [])[0];
+  const cards = [];
+
+  if (gpu0) {
+    cards.push({
+      icon: '🎮', label: '显存占用', value: Math.round(gpu0.memoryPercent || 0), unit: '%',
+      sub: `${(gpu0.memoryUsedMB / 1024).toFixed(1)} / ${(gpu0.memoryTotalMB / 1024).toFixed(1)} GB`,
+      trend: (h.vram || []).slice(-24),
+      tone: gpu0.memoryPercent >= 90 ? 'bad' : gpu0.memoryPercent >= 75 ? 'warn' : '',
+    });
+  }
+  if (m.cpu) {
+    cards.push({
+      icon: '🧠', label: 'CPU', value: Math.round(m.cpu.usage || 0), unit: '%',
+      sub: `${m.cpu.cores} 核`, trend: (h.cpu || []).slice(-24),
+      tone: m.cpu.usage >= 90 ? 'bad' : m.cpu.usage >= 70 ? 'warn' : '',
+    });
+  }
+  if (m.memory) {
+    cards.push({
+      icon: '📦', label: '内存', value: Math.round(m.memory.percent || 0), unit: '%',
+      sub: `${fmtGB(m.memory.usedGB)} / ${fmtGB(m.memory.totalGB)}`,
+      trend: (h.memory || []).slice(-24),
+      tone: m.memory.percent >= 90 ? 'bad' : m.memory.percent >= 75 ? 'warn' : '',
+    });
+  }
+  if (m.disk) {
+    cards.push({
+      icon: '💾', label: '磁盘剩余', value: fmtGB(m.disk.freeGB), unit: 'GB',
+      sub: `${m.disk.path} · 已用 ${Math.round(m.disk.usedPercent || 0)}%`,
+      tone: m.disk.usedPercent >= 90 ? 'bad' : m.disk.usedPercent >= 80 ? 'warn' : '',
+    });
+  }
+  if (gpu0 && gpu0.temperature != null) {
+    cards.push({
+      icon: '🌡️', label: '显卡温度', value: Math.round(gpu0.temperature), unit: '°C',
+      sub: gpu0.temperature >= 85 ? '偏热，会降速' : '正常',
+      tone: gpu0.temperature >= 85 ? 'bad' : gpu0.temperature >= 78 ? 'warn' : 'good',
+    });
+  }
+  if (Array.isArray(state.models) && state.models.length) {
+    cards.push({
+      icon: '🧩', label: '已装模型', value: state.models.length, unit: '个',
+      sub: state.models.slice(0, 2).map((x) => x.name || x).join('、') + (state.models.length > 2 ? ' 等' : ''),
+    });
+  }
+
+  box.innerHTML = cards.length
+    ? Chart.kpiCards(cards, { compact: true })
+    : '<div class="chart-empty">还没有数据</div>';
 }
 
 function startDashTimer() {
@@ -873,6 +935,7 @@ function renderModels() {
       <div class="mz">${m.sizeGB} GB</div>
       <div class="ma">
         <button class="star-btn${favSet.has(m.name) ? ' on' : ''}" data-star="${esc(m.name)}" title="收藏 / 取消收藏">${favSet.has(m.name) ? '★' : '☆'}</button>
+        <button class="btn ghost small" data-copy="${esc(m.name)}" title="复制模型名">复制</button>
         <button class="btn ghost small" data-alias="${esc(m.name)}">起别名</button>
         <button class="btn ghost small danger" data-del="${esc(m.name)}">删除</button>
       </div>
@@ -898,6 +961,23 @@ function renderModels() {
 
   for (const b of document.querySelectorAll('[data-star]')) {
     b.addEventListener('click', () => toggleFav(b.dataset.star));
+  }
+  for (const b of document.querySelectorAll('[data-copy]')) {
+    b.addEventListener('click', async () => {
+      const name = b.dataset.copy;
+      try {
+        await navigator.clipboard.writeText(name);
+        toast(`已复制「${name}」`);
+      } catch {
+        // 剪贴板 API 在非 HTTPS / 旧浏览器上不可用，退回选中文本让用户自己复制
+        const r = document.createRange();
+        r.selectNodeContents(b.closest('.mrow'));
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+        toast('已选中这一行，按 Ctrl+C 复制');
+      }
+    });
   }
 }
 
@@ -944,7 +1024,45 @@ async function loadCaps() {
     const caps = await (await fetch('/api/model-caps')).json();
     state.caps = caps;
     renderModels();
+    renderCapsMatrix();
   } catch { /* 拿不到就算了 */ }
+}
+
+const CAP_LABELS = {
+  vision: '看图', tools: '工具调用', thinking: '深度思考',
+  embedding: '向量化', completion: '对话', insert: '续写',
+};
+
+/** 模型 × 能力矩阵：一眼看清「哪个模型能干嘛」 */
+function renderCapsMatrix() {
+  const box = $('capsMatrix');
+  if (!box) return;
+  const caps = state.caps || {};
+  const names = Object.keys(caps);
+  if (!names.length) {
+    box.innerHTML = '<div class="chart-empty">还没读到能力信息</div>';
+    return;
+  }
+  // 列 = 所有模型声称支持的能力并集（保持稳定顺序）
+  const order = ['vision', 'tools', 'thinking', 'embedding', 'completion', 'insert'];
+  const present = new Set();
+  for (const n of names) for (const c of caps[n] || []) present.add(c);
+  const cols = [...order.filter((c) => present.has(c)), ...[...present].filter((c) => !order.includes(c))];
+  if (!cols.length) {
+    box.innerHTML = '<div class="chart-empty">这些模型没有声明任何能力</div>';
+    return;
+  }
+  const rows = names.map((n) => ({
+    row: n.length > 16 ? `${n.slice(0, 15)}…` : n,
+    cells: cols.map((c) => ({
+      value: (caps[n] || []).includes(c) ? 1 : 0,
+      text: (caps[n] || []).includes(c) ? '✓' : '—',
+      tone: (caps[n] || []).includes(c) ? 'good' : '',
+    })),
+  }));
+  box.innerHTML = Chart.matrix(rows, { width: 460, cols: cols.map((c) => CAP_LABELS[c] || c) })
+    + `<p class="row-hint" style="margin-top:8px">能力来自 Ollama 对模型的声明。
+       「工具调用」决定能不能让模型自己调命令，「看图」决定能不能识图。</p>`;
 }
 
 function renderSettings() {
@@ -1059,7 +1177,23 @@ async function loadSpace() {
     }));
     hb.innerHTML = Chart.histogram(counts, { width: 460, height: 170 });
   }
+
+  // 空间构成：把「实际占用」拆成 独有 / 共用 / 残留 三块（v1.10.0）
+  const bd = $('spaceBreakdown');
+  if (bd) {
+    const unique = Math.max(0, p.totalGB - p.sharedGB - p.orphanGB);
+    const segs = [
+      { label: '仅一个模型用', value: round2(unique), color: 'var(--chart-1)' },
+      { label: '多模型共用', value: round2(p.sharedGB), color: 'var(--chart-2)' },
+      { label: '无人引用（残留）', value: round2(p.orphanGB), color: 'var(--chart-5)' },
+    ].filter((s) => s.value > 0.01);
+    bd.innerHTML = Chart.stackedBar([{ label: '模型目录', segments: segs }], { width: 460, unit: 'GB' })
+      + `<p class="row-hint" style="margin-top:8px">删掉一个模型只能回收「仅一个模型用」那部分（${round2(unique)} GB）；
+         共用的层（${round2(p.sharedGB)} GB）要等所有用到它的模型都删掉才会释放。</p>`;
+  }
 }
+
+function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
 function renderConfig() {
   $('cfgSummary').innerHTML = `
@@ -1121,12 +1255,32 @@ async function loadVramPlan() {
         <span class="dim">${esc(cur.model)} · 显卡 ${d.vramGB} GB · 当前 ${Math.round(d.currentContext / 1024)}K</span>
       </div>
       <div class="vram-cells">${cells}</div>
+      <div class="vram-bullet" id="vramBullet"></div>
       ${bad ? `<div class="vram-warn ${active.level === 'over' ? 'over' : ''}">
         ${active.level === 'over'
           ? `⚠ 当前设置需要约 <b>${active.need} GB</b>，超过显卡的 ${d.vramGB} GB。跑起来会退回 CPU（很慢）或直接失败——建议降到更低的上下文档位，或换个小一点的模型。`
           : `当前设置需要约 <b>${active.need} GB</b>，占显卡 ${d.vramGB} GB 的 ${Math.round((active.need / d.vramGB) * 100)}%，比较紧。如果同时开着别的程序（浏览器、游戏）可能会爆。`}
       </div>` : `<div class="vram-ok">当前设置需要约 ${active && active.need != null ? active.need + ' GB' : '—'}，在 ${d.vramGB} GB 显存内够用。</div>`}
     </div>`;
+
+    // 子弹图：各上下文档位的需求 vs 显卡上限（v1.10.0）
+    const bl = $('vramBullet');
+    if (bl) {
+      const items = cur.options
+        .filter((o) => o.need != null)
+        .map((o) => ({
+          label: o.label,
+          value: o.need,
+          max: d.vramGB,
+          unit: 'GB',
+          text: `${o.need.toFixed(1)} GB`,
+          color: o.level === 'over' ? 'var(--err)' : o.level === 'tight' ? 'var(--warn)' : 'var(--ok)',
+        }));
+      bl.innerHTML = items.length
+        ? Chart.bullet(items, { width: 460, padL: 76 })
+          + '<p class="row-hint" style="margin-top:6px">虚线是显卡的显存上限；条子越过虚线就是「跑起来会退回 CPU 或直接失败」。</p>'
+        : '';
+    }
   } catch { box.hidden = true; }
 }
 
@@ -1606,7 +1760,32 @@ function renderQueue(state) {
       catch (e) { toast(e.message); }
     });
   }
+
+  // 下载时间轴（v1.10.0）：谁先排队、各自花了多久，一眼看清
+  const tl = $('queueTimeline');
+  if (tl) {
+    const now = Date.now();
+    const bars = items.map((it) => {
+      const seen = it.queuedAt || queueSeen.get(it.model) || now;
+      if (!it.queuedAt) queueSeen.set(it.model, seen);
+      const end = it.finishedAt || (it.status === 'done' ? now : now);
+      return {
+        label: it.model.length > 14 ? `${it.model.slice(0, 13)}…` : it.model,
+        start: seen,
+        end: Math.max(end, seen),
+        text: it.status === 'done' ? '已完成' : it.status === 'running' ? '下载中' : '排队中',
+        color: it.status === 'done' ? 'var(--ok)' : it.status === 'running' ? 'var(--accent)' : 'var(--chart-4)',
+      };
+    });
+    tl.innerHTML = bars.length > 1
+      ? Chart.timeline(bars, { width: 460, unit: '' })
+        + '<p class="row-hint" style="margin-top:6px">从这一批任务进入队列算起。并排下载时，后开始的会等前面腾出带宽。</p>'
+      : '';
+  }
 }
+
+/* 记录每个下载任务第一次出现在队列里的时间，用来画时间轴 */
+const queueSeen = new Map();
 
 if ($('btnQueueClear')) {
   $('btnQueueClear').addEventListener('click', async () => {
@@ -2006,6 +2185,33 @@ async function benchCompare(r) {
         ] },
       ], { width: 460, height: 200 });
     }
+
+    // 上次 vs 本次斜率图（v1.10.0）：升了还是降了一眼看出来
+    const sl = $('benchSlope');
+    if (sl) {
+      if (items.length < 2) {
+        sl.innerHTML = '<div class="chart-empty">至少测两次才能对比</div>';
+      } else {
+        const prev = items[items.length - 2];
+        const rows = [];
+        if (r.verdict && prev.gen != null && now > 0) {
+          rows.push({
+            label: '生成速度', before: prev.gen, after: now,
+            beforeText: `${prev.gen} t/s`, afterText: `${now} t/s`,
+          });
+        }
+        if (r.verdict && prev.prompt != null && r.verdict.promptTokensPerSec) {
+          rows.push({
+            label: '读提示词', before: prev.prompt, after: r.verdict.promptTokensPerSec,
+            beforeText: `${prev.prompt} t/s`, afterText: `${r.verdict.promptTokensPerSec} t/s`,
+          });
+        }
+        sl.innerHTML = rows.length
+          ? Chart.slope(rows, { width: 460, height: 180, beforeLabel: `上次（${new Date(prev.at).toLocaleDateString()}）`, afterLabel: '本次' })
+            + '<p class="row-hint" style="margin-top:8px">线往上 = 变快了，往下 = 变慢了。生成速度和读上下文是两回事，别只看一条。</p>'
+          : '<div class="chart-empty">这两次里没有可比的指标</div>';
+      }
+    }
   } catch { /* ignore */ }
 }
 
@@ -2059,6 +2265,20 @@ async function loadTrend(kind) {
           text: it.passed != null ? `${it.passed}/${it.total}` : '',
         })), { weeks: 12 })
         + '<p class="row-hint" style="margin-top:6px">颜色越绿说明当天体检成绩越好。</p>';
+
+      // 历次 × 指标矩阵（v1.10.0）：通过率和稳定性放一起看
+      const withMetrics = items.filter((it) => it.rate != null || it.share != null).slice(-8);
+      if (withMetrics.length >= 2) {
+        box.innerHTML += '<h3 class="space-sub">历次成绩对照</h3>'
+          + Chart.matrix(withMetrics.map((it) => ({
+            row: new Date(it.at).toLocaleDateString(),
+            cells: [
+              { value: it.rate == null ? 0 : Math.round(it.rate * 100), text: it.rate == null ? '—' : `${Math.round(it.rate * 100)}%` },
+              { value: it.share == null ? 0 : Math.round(it.share * 100), text: it.share == null ? '—' : `${Math.round(it.share * 100)}%` },
+            ],
+          })), { width: 460, cols: ['质量通过率', '采样稳定性'] })
+          + '<p class="row-hint" style="margin-top:6px">两项一起掉，多半是模型或配置的问题；只掉通过率，先看是不是长上下文跟不上。</p>';
+      }
     } else {
       const points = items.map((it) => ({
         label: new Date(it.at).toLocaleDateString(),
@@ -2438,6 +2658,23 @@ async function runNetCheck() {
     rows.push(`<div class="row"><span class="k">建议</span><span class="v">${esc((r.advice || []).join(' '))}</span></div>`);
     $('netResult').innerHTML = rows.join('');
     $('netStamp').textContent = `检查于 ${new Date(r.at).toLocaleTimeString()}`;
+
+    // 延迟对比条形图（v1.10.0）：哪个站点卡一眼看出来
+    const nc = $('netChart');
+    if (nc) {
+      const measured = (r.results || []).filter((x) => x.ok && x.ms > 0);
+      if (measured.length < 2) {
+        nc.innerHTML = '<div class="chart-empty">至少两个站点测到延迟才会有对比图</div>';
+      } else {
+        nc.innerHTML = Chart.bars(
+          measured.map((x) => ({
+            label: x.label, value: x.ms,
+            text: `${x.ms} ms`,
+            tone: x.ms > 1500 ? 'bad' : x.ms > 600 ? 'warn' : '',
+          })), { width: 460, height: 170, unit: 'ms' })
+          + '<p class="row-hint" style="margin-top:8px">模型下不动的时候，先看这里 —— 哪个站点超时，就是哪一环的问题。</p>';
+      }
+    }
   } catch (e) {
     $('netResult').innerHTML = `<div class="row"><span class="k">失败</span><span class="v">${esc(e.message)}</span></div>`;
     $('netStamp').textContent = '检查失败';
@@ -2944,6 +3181,36 @@ async function loadCheckpoints() {
 /* ------------------------------------------------------------ 用量统计 */
 
 /** 用量统计：每天消耗了多少 token */
+/* 用量导出 CSV：服务端没有对应接口，这里在前端拼（v1.10.0） */
+if ($('btnCsvUsage')) {
+  $('btnCsvUsage').addEventListener('click', async () => {
+    try {
+      const r = await (await fetch('/api/usage')).json();
+      const items = r.items || [];
+      if (!items.length) { toast('还没有用量记录'); return; }
+      const models = [...new Set(items.flatMap((u) => Object.keys(u.models || {})))];
+      const head = ['日期', 'tokens', '对话次数', ...models];
+      const cell = (v) => {
+        const s = String(v == null ? '' : v);
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const lines = [head.map(cell).join(',')];
+      for (const u of items) {
+        lines.push([u.day, u.tokens, u.calls, ...models.map((m) => (u.models || {})[m] || 0)].map(cell).join(','));
+      }
+      const blob = new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `localai-用量-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast('用量已导出为 CSV');
+    } catch (e) { toast(e.message); }
+  });
+}
+
 async function loadUsage() {
   const box = $('dashUsage');
   if (!box) return;
@@ -3137,6 +3404,24 @@ function renderFix(report) {
     ? `<b>发现 ${problems.length} 个问题</b><span>${esc(problems.map((c) => c.label).join('、'))}</span>`
     : '<b>一切正常</b><span>这套配置现在是可以用的。</span>';
 
+  // 汇总漏斗（v1.10.0）：检查项 → 正常 → 有问题 → 其中能自动修
+  const fn = $('fixFunnel');
+  if (fn) {
+    const checks = report.checks || [];
+    const okCount = checks.length - problems.length;
+    const fixable = problems.filter((c) => c.fixable).length;
+    const steps = [
+      { label: '检查项', value: checks.length },
+      { label: '正常', value: okCount },
+      { label: '有问题', value: problems.length },
+    ];
+    if (problems.length) steps.push({ label: '其中能自动修', value: fixable });
+    fn.innerHTML = Chart.funnel(steps, { width: 460 })
+      + `<p class="row-hint" style="margin-top:8px">${fixable
+        ? `${fixable} 个可以直接点「修复」，不用重装。`
+        : problems.length ? '这些都得手动处理，逐项下面有说明。' : '十项全过，直接用。'}</p>`;
+  }
+
   // 有问题就提醒一下，并给出「怎么排查」的引导入口
   if (problems.length && report.at && report.at !== lastDiagnoseAt) {
     lastDiagnoseAt = report.at;
@@ -3237,9 +3522,30 @@ function gotoTab(name) {
 let paletteIndex = 0;
 let paletteHits = [];
 
+/* 最近访问：记下来，命令面板空查询时优先显示（v1.10.0） */
+const RECENT_KEY = 'localai-recent';
+let recentTabs = [];
+try { recentTabs = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { recentTabs = []; }
+if (!Array.isArray(recentTabs)) recentTabs = [];
+
+function pushRecent(tab) {
+  if (!tab) return;
+  recentTabs = [tab, ...recentTabs.filter((t) => t !== tab)].slice(0, 4);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(recentTabs)); } catch { /* ignore */ }
+}
+
 function paletteRender() {
   const q = $('paletteInput').value.trim().toLowerCase();
   let hits = COMMANDS.filter((c) => !q || c.name.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q));
+
+  // 没有查询词时，把最近访问的页面顶到最前面
+  if (!q && recentTabs.length) {
+    const recentHits = recentTabs
+      .map((t) => COMMANDS.find((c) => c.run.toString().includes(`'${t}'`)))
+      .filter(Boolean)
+      .map((c) => ({ ...c, hint: `最近 · ${c.hint}` }));
+    if (recentHits.length) hits = [...recentHits, ...hits.filter((c) => !recentHits.includes(c))];
+  }
 
   // 已装的模型也能搜到：搜到就能直接拿去聊
   const models = (state && state.models) || [];
@@ -3771,12 +4077,25 @@ loadState().catch((e) => {
 startDashTimer();
 
 // 深链：#context / #settings / #palette / #tour
+// 没有 hash 时，回到上次停着的页面（v1.10.0：记住位置，刷新不跳回首页）
 {
-  const want = (location.hash || '').replace('#', '');
+  const LAST_TAB_KEY = 'localai-lasttab';
+  let want = (location.hash || '').replace('#', '');
+  if (!want) {
+    try { want = localStorage.getItem(LAST_TAB_KEY) || ''; } catch { want = ''; }
+  }
   const hit = want && document.querySelector(`#tabs li[data-tab="${want}"]`);
   if (hit) hit.click();
   else if (want === 'palette') paletteOpen();
   else if (want === 'tour') tourOpen();
+
+  // 切换页面时把位置记下来
+  for (const li of document.querySelectorAll('#tabs li')) {
+    li.addEventListener('click', () => {
+      try { localStorage.setItem(LAST_TAB_KEY, li.dataset.tab); } catch { /* ignore */ }
+      pushRecent(li.dataset.tab);
+    });
+  }
 }
 
 // 每 5 秒刷新一次状态（服务启停、模型增删后自动跟上）

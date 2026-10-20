@@ -89,6 +89,7 @@ export function createPullQueue({ emit, pull = defaultPull } = {}) {
     if (items.some((it) => it.model === name)) return { ok: false, error: `「${name}」已经在队列里了` };
     items.push({
       model: name, status: 'queued', percent: 0, got: 0, total: 0, speed: 0, eta: 0, error: '',
+      queuedAt: Date.now(),
     });
     notify();
     pump();
@@ -182,7 +183,7 @@ export function createPullQueue({ emit, pull = defaultPull } = {}) {
       }, controller.signal);
 
       flush(true);
-      update(item.model, { status: 'done', percent: 100, speed: 0, eta: 0 });
+      update(item.model, { status: 'done', percent: 100, speed: 0, eta: 0, finishedAt: Date.now() });
     } catch (e) {
       if (stopped || e.name === 'AbortError') {
         update(item.model, { status: 'cancelled', speed: 0, eta: 0 });

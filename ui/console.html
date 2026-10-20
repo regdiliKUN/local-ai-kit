@@ -82,6 +82,8 @@
 
       <div id="dashScore"></div>
 
+      <div id="dashKpi"></div>
+
       <div class="gauge-row" id="dashGauges">
         <div class="gauge-card"><div class="gk">显卡显存</div><div class="gv" id="gVram">—</div><div class="gs" id="gVramSub">等待数据</div><div class="gsp" id="gVramSpark"></div></div>
         <div class="gauge-card"><div class="gk">CPU 占用</div><div class="gv" id="gCpu">—</div><div class="gs" id="gCpuSub">等待数据</div><div class="gsp" id="gCpuSpark"></div></div>
@@ -113,6 +115,10 @@
       <h2 class="sec-h">最近用了多少</h2>
       <div class="panel">
         <div class="panel-b" id="dashUsage"><div class="chart-empty">在「试用」页聊过之后这里会有记录</div></div>
+        <div class="row-actions" style="padding:0 14px 14px">
+          <button class="btn ghost small" id="btnCsvUsage">导出 CSV</button>
+          <span class="row-hint">只统计「试用」页的对话</span>
+        </div>
       </div>
 
       <h2 class="sec-h">磁盘健康</h2>
@@ -163,9 +169,19 @@
         <div class="panel-b" id="sizeHist"><div class="chart-empty">读取中…</div></div>
       </div>
 
+      <h2 class="sec-h">能力矩阵</h2>
+      <div class="panel">
+        <div class="panel-b" id="capsMatrix"><div class="chart-empty">读取中…</div></div>
+      </div>
+
       <h2 class="sec-h">磁盘占用（按占比）</h2>
       <div class="panel">
         <div class="panel-b" id="spaceTreemap"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">空间构成</h2>
+      <div class="panel">
+        <div class="panel-b" id="spaceBreakdown"><div class="chart-empty">读取中…</div></div>
       </div>
 
       <h2 class="sec-h">加装新模型</h2>
@@ -212,6 +228,7 @@
           <button class="btn ghost small" id="btnQueueClear">清掉已完成的</button>
         </div>
         <div id="queueList"></div>
+        <div class="panel-b" id="queueTimeline" style="margin-top:10px"></div>
       </div>
 
       <div class="progress-wrap" id="progressWrap" hidden>
@@ -451,6 +468,11 @@
         <div class="row"><span class="k">—</span><span class="v">还没有历史数据</span></div>
       </div>
 
+      <h2 class="sec-h">上次 vs 本次</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchSlope"><div class="chart-empty">至少测两次才能对比</div></div>
+      </div>
+
       <h2 class="sec-h">这说明什么</h2>
       <div class="summary" id="benchAdvice">
         <div class="row"><span class="k">—</span><span class="v">还没有测过</span></div>
@@ -607,6 +629,7 @@
         <span class="row-hint" id="netStamp">—</span>
       </div>
       <div class="summary" id="netResult"><div class="row"><span class="k">—</span><span class="v">还没检查</span></div></div>
+      <div class="panel-b" id="netChart" style="margin-top:10px"><div class="chart-empty">检查之后这里会有延迟对比</div></div>
 
       <h2 class="sec-h">清理下载残留</h2>
       <p class="lead">下载中断会在模型目录里留下没人引用的分片。删掉不影响已装的模型。</p>
@@ -681,6 +704,8 @@
       </div>
 
       <div class="fix-summary" id="fixSummary"><div class="loading"><span class="spinner"></span> 检查中…</div></div>
+
+      <div class="panel-b" id="fixFunnel" style="margin-bottom:14px"><div class="chart-empty">检查之后这里会有汇总</div></div>
 
       <h2 class="sec-h">逐项结果</h2>
       <div class="stack" id="fixList"><div class="loading"><span class="spinner"></span> 检查中…</div></div>
