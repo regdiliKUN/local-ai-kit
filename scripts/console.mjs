@@ -32,12 +32,16 @@ import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
 import { createPullQueue } from './pull-queue.mjs';
-import { streamChat, sanitizeMessages } from './chat.mjs';
+import { streamChat, sanitizeMessages, streamCompare } from './chat.mjs';
 import { runBenchmark } from './bench.mjs';
 import { exportBundle, importBundle } from './backup.mjs';
 import { diagnose, repair } from './repair.mjs';
 import { compareVersions } from './version.mjs';
 import { appendItem, readList, writeList, clearList, storePath } from './store.mjs';
+import { searchLibrary } from './library.mjs';
+import { checkNetwork } from './netcheck.mjs';
+import { findOrphanBlobs, cleanupOrphanBlobs } from './space.mjs';
+import { buildReport } from './report.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -777,6 +781,21 @@ const server = createSafeServer(async (req, res) => {
     return;
   }
 
+  /* ------------------------------------------------------------ 模型对比 */
+  if (p === '/api/compare' && req.method === 'POST') {
+    const body = await readBody(req);
+    const models = (Array.isArray(body.models) ? body.models : [])
+      .map((m) => String(m || '').trim())
+      .filter((m) => isValidModelName(m))
+      .slice(0, 4);
+    if (!models.length) return json(res, 400, { error: '至少选一个模型' });
+    const messages = sanitizeMessages(body.messages);
+    if (!messages.length) return json(res, 400, { error: '至少要有一条消息' });
+    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
+    await streamCompare(res, { models, messages, options: body.options || {} });
+    return;
+  }
+
   /* ------------------------------------------------------------ 试用模型 */
   if (p === '/api/chat' && req.method === 'POST') {
     const body = await readBody(req);
@@ -811,6 +830,60 @@ const server = createSafeServer(async (req, res) => {
     // 所以要真的比大小，不能只比「不一样」。
     const newer = latest && compareVersions(latest, KIT_VERSION) > 0;
     return json(res, 200, { current: KIT_VERSION, latest, note, update: !!newer });
+  }
+
+  /* ---------------------------------------------------------- 网络诊断 */
+  if (p === '/api/netcheck' && req.method === 'GET') {
+    return json(res, 200, await checkNetwork());
+  }
+
+  /* ---------------------------------------------------------- 清理残留 */
+  if (p === '/api/cleanup' && req.method === 'GET') {
+    const dir = cfg.modelDir || '';
+    const found = findOrphanBlobs(dir);
+    return json(res, 200, {
+      dir,
+      count: found.blobs.length,
+      totalGB: found.totalGB,
+      preview: found.blobs.slice(0, 20).map((b) => ({ name: b.name, mb: Math.round(b.bytes / 1048576) })),
+    });
+  }
+
+  if (p === '/api/cleanup' && req.method === 'POST') {
+    const body = await readBody(req);
+    const dryRun = body.dryRun !== false;
+    const dir = cfg.modelDir || '';
+    if (!dir) return json(res, 400, { error: '还没配置模型目录' });
+    const out = cleanupOrphanBlobs(dir, { dryRun });
+    return json(res, 200, { ok: true, dryRun, ...out });
+  }
+
+  /* -------------------------------------------------------- 诊断报告 */
+  if (p === '/api/report' && req.method === 'GET') {
+    const text = buildReport({
+      root: ROOT,
+      cfg,
+      metrics: await collectMetrics({ modelDir: cfg.modelDir || '' }),
+      diagnose: await diagnose({ root: ROOT, cfg, kitDir: ROOT }),
+      health: lastHealth,
+      bench: lastBench,
+      logText: tailLog(300),
+    });
+    const name = `localai-diagnostic-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}.txt`;
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${name}"`,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(text);
+  }
+
+  /* ---------------------------------------------------------- 官方模型库 */
+  if (p === '/api/library' && req.method === 'GET') {
+    const q = String(url.searchParams.get('q') || '');
+    const out = await searchLibrary(q);
+    return json(res, 200, { query: q, ...out });
   }
 
   /* ------------------------------------------------------------ 历史记录 */

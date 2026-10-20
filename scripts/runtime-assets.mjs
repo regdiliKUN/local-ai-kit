@@ -11,6 +11,8 @@ export const SCRIPT_FILES = [
   // v1.4.0 新增
   'metrics.mjs', 'history.mjs', 'space.mjs', 'pull-queue.mjs',
   'chat.mjs', 'bench.mjs', 'backup.mjs', 'repair.mjs', 'version.mjs',
+  // v1.5.0 新增
+  'store.mjs', 'library.mjs', 'netcheck.mjs', 'report.mjs',
 ];
 
 export function copyRuntime(kitDir, root) {

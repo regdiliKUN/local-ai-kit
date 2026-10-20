@@ -22,10 +22,12 @@
       <li data-tab="dashboard" class="active"><span class="dot"></span><span class="label">系统概览</span></li>
       <li data-tab="models"><span class="dot"></span><span class="label">模型管理</span></li>
       <li data-tab="play"><span class="dot"></span><span class="label">试用</span></li>
+      <li data-tab="compare"><span class="dot"></span><span class="label">模型对比</span></li>
       <li data-tab="bench"><span class="dot"></span><span class="label">性能基准</span></li>
       <li data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
       <li data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
       <li data-tab="fix"><span class="dot"></span><span class="label">修复中心</span></li>
+      <li data-tab="tools"><span class="dot"></span><span class="label">诊断与维护</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
 
@@ -102,6 +104,18 @@
       <h2 class="sec-h">加装新模型</h2>
       <p class="lead">从 Ollama 官方模型库下载。名字形如 <code>qwen3:8b</code>，可以在
         <a class="hint-link" href="https://ollama.com/library" target="_blank" rel="noreferrer">模型库</a>里挑。</p>
+
+      <details class="adv" id="libBox">
+        <summary>搜官方模型库（联网时可用）</summary>
+        <div class="adv-body">
+          <div class="custom-row" style="border:0;margin:0;padding:0">
+            <input type="search" id="libQuery" placeholder="例如 qwen、llama、coder" spellcheck="false">
+            <button class="btn primary small" id="btnLibSearch">搜索</button>
+          </div>
+          <div id="libResults" class="lib-results"><p class="row-hint">搜一下官方库，几百个模型里挑一个合适的。</p></div>
+        </div>
+      </details>
+
       <div class="quick-row" id="quickModels"></div>
       <div class="custom-row">
         <span class="check">模型名</span>
@@ -327,6 +341,45 @@
       </div>
     </section>
 
+    <!-- ============ 模型对比 ============ -->
+    <section class="view" id="view-compare" hidden>
+      <h1>模型对比</h1>
+      <div class="guide">
+        <span class="guide-n">用在哪</span>
+        <span>「换个模型会不会更好」是最难自己判断的问题。同一个问题<b>同时问几个模型</b>，并排一看就清楚了。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">要比哪些模型</div>
+            <div class="s">最多 4 个。只能选已安装的模型。</div>
+          </div>
+          <div class="ctx-inline" id="compareModels"></div>
+        </div>
+      </div>
+
+      <div class="set-card" style="margin-top:12px">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">问什么</div>
+            <div class="s">同一个问题会原样发给每个模型。</div>
+          </div>
+          <input type="text" id="comparePrompt" class="ctx-input" style="width:320px" placeholder="例如：解释一下什么是 KV cache" value="用三句话解释什么是显存。">
+        </div>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnCompare">开始对比</button>
+        <span class="row-hint" id="compareHint">最多 4 个模型，依次跑（并发会互相抢显存）。</span>
+      </div>
+
+      <h2 class="sec-h">结果</h2>
+      <div class="compare-grid" id="compareResults">
+        <div class="empty">选好模型，点「开始对比」。</div>
+      </div>
+    </section>
+
     <!-- ============ 模型体检 ============ -->
     <section class="view" id="view-health" hidden>
       <h1>模型体检</h1>
@@ -380,6 +433,37 @@
         <summary>查看详细日志</summary>
         <pre id="healthLog"></pre>
       </details>
+    </section>
+
+    <!-- ============ 诊断与维护 ============ -->
+    <section class="view" id="view-tools" hidden>
+      <h1>诊断与维护</h1>
+      <div class="guide">
+        <span class="guide-n">出问题时</span>
+        <span>下载不动、更新查不到、硬盘越来越满 —— 先在这里查一遍，<b>不用重装</b>。</span>
+      </div>
+
+      <h2 class="sec-h">网络连通性</h2>
+      <div class="row-actions">
+        <button class="btn primary" id="btnNetCheck">检查网络</button>
+        <span class="row-hint" id="netStamp">—</span>
+      </div>
+      <div class="summary" id="netResult"><div class="row"><span class="k">—</span><span class="v">还没检查</span></div></div>
+
+      <h2 class="sec-h">清理下载残留</h2>
+      <p class="lead">下载中断会在模型目录里留下没人引用的分片。删掉不影响已装的模型。</p>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnCheckOrphan">检查残留</button>
+        <button class="btn ghost small danger" id="btnCleanup" disabled>清理</button>
+        <span class="row-hint" id="orphanHint">先检查，再决定要不要清。</span>
+      </div>
+      <div class="summary" id="orphanResult"><div class="row"><span class="k">—</span><span class="v">还没检查</span></div></div>
+
+      <h2 class="sec-h">诊断报告</h2>
+      <p class="lead">把环境、配置、日志打包成一个文件，发给别人就能直接看到问题在哪（已自动去掉用户名和令牌）。</p>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnReport">下载诊断报告</button>
+      </div>
     </section>
 
     <!-- ============ 修复中心 ============ -->
@@ -497,6 +581,15 @@
 </div>
 
 <div class="toast" id="toast" hidden></div>
+
+<!-- 命令面板：Ctrl+K 打开，输入关键字直接跳到对应操作 -->
+<div class="palette-mask" id="paletteMask" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="命令面板">
+    <input type="text" id="paletteInput" placeholder="输入命令或页面名…（Esc 关闭）" spellcheck="false" autocomplete="off">
+    <ul class="palette-list" id="paletteList"></ul>
+    <div class="palette-foot">↑↓ 选择 · Enter 执行 · Esc 关闭</div>
+  </div>
+</div>
 
 <script src="charts.js"></script>
 <script src="console.js"></script>

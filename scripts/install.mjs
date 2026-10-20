@@ -646,7 +646,7 @@ function stepDsh(opts, emit) {
 const GENERATED_MARK = '# 由本地 AI 安装向导生成';
 
 /** 部署包版本；写进生成的配置，方便以后判断这份文件是谁写的、要不要升级 */
-export const KIT_VERSION = '1.4.0';
+export const KIT_VERSION = '1.5.0';
 
 /* ------------------------------------------------- dsh 配置块（未缩进） */
 

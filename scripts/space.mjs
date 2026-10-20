@@ -175,6 +175,80 @@ export function analyzeModelDir(dir) {
 }
 
 /**
+ * 找出「没被任何 manifest 引用」的 blob（下载中断留下的碎片）。
+ *
+ * 只查不删 —— 删除是不可逆操作，交给界面上的「清理」按钮，
+ * 并且删之前一定要把能释放多少空间说清楚。
+ */
+export function findOrphanBlobs(dir) {
+  const result = { blobs: [], totalBytes: 0, totalGB: 0 };
+  if (!dir || !fs.existsSync(dir)) return result;
+  const blobDir = path.join(dir, 'blobs');
+  const manifestRoot = path.join(dir, 'manifests');
+  if (!fs.existsSync(blobDir)) return result;
+
+  // 统计每个 digest 被多少个 manifest 引用
+  const refCount = new Map();
+  for (const file of walk(manifestRoot)) {
+    for (const l of readManifest(file.path)) {
+      refCount.set(l.digest, (refCount.get(l.digest) || 0) + 1);
+    }
+  }
+
+  for (const file of walk(blobDir)) {
+    const digest = path.basename(file.path);
+    if ((refCount.get(digest) || 0) === 0) {
+      result.blobs.push({ name: digest, bytes: file.size, path: file.path });
+      result.totalBytes += file.size;
+    }
+  }
+  result.totalGB = round2(result.totalBytes / GB);
+  result.blobs.sort((a, b) => b.bytes - a.bytes);
+  return result;
+}
+
+/**
+ * 删除残留 blob。
+ *
+ * 安全措施：
+ *   - 必须在模型目录的 blobs 子目录里（不能是任意路径）
+ *   - 再次确认这个 blob 确实没被引用（防止删之前状态变了）
+ *   - 逐个删，不用递归删目录
+ *
+ * @returns {{removed:number, freedBytes:number, freedGB:number, skipped:string[]}}
+ */
+export function cleanupOrphanBlobs(dir, { dryRun = true } = {}) {
+  const out = { removed: 0, freedBytes: 0, freedGB: 0, skipped: [] };
+  if (!dir || !fs.existsSync(dir)) return out;
+  const blobDir = path.join(dir, 'blobs');
+  const found = findOrphanBlobs(dir);
+  if (!found.blobs.length) return out;
+
+  // 删之前再统计一次引用情况，确认这批 blob 确实没人用
+  const refCount = new Map();
+  for (const file of walk(path.join(dir, 'manifests'))) {
+    for (const l of readManifest(file.path)) {
+      refCount.set(l.digest, (refCount.get(l.digest) || 0) + 1);
+    }
+  }
+
+  for (const blob of found.blobs) {
+    // 必须真的在 blobs 目录里（防止路径被绕出去）
+    const full = path.resolve(blob.path);
+    if (!full.startsWith(path.resolve(blobDir) + path.sep)) { out.skipped.push(blob.name); continue; }
+    if ((refCount.get(blob.name) || 0) > 0) { out.skipped.push(blob.name); continue; }
+    if (dryRun) { out.removed += 1; out.freedBytes += blob.bytes; continue; }
+    try {
+      fs.rmSync(full, { force: true });
+      out.removed += 1;
+      out.freedBytes += blob.bytes;
+    } catch { out.skipped.push(blob.name); }
+  }
+  out.freedGB = round2(out.freedBytes / GB);
+  return out;
+}
+
+/**
  * 扫描整台机器上所有可能的模型目录。
  * 用来回答「这台电脑上到底装了哪些模型、分别在哪个盘」。
  */

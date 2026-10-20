@@ -113,12 +113,18 @@ function currentTheme() {
  *   ?     显示快捷键说明
  */
 const KEYMAP = {
-  '1': 'dashboard', '2': 'models', '3': 'play', '4': 'bench',
-  '5': 'context', '6': 'health', '7': 'fix', '8': 'settings',
+  '1': 'dashboard', '2': 'models', '3': 'play', '4': 'compare', '5': 'bench',
+  '6': 'context', '7': 'health', '8': 'fix', '9': 'tools', '0': 'settings',
 };
 
 document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) {
+    // Ctrl+K / Cmd+K 打开命令面板
+    if (e.key === 'k' || e.key === 'K') {
+      if ($('paletteMask') && $('paletteMask').hidden) { paletteOpen(); e.preventDefault(); }
+    }
+    return;
+  }
   const tag = (e.target.tagName || '').toLowerCase();
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
@@ -161,6 +167,7 @@ async function loadState() {
   renderQueue(state.queue);
   playModels();
   benchModels();
+  compareModels();
   loadSessions().then(() => {
     // 打开页面就接着上次的对话
     if (playSessions.length) {
@@ -1059,6 +1066,234 @@ if ($('btnClearBench')) {
   });
 }
 
+/* -------------------------------------------------------- 官方模型库搜索 */
+
+const CAP_TEXT = {
+  tools: '工具调用', vision: '看图', thinking: '深度思考',
+  embedding: '向量化', audio: '语音', cloud: '云端',
+};
+
+async function searchLibrary() {
+  const q = $('libQuery').value.trim();
+  const box = $('libResults');
+  box.innerHTML = '<div class="loading"><span class="spinner"></span> 正在搜 ollama.com…</div>';
+  try {
+    const r = await (await fetch(`/api/library?q=${encodeURIComponent(q)}`)).json();
+    if (r.error && !r.items.length) {
+      box.innerHTML = `<p class="row-hint">${esc(r.error)}。离线时可以用下面的输入框直接写模型名。</p>`;
+      return;
+    }
+    if (!r.items.length) {
+      box.innerHTML = '<p class="row-hint">没找到匹配的模型。</p>';
+      return;
+    }
+    box.innerHTML = r.items.map((m) => `
+      <div class="libitem">
+        <div class="li">
+          <div class="ln">${esc(m.name)}</div>
+          <div class="ld">${esc((m.description || '').slice(0, 120))}</div>
+          <div class="lt">${(m.capabilities || []).map((c) => `<span class="tag">${esc(CAP_TEXT[c] || c)}</span>`).join('')}
+            ${(m.sizes || []).slice(0, 8).map((s) => `<span class="tag plain">${esc(s)}</span>`).join('')}</div>
+        </div>
+        <div class="la">
+          ${m.pulls ? `<div class="lp">${esc(m.pulls)} 次下载</div>` : ''}
+          <button class="btn ghost small" data-lib="${esc(m.name)}">下载</button>
+        </div>
+      </div>`).join('');
+
+    for (const b of box.querySelectorAll('[data-lib]')) {
+      b.addEventListener('click', async () => {
+        const name = b.dataset.lib;
+        b.disabled = true;
+        b.textContent = '加入中…';
+        try {
+          const out = await post('/api/queue', { model: `${name}:latest` });
+          renderQueue(out.state);
+          toast(`「${name}:latest」已加入下载队列`);
+        } catch (e) { toast(e.message); }
+        b.disabled = false;
+        b.textContent = '下载';
+      });
+    }
+  } catch (e) {
+    box.innerHTML = `<p class="row-hint">搜索失败：${esc(e.message)}</p>`;
+  }
+}
+
+if ($('btnLibSearch')) $('btnLibSearch').addEventListener('click', searchLibrary);
+if ($('libQuery')) {
+  $('libQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchLibrary(); });
+}
+
+/* ------------------------------------------------------------ 模型对比 */
+
+const compareState = {};   // model -> { content, status, stats }
+
+function compareModels() {
+  const box = $('compareModels');
+  if (!box) return;
+  const names = (state.models || []).map((m) => m.name);
+  if (!names.length) { box.innerHTML = '<span class="row-hint">（没有已安装的模型）</span>'; return; }
+  // 记住上次勾选，页面刷新别丢
+  const chosen = new Set(Array.from(box.querySelectorAll('input:checked')).map((i) => i.value));
+  if (!chosen.size) { names.slice(0, 2).forEach((n) => chosen.add(n)); }
+  box.innerHTML = names.map((n) => `
+    <label class="check"><input type="checkbox" value="${esc(n)}"${chosen.has(n) ? ' checked' : ''}>
+      <span>${esc(n)}</span></label>`).join('');
+}
+
+function renderCompare() {
+  const box = $('compareResults');
+  const models = Object.keys(compareState);
+  if (!models.length) {
+    box.innerHTML = '<div class="empty">选好模型，点「开始对比」。</div>';
+    return;
+  }
+  box.innerHTML = models.map((m) => {
+    const r = compareState[m];
+    const body = r.status === 'running' ? '<span class="typing">正在思考…</span>'
+      : r.status === 'error' ? `<span class="ctx-bad">${esc(r.content)}</span>`
+        : esc(r.content || '（没有返回内容）');
+    const s = r.stats;
+    const meta = s
+      ? `${s.tokens} tokens · ${s.tokensPerSec || '—'} t/s · ${(r.wallMs / 1000).toFixed(1)} 秒`
+      : r.wallMs ? `${(r.wallMs / 1000).toFixed(1)} 秒` : '';
+    return `<div class="cmpcard">
+      <div class="cmp-head"><b>${esc(m)}</b><span class="cmp-meta">${esc(meta)}</span></div>
+      <div class="cmp-body">${body}</div>
+    </div>`;
+  }).join('');
+}
+
+async function startCompare() {
+  const models = Array.from($('compareModels').querySelectorAll('input:checked')).map((i) => i.value);
+  if (!models.length) { toast('至少选一个模型'); return; }
+  const prompt = $('comparePrompt').value.trim();
+  if (!prompt) { toast('先写一个问题'); return; }
+
+  for (const m of Object.keys(compareState)) delete compareState[m];
+  for (const m of models) compareState[m] = { status: 'queued', content: '', stats: null };
+  renderCompare();
+  $('btnCompare').disabled = true;
+  $('compareHint').textContent = '正在依次跑…';
+
+  try {
+    const r = await fetch('/api/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-LocalAI-Token': window.__TOKEN__ || '' },
+      body: JSON.stringify({ models, messages: [{ role: 'user', content: prompt }] }),
+    });
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        const item = compareState[ev.model];
+        if (!item) continue;
+        if (ev.type === 'compare-item') {
+          item.status = ev.status;
+          if (ev.status === 'error') item.content = ev.content;
+          if (ev.stats) item.stats = ev.stats;
+          if (ev.wallMs) item.wallMs = ev.wallMs;
+        } else if (ev.type === 'compare-chunk') {
+          item.status = 'running';
+          item.content += ev.content;
+        }
+        renderCompare();
+      }
+    }
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    $('btnCompare').disabled = false;
+    $('compareHint').textContent = '最多 4 个模型，依次跑（并发会互相抢显存）。';
+  }
+}
+
+if ($('btnCompare')) $('btnCompare').addEventListener('click', startCompare);
+
+/* ------------------------------------------------- 诊断与维护（网络/清理/报告） */
+
+async function runNetCheck() {
+  $('netStamp').textContent = '检查中…';
+  $('netResult').innerHTML = '<div class="row"><span class="k">—</span><span class="v">正在探测…</span></div>';
+  try {
+    const r = await (await fetch('/api/netcheck')).json();
+    const rows = (r.results || []).map((x) => {
+      const ok = x.ok;
+      return `<div class="row"><span class="k">${ok ? (x.warn ? '⚠️' : '✅') : '❌'} ${esc(x.label)}</span>
+        <span class="v">${ok ? `${x.ms} ms${x.warn ? ` · ${esc(x.warn)}` : ''}` : esc(x.error || '不通')}</span></div>`;
+    });
+    if ((r.proxies || []).length) {
+      rows.push(`<div class="row"><span class="k">代理</span><span class="v">${esc(r.proxies.map((p) => `${p.key}=${p.value}`).join('，'))}</span></div>`);
+    }
+    rows.push(`<div class="row"><span class="k">建议</span><span class="v">${esc((r.advice || []).join(' '))}</span></div>`);
+    $('netResult').innerHTML = rows.join('');
+    $('netStamp').textContent = `检查于 ${new Date(r.at).toLocaleTimeString()}`;
+  } catch (e) {
+    $('netResult').innerHTML = `<div class="row"><span class="k">失败</span><span class="v">${esc(e.message)}</span></div>`;
+    $('netStamp').textContent = '检查失败';
+  }
+}
+
+async function checkOrphan() {
+  $('orphanHint').textContent = '检查中…';
+  try {
+    const r = await (await fetch('/api/cleanup')).json();
+    if (!r.count) {
+      $('orphanResult').innerHTML = '<div class="row"><span class="k">残留</span><span class="v">没有残留，磁盘是干净的</span></div>';
+      $('btnCleanup').disabled = true;
+      $('orphanHint').textContent = '没有需要清理的东西';
+      return;
+    }
+    const preview = (r.preview || []).slice(0, 8).map((b) => `${b.name.slice(0, 22)}… ${b.mb} MB`).join('，');
+    $('orphanResult').innerHTML = [
+      `<div class="row"><span class="k">残留分片</span><span class="v">${r.count} 个，共 ${r.totalGB} GB</span></div>`,
+      `<div class="row"><span class="k">其中</span><span class="v">${esc(preview)}${(r.preview || []).length > 8 ? ' …' : ''}</span></div>`,
+    ].join('');
+    $('btnCleanup').disabled = false;
+    $('orphanHint').textContent = `可以释放约 ${r.totalGB} GB`;
+  } catch (e) {
+    $('orphanHint').textContent = `检查失败：${e.message}`;
+  }
+}
+
+if ($('btnNetCheck')) $('btnNetCheck').addEventListener('click', runNetCheck);
+if ($('btnCheckOrphan')) $('btnCheckOrphan').addEventListener('click', checkOrphan);
+if ($('btnCleanup')) {
+  $('btnCleanup').addEventListener('click', async () => {
+    if (!confirm('确定要删除这些残留分片吗？\n（已装的模型不受影响）')) return;
+    $('btnCleanup').disabled = true;
+    try {
+      const r = await post('/api/cleanup', { dryRun: false });
+      toast(`已清理 ${r.removed} 个分片，释放 ${r.freedGB} GB`);
+      await checkOrphan();
+      loadSpace().catch(() => {});
+    } catch (e) { toast(e.message); }
+    $('btnCleanup').disabled = false;
+  });
+}
+if ($('btnReport')) {
+  $('btnReport').addEventListener('click', () => {
+    window.open('/api/report', '_blank');
+    toast('诊断报告已开始下载');
+  });
+}
+
 /* ---------------------------------------------------------------- 修复中心 */
 
 const FIX_LEVEL = { ok: { text: '正常', cls: 'ok' }, warn: { text: '注意', cls: 'warn' }, error: { text: '有问题', cls: 'error' } };
@@ -1118,6 +1353,98 @@ async function runDiagnose() {
 }
 
 if ($('btnDiagnose')) $('btnDiagnose').addEventListener('click', runDiagnose);
+
+/* ------------------------------------------------------------ 命令面板 */
+
+/**
+ * 命令面板：Ctrl+K 打开。
+ *
+ * 页面已经有 9 个标签页、几十个按钮，光靠鼠标找会很累。
+ * 一个输入框就能跳到任何地方 —— 顺便也是最快的「这软件能干什么」说明书。
+ */
+const COMMANDS = [
+  { name: '系统概览', hint: '页面', run: () => gotoTab('dashboard') },
+  { name: '模型管理', hint: '页面', run: () => gotoTab('models') },
+  { name: '试用', hint: '页面', run: () => gotoTab('play') },
+  { name: '模型对比', hint: '页面', run: () => gotoTab('compare') },
+  { name: '性能基准', hint: '页面', run: () => gotoTab('bench') },
+  { name: '上下文与模型', hint: '页面', run: () => gotoTab('context') },
+  { name: '模型体检', hint: '页面', run: () => gotoTab('health') },
+  { name: '修复中心', hint: '页面', run: () => gotoTab('fix') },
+  { name: '诊断与维护', hint: '页面', run: () => gotoTab('tools') },
+  { name: '服务设置', hint: '页面', run: () => gotoTab('settings') },
+
+  { name: '开始体检', hint: '动作', run: () => { gotoTab('health'); $('btnHealth') && $('btnHealth').click(); } },
+  { name: '快速体检（跳过 32K）', hint: '动作', run: () => { gotoTab('health'); $('btnHealthQuick') && $('btnHealthQuick').click(); } },
+  { name: '开始测速', hint: '动作', run: () => { gotoTab('bench'); $('btnBench') && $('btnBench').click(); } },
+  { name: '重新检查（修复中心）', hint: '动作', run: () => { gotoTab('fix'); $('btnDiagnose') && $('btnDiagnose').click(); } },
+  { name: '检查网络', hint: '动作', run: () => { gotoTab('tools'); $('btnNetCheck') && $('btnNetCheck').click(); } },
+  { name: '检查下载残留', hint: '动作', run: () => { gotoTab('tools'); $('btnCheckOrphan') && $('btnCheckOrphan').click(); } },
+  { name: '下载诊断报告', hint: '动作', run: () => { gotoTab('tools'); $('btnReport') && $('btnReport').click(); } },
+  { name: '刷新状态', hint: '动作', run: () => { loadState(); toast('已刷新'); } },
+  { name: '搜官方模型库', hint: '动作', run: () => { gotoTab('models'); $('libBox').open = true; $('libQuery').focus(); } },
+  { name: '搜索已装模型', hint: '动作', run: () => { gotoTab('models'); $('modelSearch').focus(); } },
+  { name: '查看日志', hint: '动作', run: () => { gotoTab('settings'); $('btnShowLog').click(); } },
+  { name: '下载日志', hint: '动作', run: () => { gotoTab('settings'); $('btnDownloadLog').click(); } },
+  { name: '检查更新', hint: '动作', run: () => { gotoTab('settings'); $('btnCheckVersion').click(); } },
+  { name: '导出配置', hint: '动作', run: () => { gotoTab('settings'); $('btnExportCfg').click(); } },
+  { name: '导入配置', hint: '动作', run: () => { gotoTab('settings'); $('btnImportCfg').click(); } },
+  { name: '切换深色 / 浅色', hint: '动作', run: () => $('btnTheme').click() },
+  { name: '停止服务并释放显存', hint: '动作', run: () => { gotoTab('settings'); $('btnStopSvc').click(); } },
+  { name: '启动工作台', hint: '动作', run: () => { gotoTab('settings'); $('btnStartSvc').click(); } },
+];
+
+function gotoTab(name) {
+  const li = document.querySelector(`#tabs li[data-tab="${name}"]`);
+  if (li) li.click();
+}
+
+let paletteIndex = 0;
+let paletteHits = [];
+
+function paletteRender() {
+  const q = $('paletteInput').value.trim().toLowerCase();
+  paletteHits = COMMANDS.filter((c) => !q || c.name.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q));
+  paletteIndex = 0;
+  $('paletteList').innerHTML = paletteHits.length
+    ? paletteHits.map((c, i) => `<li class="${i === 0 ? 'on' : ''}" data-i="${i}">
+        <span class="pn">${esc(c.name)}</span><span class="ph">${esc(c.hint)}</span></li>`).join('')
+    : '<li class="none">没有匹配的命令</li>';
+  for (const li of $('paletteList').querySelectorAll('[data-i]')) {
+    li.addEventListener('click', () => paletteRun(Number(li.dataset.i)));
+  }
+}
+
+function paletteRun(i) {
+  const cmd = paletteHits[i];
+  if (!cmd) return;
+  paletteClose();
+  try { cmd.run(); } catch (e) { toast(e.message); }
+}
+
+function paletteOpen() {
+  $('paletteMask').hidden = false;
+  $('paletteInput').value = '';
+  paletteRender();
+  $('paletteInput').focus();
+}
+
+function paletteClose() {
+  $('paletteMask').hidden = true;
+}
+
+if ($('paletteInput')) {
+  $('paletteInput').addEventListener('input', paletteRender);
+  $('paletteInput').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { paletteIndex = Math.min(paletteIndex + 1, paletteHits.length - 1); paletteRender(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { paletteIndex = Math.max(paletteIndex - 1, 0); paletteRender(); e.preventDefault(); }
+    else if (e.key === 'Enter') { paletteRun(paletteIndex); e.preventDefault(); }
+    else if (e.key === 'Escape') { paletteClose(); e.preventDefault(); }
+  });
+}
+if ($('paletteMask')) {
+  $('paletteMask').addEventListener('click', (e) => { if (e.target === $('paletteMask')) paletteClose(); });
+}
 
 /* ------------------------------------------------------------------ 体检 */
 

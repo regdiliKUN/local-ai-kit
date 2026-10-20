@@ -40,10 +40,79 @@ export function summarize(final) {
 }
 
 /**
- * 跑一次对话，把流直接写给客户端。
+ * 同时问几个模型，把结果并排比一比。
+ *
+ * 「换个模型会不会更好」是最难自己判断的问题 —— 同一个问题问两遍，
+ * 放在一起看，差别一眼就出来了。顺便把速度也一起比了。
  *
  * @param {import('node:http').ServerResponse} res
+ * @param {object} opts { models, messages, options }
  */
+export async function streamCompare(res, { models, messages, options = {} }) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  const send = (obj) => { try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch { /* 客户端断了 */ } };
+
+  const list = (models || []).slice(0, 4);
+  send({ type: 'compare-start', models: list });
+
+  // 一个个来：并发跑会互相抢显存，结果也不可比
+  for (const model of list) {
+    send({ type: 'compare-item', model, status: 'running', content: '' });
+    const started = Date.now();
+    let last = null;
+    try {
+      const r = await fetch(`${OLLAMA_BASE}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: sanitizeMessages(messages),
+          stream: true,
+          options: {
+            temperature: Number(options.temperature) || 0.7,
+            num_predict: Math.max(1, Math.min(2048, Number(options.numPredict) || 512)),
+            ...(options.numCtx ? { num_ctx: Number(options.numCtx) } : {}),
+          },
+        }),
+      });
+      if (!r.ok || !r.body) throw new Error(`HTTP ${r.status}`);
+      const dec = new TextDecoder();
+      let buf = '';
+      for await (const chunk of r.body) {
+        buf += dec.decode(chunk, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line) continue;
+          let j;
+          try { j = JSON.parse(line); } catch { continue; }
+          if (j.error) throw new Error(j.error);
+          const content = j.message && j.message.content;
+          if (content) send({ type: 'compare-chunk', model, content });
+          if (j.done) last = j;
+        }
+      }
+      const stats = summarize(last);
+      send({
+        type: 'compare-item',
+        model,
+        status: 'done',
+        content: '',
+        stats,
+        wallMs: Date.now() - started,
+      });
+    } catch (e) {
+      send({ type: 'compare-item', model, status: 'error', content: String(e.message || e), wallMs: Date.now() - started });
+    }
+  }
+  send({ type: 'compare-done' });
+  try { res.end(); } catch { /* ignore */ }
+}
 export async function streamChat(res, { model, messages, options = {} }) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',

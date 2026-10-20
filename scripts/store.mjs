@@ -14,10 +14,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = process.env.LOCAL_AI_DATA_DIR
-  || path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'LocalAI');
+/**
+ * 存储文件的位置。
+ *
+ * 延迟计算（而不是 import 时就定死），这样测试可以临时改
+ * LOCAL_AI_DATA_DIR 指向临时目录，不污染真实数据。
+ */
+export function storeDir() {
+  return process.env.LOCAL_AI_DATA_DIR
+    || path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'LocalAI');
+}
 
-const FILE = path.join(DIR, 'store.json');
+export function storeFile() {
+  return path.join(storeDir(), 'store.json');
+}
 
 /** 各类型最多留多少条（多了文件会变得很臃肿） */
 const LIMITS = {
@@ -29,7 +39,7 @@ const LIMITS = {
 };
 
 function ensureDir() {
-  try { fs.mkdirSync(DIR, { recursive: true }); } catch { /* ignore */ }
+  try { fs.mkdirSync(storeDir(), { recursive: true }); } catch { /* ignore */ }
 }
 
 /**
@@ -38,7 +48,7 @@ function ensureDir() {
  */
 export function readStore() {
   try {
-    const raw = fs.readFileSync(FILE, 'utf8').replace(/^\uFEFF/, '');
+    const raw = fs.readFileSync(storeFile(), 'utf8').replace(/^\uFEFF/, '');
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     return parsed;
@@ -48,10 +58,11 @@ export function readStore() {
 /** 写整个存储：先写临时文件再改名，避免中途断电留半个文件 */
 export function writeStore(store) {
   ensureDir();
-  const temp = `${FILE}.${process.pid}.tmp`;
+  const file = storeFile();
+  const temp = `${file}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(temp, JSON.stringify(store, null, 2), 'utf8');
-    fs.renameSync(temp, FILE);
+    fs.renameSync(temp, file);
   } finally { try { fs.rmSync(temp, { force: true }); } catch { /* ignore */ } }
   return store;
 }
@@ -98,5 +109,5 @@ export function clearList(kind) {
 
 /** 存储文件在哪（界面上要告诉用户） */
 export function storePath() {
-  return FILE;
+  return storeFile();
 }
