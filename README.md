@@ -361,7 +361,7 @@ v1.1.1 已修复。模型是多个分片同时下载的，之前界面显示的�
 │   ├── report.mjs           #   诊断报告打包
 │   ├── store.mjs            #   本地持久化（历史 / 对话）
 │   └── ...                  #   其余模块见 scripts/
-├── tests/                   # 单元测试（47 个用例）
+├── tests/                   # 单元测试（48 个用例）
 ├── .github/workflows/       # CI：多版本 × 多平台
 ├── CHANGELOG.md             # 更新记录
 └── CONTRIBUTING.md          # 参与贡献
@@ -372,7 +372,7 @@ v1.1.1 已修复。模型是多个分片同时下载的，之前界面显示的�
 项目承诺**零第三方依赖、零构建步骤**。改完 `ui/` 里的文件，刷新浏览器就生效。
 
 ```bash
-npm test        # 47 个单元测试
+npm test        # 48 个单元测试
 npm run lint    # 语法检查
 npm run console # 起本地控制台
 ```
