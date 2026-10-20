@@ -17,12 +17,30 @@ test('模型目录会挑「真的有 manifests 的那个」，而不是配置里
   fs.mkdirSync(path.join(good, 'manifests', 'registry.ollama.ai'), { recursive: true });
   const empty = path.join(root, 'empty', 'models');
   fs.mkdirSync(empty, { recursive: true });
+  const old = process.env.OLLAMA_MODELS;
+  delete process.env.OLLAMA_MODELS;
   try {
     // 显式给的目录里没有 manifests → 应该继续找，而不是直接用
-    const found = resolveModelDir(empty);
-    assert.notEqual(found, empty, '没有 manifests 的目录不该被选中');
-    assert.ok(found, '应该找到一个可用目录');
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    const found = resolveModelDir(empty, { candidates: [good] });
+    assert.equal(found, good, '应该选中真的有 manifests 的那个');
+  } finally {
+    if (old !== undefined) process.env.OLLAMA_MODELS = old;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('一个都没找到时，把显式给的原样返回（目录可能马上要被创建）', () => {
+  const root = tmp('localai-dir3-');
+  const empty = path.join(root, 'models');
+  fs.mkdirSync(empty, { recursive: true });
+  const old = process.env.OLLAMA_MODELS;
+  delete process.env.OLLAMA_MODELS;
+  try {
+    assert.equal(resolveModelDir(empty, { candidates: [] }), empty);
+  } finally {
+    if (old !== undefined) process.env.OLLAMA_MODELS = old;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('一个都没有时返回空字符串而不是 undefined', () => {

@@ -158,19 +158,27 @@ export function isValidModelName(s) {
  * 为什么需要它：配置里的 modelDir 可能是别的部署留下的（比如 Strata 的数据目录），
  * 而控制台的「模型管理」「空间分析」要对着**实际装着模型的那个目录**才有意义。
  * 所以这里不信任配置，而是从环境变量和常见位置里找一个真的有模型的目录。
+ *
+ * @param {string} explicit 优先考虑的目录（通常是配置里写的）
+ * @param {object} opts { candidates } 额外候选（测试用；不传就按系统常见位置找）
  */
-export function resolveModelDir(explicit) {
-  const candidates = [];
-  if (explicit) candidates.push(explicit);
-  if (process.env.OLLAMA_MODELS) candidates.push(process.env.OLLAMA_MODELS);
-  const home = os.homedir();
-  candidates.push(path.join(home, '.ollama', 'models'));
-  for (const letter of ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']) {
-    candidates.push(`${letter}:\\ollama\\models`);
+export function resolveModelDir(explicit, { candidates } = {}) {
+  const list = [];
+  if (explicit) list.push(explicit);
+  if (process.env.OLLAMA_MODELS) list.push(process.env.OLLAMA_MODELS);
+  // candidates 传了数组就只用这些（测试要可预期）；不传才去扫系统常见位置
+  if (Array.isArray(candidates)) {
+    for (const c of candidates) if (c) list.push(c);
+  } else {
+    const home = os.homedir();
+    list.push(path.join(home, '.ollama', 'models'));
+    for (const letter of ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']) {
+      list.push(`${letter}:\\ollama\\models`);
+    }
   }
 
   const seen = new Set();
-  for (const dir of candidates) {
+  for (const dir of list) {
     if (!dir) continue;
     const key = String(dir).toLowerCase().replace(/[\\/]+$/, '');
     if (seen.has(key)) continue;
@@ -180,5 +188,6 @@ export function resolveModelDir(explicit) {
       if (fs.existsSync(path.join(dir, 'manifests'))) return dir;
     } catch { /* ignore */ }
   }
+  // 一个都没找到：把显式给的原样返回（目录可能马上就要被创建）
   return explicit || process.env.OLLAMA_MODELS || '';
 }
