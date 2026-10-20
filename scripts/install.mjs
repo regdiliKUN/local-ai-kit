@@ -25,6 +25,7 @@
  */
 
 import fs from 'node:fs';
+import { copyRuntime } from './runtime-assets.mjs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn, execSync } from 'node:child_process';
@@ -225,11 +226,7 @@ function normPath(p) {
   return String(p).replace(/\//g, '\\').replace(/\\{2,}/g, '\\');
 }
 
-const SCRIPT_FILES = [
-  'config.mjs', 'models.mjs', 'ollama.mjs', 'detect.mjs', 'idlist.mjs', 'make-lnk.mjs',
-  'make-shortcuts.mjs', 'start-local-ai.mjs', 'stop-local-ai.mjs',
-  'console.mjs', 'uninstall.mjs',
-];
+
 
 /**
  * 安装目录里的 .cmd 入口。内容必须是纯 ASCII + CRLF。
@@ -349,9 +346,7 @@ async function stepPrepare(opts, emit) {
 
   try {
     fs.mkdirSync(root, { recursive: true });
-    for (const f of SCRIPT_FILES) {
-      fs.copyFileSync(path.join(kitDir, 'scripts', f), path.join(root, f));
-    }
+    copyRuntime(kitDir, root);
     fs.mkdirSync(path.join(root, 'icons'), { recursive: true });
     for (const f of fs.readdirSync(path.join(kitDir, 'icons'))) {
       fs.copyFileSync(path.join(kitDir, 'icons', f), path.join(root, 'icons', f));
@@ -651,7 +646,7 @@ function stepDsh(opts, emit) {
 const GENERATED_MARK = '# 由本地 AI 安装向导生成';
 
 /** 部署包版本；写进生成的配置，方便以后判断这份文件是谁写的、要不要升级 */
-export const KIT_VERSION = '1.3.7';
+export const KIT_VERSION = '1.3.8';
 
 /* ------------------------------------------------- dsh 配置块（未缩进） */
 
@@ -794,9 +789,10 @@ export function applyCompactionBudget(yamlText, budgetsOrContext) {
  * 预设内部的 compaction-basic）。读不到就返回 null，调用方跳过这一项。
  */
 export function readPresetStandard(kitDir) {
-  try {
-    return fs.readFileSync(path.join(kitDir, 'scripts', 'preset-standard.patch.yml'), 'utf8');
-  } catch { return null; }
+  for (const file of [path.join(kitDir, 'scripts', 'preset-standard.patch.yml'), path.join(kitDir, 'preset-standard.patch.yml')]) {
+    try { return fs.readFileSync(file, 'utf8'); } catch { /* try installed layout */ }
+  }
+  return null;
 }
 
 /**

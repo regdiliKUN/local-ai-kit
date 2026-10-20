@@ -7,12 +7,23 @@ const FILE = '配置.json';
 
 export function loadConfig(root) {
   try {
-    return JSON.parse(fs.readFileSync(path.join(root, FILE), 'utf8'));
+    return JSON.parse(fs.readFileSync(path.join(root, FILE), 'utf8').replace(/^\uFEFF/, ''));
   } catch {
     return null;
   }
 }
 
 export function saveConfig(root, cfg) {
-  fs.writeFileSync(path.join(root, FILE), JSON.stringify(cfg, null, 2), 'utf8');
+  const file = path.join(root, FILE);
+  const temp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temp, JSON.stringify(cfg, null, 2), 'utf8');
+    fs.renameSync(temp, file);
+  } finally { fs.rmSync(temp, { force: true }); }
+}
+
+export function deploymentRoot(here) {
+  if (fs.existsSync(path.join(here, FILE))) return here;
+  const parent = path.dirname(here);
+  return path.basename(here) === 'scripts' ? parent : here;
 }

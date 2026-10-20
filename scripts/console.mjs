@@ -12,12 +12,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import http from 'node:http';
+import { createSafeServer, readBody, tokenMatches } from './local-http.mjs';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from './config.mjs';
+import { handleStrata } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
@@ -70,7 +71,7 @@ function postOk(req) {
   const origin = req.headers.origin;
   if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}`) return false;
   const t = String(req.headers['x-localai-token'] || '');
-  return t.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
+  return tokenMatches(t, TOKEN);
 }
 
 function json(res, code, body) {
@@ -78,15 +79,6 @@ function json(res, code, body) {
   res.end(JSON.stringify(body));
 }
 
-function readBody(req) {
-  return new Promise((resolve) => {
-    let b = '';
-    req.on('data', (c) => { b += c; if (b.length > 64 * 1024) req.destroy(); });
-    req.on('end', () => {
-      try { resolve(b ? JSON.parse(b) : {}); } catch { resolve({}); }
-    });
-  });
-}
 
 function broadcast(ev) {
   eventLog.push(ev);
@@ -415,6 +407,8 @@ async function applyConfig(body) {
     }
   }
 
+  for (const key of Object.keys(cfg)) delete cfg[key];
+  Object.assign(cfg, next);
   return { config: next, budgets: b, notes, backups: backups.filter(Boolean) };
 }
 
@@ -429,6 +423,7 @@ async function applyConfig(body) {
 function runHealth(quick) {
   const script = path.join(ROOT, 'healthcheck', 'quick.mjs');
   if (!fs.existsSync(script)) {
+    busy = null;
     broadcast({ type: 'health-error', text: '找不到 healthcheck/quick.mjs' });
     return;
   }
@@ -437,7 +432,7 @@ function runHealth(quick) {
 
   const child = spawn(process.execPath, args, {
     cwd: ROOT,
-    env: { ...process.env },
+    env: { ...process.env, LOCAL_AI_MODEL: cfg.model || '', LOCAL_AI_BASE_URL: `${OLLAMA_BASE}/v1` },
     windowsHide: true,
   });
 
@@ -480,7 +475,7 @@ function runHealth(quick) {
 
 /* ------------------------------------------------------------------ 路由 */
 
-const server = http.createServer(async (req, res) => {
+const server = createSafeServer(async (req, res) => {
   if (!hostOk(req)) {
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('forbidden');
@@ -489,6 +484,7 @@ const server = http.createServer(async (req, res) => {
 
   const url = new URL(req.url, 'http://127.0.0.1');
   const p = url.pathname;
+  if (cfg.backend === 'strata') return handleStrata(req, res, { cfg, root: ROOT, ui: UI, token: TOKEN });
 
   if (p === '/api/state') {
     const running = !!(await ollamaVersion());
@@ -526,18 +522,19 @@ const server = http.createServer(async (req, res) => {
 
   if (p === '/api/config' && req.method === 'POST') {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    busy = 'config';
     try {
       const body = await readBody(req);
       const out = await applyConfig(body);
       return json(res, 200, { ok: true, ...out });
     } catch (e) {
-      return json(res, 400, { error: String((e && e.message) || e) });
-    }
+      return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
+    } finally { busy = null; }
   }
 
   if (p === '/api/health' && req.method === 'POST') {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    const body = await readBody(req).catch(() => ({}));
+    const body = await readBody(req);
     busy = 'health';
     runHealth(!!(body && body.quick));
     return json(res, 202, { started: true });
@@ -677,8 +674,9 @@ function listen(port) {
   console.log('        本地 AI 控制台   已启动');
   console.log('==================================================');
   console.log('');
-  console.log('  这里可以管理模型（加装 / 删除）、开关开机自启、');
-  console.log('  开关局域网共享、启动或停止服务。');
+  console.log(cfg.backend === 'strata'
+    ? '  已接入 Strata：查看引擎 / WebUI / dsh 状态，启动或停止服务。'
+    : '  管理模型、上下文、开机自启和局域网共享，启动或停止服务。');
   console.log('');
   console.log('  浏览器没自动打开？把下面这个地址复制到浏览器：');
   console.log(`      ${url}`);

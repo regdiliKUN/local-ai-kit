@@ -1,0 +1,20 @@
+/** Keep source and installed console dependencies in one manifest. */
+import fs from 'node:fs';
+import path from 'node:path';
+
+export const SCRIPT_FILES = [
+  'config.mjs', 'models.mjs', 'ollama.mjs', 'detect.mjs', 'idlist.mjs', 'make-lnk.mjs',
+  'make-shortcuts.mjs', 'start-local-ai.mjs', 'stop-local-ai.mjs',
+  'console.mjs', 'uninstall.mjs', 'install.mjs', 'yamlpatch.mjs',
+  'preset-standard.patch.yml', 'local-http.mjs', 'runtime-assets.mjs', 'strata.mjs',
+  'strata-process.ps1',
+];
+
+export function copyRuntime(kitDir, root) {
+  fs.mkdirSync(root, { recursive: true });
+  for (const file of SCRIPT_FILES) fs.copyFileSync(path.join(kitDir, 'scripts', file), path.join(root, file));
+  fs.cpSync(path.join(kitDir, 'healthcheck'), path.join(root, 'healthcheck'), {
+    recursive: true,
+    filter: (source) => !['check_out', 'probe_out', '__pycache__'].includes(path.basename(source)),
+  });
+}

@@ -1,5 +1,7 @@
 # 运行期生成的文件（不应提交）
 配置.json
+配置.json.*.bak
+配置.json.*.tmp
 dsh-runtime/
 ui/index.html.bak
 healthcheck/check_out/

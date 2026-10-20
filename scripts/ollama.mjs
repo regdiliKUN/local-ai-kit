@@ -56,8 +56,8 @@ export function persistOllamaVars(cfg) {
 
 export async function isUp(url = `${OLLAMA_BASE}/api/version`, timeout = 3000) {
   try {
-    await fetch(url, { signal: AbortSignal.timeout(timeout) });
-    return true;
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeout) });
+    return response.ok;
   } catch { return false; }
 }
 

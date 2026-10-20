@@ -18,10 +18,11 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { loadConfig } from './config.mjs';
+import { loadConfig, deploymentRoot } from './config.mjs';
+import { runStrataAction } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp } from './ollama.mjs';
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = deploymentRoot(path.dirname(fileURLToPath(import.meta.url)));
 const DSH_BASE = 'http://127.0.0.1:3080';
 const MAX_OLLAMA_RESPAWNS = 3;
 
@@ -278,7 +279,13 @@ if (isDirectRun) {
   log('==================================================');
   log();
 
-  if (!cfg || !MODEL) {
+  if (cfg?.backend === 'strata') {
+    try {
+      const result = await runStrataAction(cfg, 'workbench');
+      log(result.alreadyRunning ? '工作台已在运行。' : '后台启动已提交，请在图形控制台查看服务状态。');
+    }
+    catch (error) { log(error.message); process.exitCode = 1; }
+  } else if (!cfg || !MODEL) {
     log('  找不到 配置.json（或里面没有模型）。');
     log('  请重新运行安装向导：双击「① 双击这里开始安装.cmd」。');
     process.exitCode = 1;
@@ -288,6 +295,12 @@ if (isDirectRun) {
     process.on('SIGHUP', shutdown);   // 直接点窗口右上角关闭
 
     (async () => {
+      // Reopening the launcher must not restart Ollama under a live dsh session.
+      if (await isUp(DSH_BASE)) {
+        log('工作台已在运行，正在打开浏览器。');
+        openBrowser(DSH_BASE);
+        return;
+      }
       if (!(await ensureOllama())) { process.exitCode = 1; return; }
       await precheckModel();
       if (!(await warmUp())) log('      工作台仍会启动，但对话前需要先解决上面的问题。');

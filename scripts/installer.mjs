@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import http from 'node:http';
+import { createSafeServer, readBody, tokenMatches } from './local-http.mjs';
 import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -82,7 +82,7 @@ function postOk(req) {
   const origin = req.headers.origin;
   if (origin && origin !== `http://127.0.0.1:${PORT}` && origin !== `http://localhost:${PORT}`) return false;
   const t = String(req.headers['x-localai-token'] || '');
-  return t.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(TOKEN));
+  return tokenMatches(t, TOKEN);
 }
 
 /** 校验安装参数；返回 { error } 或规范化后的参数 */
@@ -153,18 +153,6 @@ function json(res, code, body) {
   res.end(s);
 }
 
-function readBody(req) {
-  return new Promise((resolve) => {
-    let b = '';
-    req.on('data', (c) => {
-      b += c;
-      if (b.length > 64 * 1024) req.destroy();
-    });
-    req.on('end', () => {
-      try { resolve(b ? JSON.parse(b) : {}); } catch { resolve({}); }
-    });
-  });
-}
 
 /* --------------------------------------------------------- 管理员权限相关 */
 
@@ -317,7 +305,7 @@ function startInstall(params) {
 
 /* ------------------------------------------------------------------ 路由 */
 
-const server = http.createServer(async (req, res) => {
+const server = createSafeServer(async (req, res) => {
   if (!hostOk(req)) {
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('forbidden');
