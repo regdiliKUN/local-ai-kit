@@ -317,6 +317,7 @@ async function loadState() {
     playModels();
     benchModels();
     compareModels();
+    renderServices();
     loadSpace().catch(() => {});
     loadCaps();
     if (window.__BOOT__.metrics) renderMetrics(window.__BOOT__.metrics);
