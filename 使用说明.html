@@ -102,13 +102,27 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>重启后双击「启动本地AI」即可。</p>
 <hr>
 <h2>本地AI控制台（新）</h2>
-<p>双击桌面上的「<strong>本地AI控制台</strong>」，浏览器会打开一个小网页，分两页：</p>
+<p>双击桌面上的「<strong>本地AI控制台</strong>」，浏览器会打开一个小网页。v1.4.0 起有八个页面：</p>
+<h3>系统概览</h3>
+<ul><li><strong>显存 / CPU / 内存 / 磁盘</strong>的实时占用，带趋势线</li><li>显卡详情：型号、驱动、显存、GPU 占用、温度、功耗</li><li>正在驻留的模型、各占多少显存</li><li>准备打游戏之前先看一眼，确认显存已经还回去了</li></ul>
 <h3>模型管理</h3>
-<ul><li><strong>看</strong>：已经装了哪些模型、各占多少磁盘、什么量化</li><li><strong>删</strong>：点「删除」→ 原地变成「确认删除？」→ 再点一下才真删（不会误删）</li><li><strong>装</strong>：输入模型名（比如 <code>qwen3:8b</code>）点「下载」，带实时进度、速度、剩余时间</li><li>下面还有一排常用模型的快捷按钮，点一下就填进输入框</li></ul>
+<ul><li><strong>看</strong>：已经装了哪些模型、各占多少磁盘、什么量化、有没有「看图 / 工具调用」能力</li><li><strong>搜</strong>：输入关键字过滤，按体积 / 名称 / 时间排序</li><li><strong>删</strong>：点「删除」→ 原地变成「确认删除？」→ 再点一下才真删（不会误删）</li><li><strong>装</strong>：输入模型名（比如 <code>qwen3:8b</code>）点「加入下载队列」—— 可以一次加好几个，排队依次下，每个都有独立进度条，单独能取消</li><li><strong>空间分析</strong>：算出每个模型真实占用（去重后），还能看出下载中断留下的残留、哪些基础层被多个模型共用</li></ul>
+<h3>试用</h3>
+<p>不用切到工作台，直接在这里跟模型说话。换模型试效果、改提示词、调温度，右下角能看到每秒生成多少 token。</p>
+<h3>性能基准</h3>
+<table><thead><tr><th>指标</th><th>说明</th><th>慢了怎么办</th></tr></thead><tbody><tr><td><strong>生成速度</strong></td><td>每秒能生成多少 token</td><td>慢了说明显卡没吃满，换更大的显卡有用</td></tr><tr><td><strong>读提示词速度</strong></td><td>读长上下文有多快</td><td>慢了说明上下文开太大，<strong>把窗口调小一档立刻见效</strong></td></tr></tbody></table>
+<p>测完会给结论和建议 —— 「慢」有两种完全不同的原因，解法也不一样。</p>
+<h3>上下文与模型</h3>
+<p>改模型、窗口大小、输出上限、压缩参数，改完点「应用」，<strong>再重启工作台</strong>才生效。页面会实时算「压力预算」，负数当场标红并拒绝写入；「窗口分配」图能看出窗口被怎么分掉；「变更预览」列出每一项的旧值 → 新值。</p>
+<h3>模型体检</h3>
+<p>回答变短、长对话跑偏、同一问题有时对有时错 —— 先跑一次，<strong>别急着换显卡</strong>。21 道质量题 + 长上下文漂移 + 采样稳定性，约 40 秒，跑完按分类给出通过率图表。</p>
+<h3>修复中心</h3>
+<p>用不上的时候先点「重新检查」，看看是哪一环断了；能自动修的直接一键修，不用重装。</p>
 <h3>服务设置</h3>
 <table><thead><tr><th>开关</th><th>说明</th></tr></thead><tbody><tr><td><strong>开机自动启动工作台</strong></td><td>打开后每次开机自动启动服务并加载模型（会占显存）。想自己控制就别开。</td></tr><tr><td><strong>局域网共享</strong></td><td>把 Ollama 的接口开放给同一个 WiFi 下的手机 / 平板 / 其它电脑。<strong>默认关闭</strong>，打开前必须先在警告里打勾确认。</td></tr></tbody></table>
-<p>下面还有「启动工作台」「停止服务并释放显存」「打开安装目录」「打开模型目录」，以及一个<strong>卸载</strong>入口。</p>
+<p>下面还有「启动工作台」「停止服务并释放显存」「打开安装目录」「打开模型目录」「查看日志」「检查更新」，以及<strong>导出配置 / 导入配置</strong>（把模型、模型目录、上下文、压缩参数和 dsh 的配置打包成一个 JSON，换电脑时带过去导入就能还原）和一个<strong>卸载</strong>入口。</p>
 <blockquote><p>局域网共享会把 Ollama 暴露到 <code>0.0.0.0:11434</code>。<br>在公共 WiFi、宿舍网、公司网里，同网段的任何人都能用你的显卡跑模型。<br><strong>只在你信任的家庭网络里打开，用完关掉。</strong></p></blockquote>
+<p><strong>小技巧：</strong>快捷键 <code>1</code>–<code>8</code> 切换页面、<code>R</code> 刷新、<code>/</code> 聚焦搜索框；深色 / 浅色主题可以手动切换；控制台日志在 <code>%TEMP%\localai-console.log</code>，页面上也能直接看和下载。</p>
 <hr>
 <h2>想换模型 / 加装模型</h2>
 <p>两种方式都行：</p>
@@ -265,6 +279,15 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>  下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</p>
 <hr>
 <h2>更新日志</h2>
+<h3>v1.4.0</h3>
+<p><strong>这一版把控制台从「能管模型」升级成「能看懂、能测、能修」。</strong></p>
+<p><strong>新增页面</strong></p>
+<ul><li><strong>系统概览</strong> —— 显存 / CPU / 内存 / 磁盘实时占用 + 趋势线，显卡详情，驻留模型一览</li><li><strong>试用</strong> —— 直接在控制台里跟模型对话，看每秒生成多少 token</li><li><strong>性能基准</strong> —— 分开测「生成速度」和「读长提示词速度」，并给建议</li><li><strong>修复中心</strong> —— 十项体检 + 一键修复（建目录、起 Ollama、重打补丁、换掉失效模型）</li></ul>
+<p><strong>新增能力</strong></p>
+<ul><li>模型列表支持搜索、排序，显示「看图 / 工具调用 / 深度思考」能力标签</li><li><strong>下载队列</strong> —— 一次加多个模型排队下，每个独立进度条、可单独取消</li><li><strong>空间分析</strong> —— 算出每个模型真实占用，找出残留分片与共用基础层</li><li><strong>配置导出 / 导入</strong> —— 打包成一个 JSON，换电脑一键还原</li><li>体检结果按分类出通过率图表；上下文页有「窗口分配」瀑布图</li><li>安装向导里有硬件雷达图，一眼看出这台电脑离推荐配置有多远</li><li>控制台可查看 / 下载日志，可检查更新</li><li>深色 / 浅色主题可手动切换；快捷键 <code>1</code>–<code>8</code> 切页、<code>R</code> 刷新、<code>/</code> 搜索</li></ul>
+<p><strong>修掉的问题</strong></p>
+<ul><li>SSE 长连接被 15 秒超时掐断，浏览器疯狂重连，进度条从此卡住</li><li>页面切换留下僵尸连接，拖死浏览器（同源最多只有 6 条连接）</li><li>改了代码页面还是旧的（静态资源没设不缓存）</li><li>配置写坏了就丢（现在写前备份、损坏自动回退）</li><li>空间分析把全部模型都算成「残留」（digest 写法对不上）</li><li>「检查更新」方向反了（GitHub 上的版本可能比本地还旧）</li></ul>
+<p>单元测试从 6 个增加到 32 个，并接入 GitHub Actions（Node 20/22/24 × Windows/Linux）。</p>
 <h3>v1.3.3</h3>
 <p><strong>这一版把「电脑上还没装 Node.js」时的自动安装路真正修通了。</strong></p>
 <p><strong>修复：双击后报 <code>'node' is not recognized</code>，或窗口一闪就没了</strong></p>
