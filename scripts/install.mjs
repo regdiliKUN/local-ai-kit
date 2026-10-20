@@ -645,8 +645,18 @@ function stepDsh(opts, emit) {
 
 const GENERATED_MARK = '# 由本地 AI 安装向导生成';
 
-/** 部署包版本；写进生成的配置，方便以后判断这份文件是谁写的、要不要升级 */
-export const KIT_VERSION = '1.5.0';
+/**
+ * 部署包版本；写进生成的配置，方便以后判断这份文件是谁写的、要不要升级。
+ *
+ * 从 package.json 读而不是写死：之前这里硬编码 '1.5.0'，
+ * 而 package.json 已经到 1.6.x，诊断包里报的版本和实际发版号对不上。
+ */
+export const KIT_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    return String(pkg.version || '0.0.0');
+  } catch { return '0.0.0'; }
+})();
 
 /* ------------------------------------------------- dsh 配置块（未缩进） */
 

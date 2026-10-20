@@ -16,6 +16,7 @@
         <div class="brand-title">本地 AI</div>
         <div class="brand-sub">控制台</div>
       </div>
+      <button class="help-btn" id="btnHelp" title="快捷键（?）">?</button>
     </div>
 
     <ol class="steps" id="tabs">
@@ -32,6 +33,12 @@
       <li data-tab="help"><span class="dot"></span><span class="label">帮助</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
+
+    <div class="checklist" id="checklist" hidden>
+      <div class="checklist-head"><span>上手清单</span><b id="checklistCount">0/5</b></div>
+      <div class="checklist-bar"><i id="checklistBar"></i></div>
+      <div id="checklistItems"></div>
+    </div>
 
     <div class="sidebar-foot" id="sideInfo"></div>
 
@@ -505,6 +512,16 @@
       <div class="guide">
         <span class="guide-n">出问题时</span>
         <span>下载不动、更新查不到、硬盘越来越满 —— 先在这里查一遍，<b>不用重装</b>。</span>
+      </div>
+
+      <h2 class="sec-h">诊断包</h2>
+      <div class="row-actions">
+        <button class="btn primary" id="btnBundle">导出诊断包</button>
+        <span class="row-hint">报告 + 脱敏配置 + 日志 + 系统信息，打成一个 zip</span>
+      </div>
+      <div class="guide" style="margin-top:8px">
+        <span class="guide-n">为什么</span>
+        <span>找人帮忙时不用再一条条截图。包里<b>不含任何密钥</b>，配置是脱敏后的。</span>
       </div>
 
       <h2 class="sec-h">网络连通性</h2>

@@ -144,9 +144,14 @@ export function createOriginGuard({ port, token }) {
   };
 }
 
-export function createSafeServer(handler) {
+export function createSafeServer(handler, { onError } = {}) {
   const server = http.createServer((req, res) => {
     Promise.resolve().then(() => handler(req, res)).catch((error) => {
+      // 未预期的异常必须落日志：以前这里只回一句「请检查服务日志」，
+      // 而日志里什么都没有，用户拿着这句话根本无从下手
+      if (typeof onError === 'function') {
+        try { onError(error, req); } catch { /* 记日志本身失败就算了，别盖住原错误 */ }
+      }
       if (res.destroyed) return;
       if (res.headersSent) return res.destroy();
       applySecurityHeaders(res);

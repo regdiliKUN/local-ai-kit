@@ -24,9 +24,10 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
 import { strataState, runStrataAction, handleStrata } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
-import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
+import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
+import { makeZip } from './zip.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
@@ -791,6 +792,51 @@ const server = createSafeServer(async (req, res) => {
   }
 
   /* -------------------------------------------------------- 诊断报告 */
+  if (p === '/api/diagnose/bundle' && req.method === 'GET') {
+    // 找人帮忙时最省事的东西：一个 zip，里面有报告、脱敏配置、日志、系统信息
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const files = [];
+    const safe = async (name, fn) => {
+      try { files.push({ name, data: await fn() }); }
+      catch (e) { files.push({ name, data: `生成失败：${(e && e.message) || e}` }); }
+    };
+    await safe('报告.txt', () => (cfg.backend === 'strata'
+      ? strataReport({ root: ROOT, cfg, kitDir: ROOT, logText: tailLog(300) })
+      : buildReport({ root: ROOT, cfg, kitDir: ROOT, logText: tailLog(300) })));
+    // 配置必须脱敏：里面可能有局域网共享开关和自定义路径
+    await safe('配置.json', () => JSON.stringify(sanitizeConfig(cfg), null, 2));
+    await safe('日志.txt', () => tailLog(3000));
+    // 用 detectSystem：console.mjs 里没有 detectCached（那是 installer 的）
+    await safe('系统信息.json', async () => JSON.stringify(await detectSystem(), null, 2));
+    await safe('版本.json', () => JSON.stringify({
+      kit: KIT_VERSION, node: process.version, platform: process.platform,
+      arch: process.arch, backend: cfg.backend, at: new Date().toISOString(),
+    }, null, 2));
+    await safe('怎么用.txt', () => [
+      '这是本地 AI 控制台导出的诊断包。',
+      '',
+      '· 报告.txt       —— 给人看的现状说明',
+      '· 配置.json      —— 脱敏后的配置（不含任何密钥）',
+      '· 日志.txt       —— 最近的运行日志',
+      '· 系统信息.json  —— 显卡 / 内存 / 磁盘 / 已装组件',
+      '· 版本.json      —— 工具版本与运行环境',
+      '',
+      '遇到问题把这个 zip 整个发出去就行，不用再一条条截图。',
+    ].join('\n'));
+
+    const zip = makeZip(files);
+    res.writeHead(200, {
+      'Content-Type': 'application/zip',
+      'Content-Length': zip.length,
+      // HTTP 头只能是 ASCII：中文文件名必须走 RFC 5987 的 filename*，
+      // 直接塞进 filename="..." 会让 Node 抛 ERR_INVALID_CHAR，整个响应 500
+      'Content-Disposition': `attachment; filename="local-ai-diagnose-${stamp}.zip"; `
+        + `filename*=UTF-8''${encodeURIComponent(`local-ai-诊断包-${stamp}.zip`)}`,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(zip);
+  }
+
   if (p === '/api/report' && req.method === 'GET') {
     // 两种部署模式都能出报告 —— 换机器 / 找人帮忙时最需要的就是这个
     const text = cfg.backend === 'strata'
@@ -1417,6 +1463,14 @@ const server = createSafeServer(async (req, res) => {
     // 本地工具，缓存只会带来「改了代码但页面还是老的」这种困惑，一律不缓存
     'Cache-Control': 'no-store',
   });
+}, {
+  // 未预期异常落日志：否则用户只看到「请检查服务日志」，日志里却什么都没有
+  onError: (err, req) => {
+    const line = `[500] ${req.method} ${req.url} ${(err && err.stack) || err}`;
+    logLine(line);
+    // 日志流是异步的，控制台窗口里也打一份，排查时不用等 flush
+    console.error(line);
+  },
 });
 
 /* ------------------------------------------------------------------ 启动 */

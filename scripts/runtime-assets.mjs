@@ -13,6 +13,8 @@ export const SCRIPT_FILES = [
   'chat.mjs', 'bench.mjs', 'backup.mjs', 'repair.mjs', 'version.mjs',
   // v1.5.0 新增
   'store.mjs', 'library.mjs', 'netcheck.mjs', 'report.mjs',
+  // v1.6.1 新增
+  'zip.mjs',
 ];
 
 export function copyRuntime(kitDir, root) {

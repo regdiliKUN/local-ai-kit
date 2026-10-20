@@ -205,6 +205,52 @@ function renderShortcuts() {
   }
 }
 
+/* ------------------------------------------------------- 上手清单 */
+
+/**
+ * 侧栏的五步清单。
+ *
+ * 判断依据全部来自已有状态，不额外存标记——这样用户换台机器、清缓存，
+ * 清单也能正确反映「他到底做到哪一步了」。
+ */
+function renderChecklist() {
+  const box = $('checklist');
+  if (!box) return;
+  const done = [];
+  const st = state || {};
+  done[0] = Array.isArray(st.models) ? st.models.length > 0 : false;
+  done[1] = !!(st.history && (st.history.bench || []).length);
+  done[2] = !!(st.history && (st.history.health || []).length);
+  done[3] = localStorage.getItem('lak_chatted') === '1';
+  done[4] = !!(st.settings && st.settings.autoStart);
+
+  const items = [
+    { label: '装一个模型', tab: 'models', done: done[0] },
+    { label: '测一次速度', tab: 'bench', done: done[1] },
+    { label: '跑一次体检', tab: 'health', done: done[2] },
+    { label: '跟模型聊两句', tab: 'play', done: done[3] },
+    { label: '设好开机自启', tab: 'settings', done: done[4] },
+  ];
+  const n = items.filter((i) => i.done).length;
+  // 全部完成后就收起，别一直占着侧栏
+  box.hidden = n === items.length && localStorage.getItem('lak_checklist_done') === '1';
+  if (box.hidden) return;
+
+  $('checklistCount').textContent = `${n}/${items.length}`;
+  $('checklistBar').style.width = `${(n / items.length) * 100}%`;
+  $('checklistItems').innerHTML = items.map((i) => `
+    <div class="check-item ${i.done ? 'done' : ''}" data-check-tab="${i.tab}">
+      <span class="check-dot">${i.done ? '✓' : ''}</span>
+      <span class="check-label">${i.label}</span>
+    </div>`).join('')
+    + (n === items.length ? '<div class="checklist-finish">都做完了，可以正常用了</div>' : '');
+
+  document.querySelectorAll('[data-check-tab]').forEach((el) => {
+    el.addEventListener('click', () => gotoTab(el.dataset.checkTab));
+  });
+  if (n === items.length) localStorage.setItem('lak_checklist_done', '1');
+}
+
 /* ------------------------------------------------------- 键盘与无障碍 */
 
 /**
@@ -322,6 +368,7 @@ async function loadState() {
     loadSpace().catch(() => {});
     loadCaps();
     if (window.__BOOT__.metrics) renderMetrics(window.__BOOT__.metrics);
+    renderChecklist();
     return;
   }
   state = await (await fetch('/api/state')).json();
@@ -2845,3 +2892,51 @@ startDashTimer();
 
 // 每 5 秒刷新一次状态（服务启停、模型增删后自动跟上）
 setInterval(() => { loadState().catch(() => {}); }, 5000);
+
+
+/* 帮助按钮：快捷键说明本来就在设置页里，跳过去比再做一套浮层更省事 */
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btnHelp');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      if (typeof gotoTab === 'function') gotoTab('settings');
+      setTimeout(() => {
+        const el = document.getElementById('shortcutList');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 120);
+    });
+  }
+  const markChat = () => {
+    if (location.hash === '#play') localStorage.setItem('lak_chatted', '1');
+  };
+  window.addEventListener('hashchange', () => { markChat(); if (typeof renderChecklist === 'function') renderChecklist(); });
+});
+
+
+/* 诊断包：直接开新窗口下载，浏览器会按 Content-Disposition 存成 zip */
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btnBundle');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = '打包中…';
+    // 用 fetch 先探一次，失败能给出提示；成功再交给浏览器下载
+    fetch('/api/diagnose/bundle', { headers: { 'x-localai-token': window.__TOKEN__ || '' } })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `local-ai-诊断包-${new Date().toISOString().slice(0, 10)}.zip`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        if (typeof toast === 'function') toast('诊断包已导出');
+      })
+      .catch((e) => { if (typeof toast === 'function') toast(`导出失败：${e.message}`); })
+      .finally(() => { btn.disabled = false; btn.textContent = old; });
+  });
+});
