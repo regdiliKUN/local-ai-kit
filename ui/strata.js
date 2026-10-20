@@ -46,6 +46,10 @@ for (const button of document.querySelectorAll('[data-action]')) {
   });
 }
 $('refresh').addEventListener('click', () => refresh().catch((error) => message(error.message, true)));
+$('report').addEventListener('click', () => {
+  window.open('/api/report', '_blank');
+  message('诊断报告已开始下载。');
+});
 refresh().catch((error) => message(error.message, true));
 setInterval(() => { refresh().catch(() => message('控制台连接已断开，请重新打开控制台。', true)); }, 5000);
 

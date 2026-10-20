@@ -29,6 +29,52 @@ function section(title, body) {
 }
 
 /**
+ * Strata 部署的诊断报告。
+ *
+ * Strata 用的是自己的引擎，不是 Ollama，所以体检项不一样：
+ * 这里关心的是「三个服务在不在、端口通不通、日志里有没有报错」。
+ */
+export async function strataReport(ctx = {}) {
+  const cfg = ctx.cfg || {};
+  let state = null;
+  try {
+    const { strataState } = await import('./strata.mjs');
+    state = await strataState(cfg);
+  } catch { /* 拿不到就只报配置 */ }
+
+  let out = '';
+  out += section('本地 AI 控制台 · 诊断报告（Strata 部署）', [
+    `生成时间：${new Date().toLocaleString()}`,
+    `工具版本：v${KIT_VERSION}`,
+    `Node.js  ：v${process.versions.node}（${process.execPath}）`,
+    `系统    ：${os.platform()} ${os.release()} ${os.arch()}`,
+  ].join('\n'));
+
+  out += section('硬件', [
+    `CPU     ：${(os.cpus()[0] || {}).model || '未知'} · ${os.cpus().length} 核`,
+    `内存    ：${Math.round((os.totalmem() / 1073741824) * 10) / 10} GB 总 / ${Math.round((os.freemem() / 1073741824) * 10) / 10} GB 空闲`,
+  ].join('\n'));
+
+  out += section('配置', Object.entries(cfg)
+    .map(([k, v]) => `${k.padEnd(16)} = ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+    .join('\n') || '（没有配置）');
+
+  if (state) {
+    out += section('服务状态', [
+      `引擎 :${state.ports.engine}   ${state.engine.online ? '运行中' : `未就绪${state.engine.startupError ? ` —— ${state.engine.startupError}` : ''}`}`,
+      `WebUI :${state.ports.webui}  ${state.webui.online ? '运行中' : '未就绪'}`,
+      `dsh  :${state.ports.dsh}    ${state.dsh.online ? '运行中' : '未就绪'}`,
+      `部署根：${state.deploymentRoot}`,
+      `模型目录：${state.modelDir || '（未配置）'}`,
+    ].join('\n'));
+  }
+
+  out += section('日志（最后 300 行）', (ctx.logText || '（没有日志）').split(/\r?\n/).slice(-300).join('\n'));
+  out += section('隐私说明', '本报告已自动去掉用户名与令牌类信息。');
+
+  return scrub(out);
+}
+/**
  * 生成一份纯文本报告。
  *
  * @param {object} ctx { root, cfg, metrics, diagnose, health, bench, logText }

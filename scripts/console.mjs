@@ -41,7 +41,7 @@ import { appendItem, readList, writeList, clearList, storePath } from './store.m
 import { searchLibrary } from './library.mjs';
 import { checkNetwork } from './netcheck.mjs';
 import { findOrphanBlobs, cleanupOrphanBlobs } from './space.mjs';
-import { buildReport } from './report.mjs';
+import { buildReport, strataReport } from './report.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -718,6 +718,30 @@ const server = createSafeServer(async (req, res) => {
     return res.end(tailLog(5000));
   }
 
+  /* -------------------------------------------------------- 诊断报告 */
+  if (p === '/api/report' && req.method === 'GET') {
+    // 两种部署模式都能出报告 —— 换机器 / 找人帮忙时最需要的就是这个
+    const text = cfg.backend === 'strata'
+      ? await strataReport({ root: ROOT, cfg, kitDir: ROOT, logText: tailLog(300) })
+      : buildReport({
+        root: ROOT,
+        cfg,
+        metrics: await collectMetrics({ modelDir: cfg.modelDir || '' }),
+        diagnose: await diagnose({ root: ROOT, cfg, kitDir: ROOT }),
+        health: lastHealth,
+        bench: lastBench,
+        logText: tailLog(300),
+      });
+    const name = `localai-diagnostic-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}.txt`;
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${name}"`,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(text);
+  }
+
   if (cfg.backend === 'strata') {
     return handleStrata(req, res, {
       cfg, root: ROOT, ui: UI, token: TOKEN,
@@ -856,27 +880,6 @@ const server = createSafeServer(async (req, res) => {
     if (!dir) return json(res, 400, { error: '还没配置模型目录' });
     const out = cleanupOrphanBlobs(dir, { dryRun });
     return json(res, 200, { ok: true, dryRun, ...out });
-  }
-
-  /* -------------------------------------------------------- 诊断报告 */
-  if (p === '/api/report' && req.method === 'GET') {
-    const text = buildReport({
-      root: ROOT,
-      cfg,
-      metrics: await collectMetrics({ modelDir: cfg.modelDir || '' }),
-      diagnose: await diagnose({ root: ROOT, cfg, kitDir: ROOT }),
-      health: lastHealth,
-      bench: lastBench,
-      logText: tailLog(300),
-    });
-    const name = `localai-diagnostic-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}.txt`;
-    applySecurityHeaders(res);
-    res.writeHead(200, {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${name}"`,
-      'Cache-Control': 'no-store',
-    });
-    return res.end(text);
   }
 
   /* ---------------------------------------------------------- 官方模型库 */
