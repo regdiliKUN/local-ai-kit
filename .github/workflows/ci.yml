@@ -69,7 +69,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $out = node scripts/extract-i18n.mjs
+          # 注意要 join 成一个字符串：PowerShell 对数组用 -notmatch 会返回「不匹配的元素数组」，
+          # 那是个非空数组，恒为真 —— 会被误判成失败。
+          $out = (node scripts/extract-i18n.mjs) -join "`n"
           Write-Output $out
           if ($out -notmatch '待翻译 0 条') {
             Write-Error ("有界面文案没翻译：`n" + $out)
