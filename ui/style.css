@@ -1471,3 +1471,33 @@ html[data-theme="dark"] {
 .diff-arrow { color: var(--text-dim); font-size: 11px; }
 .diff-row.added .diff-v.to { color: var(--ok); }
 .diff-row.removed .diff-v { color: var(--err); text-decoration: line-through; }
+
+
+/* ---------------------------------------------------------------- 显存预算 */
+.vram-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 18px; margin-bottom: 12px;
+}
+.vram-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; margin-bottom: 12px; font-size: 13px;
+}
+.vram-head .dim { font-size: 11.5px; }
+.vram-cells { display: flex; gap: 8px; flex-wrap: wrap; }
+.vram-cell {
+  flex: 1; min-width: 62px; text-align: center;
+  padding: 8px 4px; border: 1px solid var(--border); border-radius: 8px;
+}
+.vram-cell.active { border-color: var(--accent); background: var(--accent-soft); }
+.vram-cell.warn { border-color: var(--warn); }
+.vram-cell.error { border-color: var(--err); }
+.vc-k { font-size: 11px; color: var(--text-dim); }
+.vc-v { font-size: 15px; font-weight: 600; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.vc-l { font-size: 10px; color: var(--text-dim); }
+.vram-warn {
+  margin-top: 12px; padding: 10px 12px; border-radius: 6px;
+  background: var(--accent-soft); border-left: 3px solid var(--warn);
+  font-size: 12.5px; line-height: 1.75;
+}
+.vram-warn.over { border-left-color: var(--err); }
+.vram-ok { margin-top: 10px; font-size: 12.5px; color: var(--text-dim); }

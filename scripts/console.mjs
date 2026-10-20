@@ -24,7 +24,8 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
 import { strataState, runStrataAction, handleStrata } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
-import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem, pidOnPort } from './detect.mjs';
+import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem, pidOnPort, detectGpu } from './detect.mjs';
+import { CONTEXT_OPTIONS, contextFit } from './models.mjs';
 import { makeLnk } from './make-lnk.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
 import { makeZip } from './zip.mjs';
@@ -1002,6 +1003,33 @@ const server = createSafeServer(async (req, res) => {
   }
 
   /* ---------------------------------------------------------- 清理残留 */
+  if (p === '/api/vram-plan' && req.method === 'GET') {
+    // 控制台里改上下文时没有任何显存预警：用户把 8K 拉到 128K，
+    // 保存后才发现跑不动。这里把每个模型 × 每个上下文档位的估算一次算清。
+    const running = !!(await ollamaVersion());
+    const models = running ? (await listModels() || []).map((m) => m.name) : [];
+    let vramGB = 0;
+    try { vramGB = Number((detectGpu() || {}).vramGB) || 0; } catch { /* 没显卡就当未知 */ }
+    const plan = models.map((tag) => ({
+      model: tag,
+      options: CONTEXT_OPTIONS.map((cw) => {
+        const fit = contextFit(tag, cw, vramGB);
+        return {
+          contextWindow: cw,
+          label: `${Math.round(cw / 1024)}K`,
+          need: fit.need == null ? null : Number(fit.need.toFixed(1)),
+          level: fit.level,
+        };
+      }),
+    }));
+    return json(res, 200, {
+      vramGB,
+      currentContext: Number(cfg.contextWindow) || 8192,
+      currentModel: cfg.model || '',
+      plan,
+    });
+  }
+
   // 注意不是 /api/usage —— 那个已经被「每天 token 用量」占了
   if (p === '/api/model-usage' && req.method === 'GET') {
     const running = !!(await ollamaVersion());

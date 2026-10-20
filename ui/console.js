@@ -64,6 +64,8 @@ for (const li of document.querySelectorAll('#tabs li')) {
     if (li.dataset.tab === 'health') loadTrend('health').catch(() => {});
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
     if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
+    // 显存估算要调 nvidia-smi，只在切到这一页时算
+    if (li.dataset.tab === 'context') loadVramPlan();
     if (li.dataset.tab === 'settings') { loadCheckpoints().catch(() => {}); renderShortcuts(); }
     if (li.dataset.tab === 'help') renderHelp();
   });
@@ -907,6 +909,59 @@ let ctxState = null;
 /** 与 install.mjs 的 outputBudget / compactionBudget 保持一致（前端只用来实时预览） */
 const autoOut = (ctx) => Math.max(512, Math.min(8192, Math.floor(ctx / 4)));
 const autoHead = (ctx) => Math.max(512, Math.min(8192, Math.floor(ctx / 8)));
+
+/**
+ * 显存预算：当前模型在各上下文档位下要多少显存、够不够。
+ *
+ * 后端早就写好 estimateVramGB / contextFit，但一直没人调用——
+ * 结果用户在控制台把 8K 拉到 128K 时没有任何提示，保存后才发现跑不动。
+ */
+async function loadVramPlan() {
+  const box = $('vramPlan');
+  if (!box) return;
+  try {
+    const d = await (await fetch('/api/vram-plan')).json();
+    if (!d.vramGB) {
+      box.hidden = false;
+      box.innerHTML = `<div class="guide" style="margin-bottom:12px">
+        <span class="guide-n">显存</span>
+        <span>没识别到独立显卡，显存估算用不上。CPU 跑的话主要看内存。</span></div>`;
+      return;
+    }
+    if (!d.plan.length) { box.hidden = true; return; }
+
+    // 只看当前选中的模型，其他模型的选择没意义
+    const cur = d.plan.find((x) => x.model === d.currentModel) || d.plan[0];
+    const levels = { ok: 'ok', tight: 'warn', over: 'error', unknown: '' };
+    const words = { ok: '够用', tight: '偏紧', over: '不够', unknown: '未知' };
+
+    const cells = cur.options.map((o) => {
+      const active = o.contextWindow === d.currentContext;
+      return `<div class="vram-cell ${levels[o.level] || ''}${active ? ' active' : ''}"
+                   title="${o.label}：需要 ${o.need == null ? '?' : o.need + ' GB'}">
+        <div class="vc-k">${o.label}</div>
+        <div class="vc-v">${o.need == null ? '—' : o.need.toFixed(1)}</div>
+        <div class="vc-l">${words[o.level] || ''}</div>
+      </div>`;
+    }).join('');
+
+    const active = cur.options.find((o) => o.contextWindow === d.currentContext);
+    const bad = active && (active.level === 'over' || active.level === 'tight');
+    box.hidden = false;
+    box.innerHTML = `<div class="vram-box">
+      <div class="vram-head">
+        <b>显存预算</b>
+        <span class="dim">${esc(cur.model)} · 显卡 ${d.vramGB} GB · 当前 ${Math.round(d.currentContext / 1024)}K</span>
+      </div>
+      <div class="vram-cells">${cells}</div>
+      ${bad ? `<div class="vram-warn ${active.level === 'over' ? 'over' : ''}">
+        ${active.level === 'over'
+          ? `⚠ 当前设置需要约 <b>${active.need} GB</b>，超过显卡的 ${d.vramGB} GB。跑起来会退回 CPU（很慢）或直接失败——建议降到更低的上下文档位，或换个小一点的模型。`
+          : `当前设置需要约 <b>${active.need} GB</b>，占显卡 ${d.vramGB} GB 的 ${Math.round((active.need / d.vramGB) * 100)}%，比较紧。如果同时开着别的程序（浏览器、游戏）可能会爆。`}
+      </div>` : `<div class="vram-ok">当前设置需要约 ${active && active.need != null ? active.need + ' GB' : '—'}，在 ${d.vramGB} GB 显存内够用。</div>`}
+    </div>`;
+  } catch { box.hidden = true; }
+}
 
 async function loadContext() {
   ctxState = await (await fetch('/api/config')).json();
