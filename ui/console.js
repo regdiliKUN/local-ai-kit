@@ -2236,7 +2236,7 @@ function renderServices() {
   actions.innerHTML = strata
     ? '<button class="btn ghost danger" id="svcStopAll">停止全部服务</button>'
     : '<button class="btn ghost small" id="btnStartSvc2">启动工作台</button><button class="btn ghost small" id="btnStopSvc2">停止服务并释放显存</button>';
-  $('svcHint').textContent = strata
+  $('svcHint2').textContent = strata
     ? '「停止全部服务」会关掉引擎、WebUI 和工作台，显存会立刻释放。'
     : '停止服务会把显存还给游戏和渲染软件。';
 
