@@ -683,6 +683,23 @@ const server = createSafeServer(async (req, res) => {
     return json(res, 200, await buildMetrics());
   }
 
+  /* ---------------------------------------------------------------- 日志 */
+  // 只读接口，放在 Strata 适配器之前 —— 两种部署模式都要能看到自己的日志。
+  if (p === '/api/logs' && req.method === 'GET') {
+    const n = Math.max(10, Math.min(5000, Number(url.searchParams.get('lines')) || 200));
+    return json(res, 200, { path: LOG_FILE, text: tailLog(n) });
+  }
+
+  if (p === '/api/logs/download' && req.method === 'GET') {
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="localai-console.log"',
+      'Cache-Control': 'no-store',
+    });
+    return res.end(tailLog(5000));
+  }
+
   if (cfg.backend === 'strata') {
     return handleStrata(req, res, {
       cfg, root: ROOT, ui: UI, token: TOKEN,
@@ -756,22 +773,6 @@ const server = createSafeServer(async (req, res) => {
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
     await streamChat(res, { model, messages, options: body.options || {} });
     return;
-  }
-
-  /* ---------------------------------------------------------------- 日志 */
-  if (p === '/api/logs' && req.method === 'GET') {
-    const n = Math.max(10, Math.min(5000, Number(url.searchParams.get('lines')) || 200));
-    return json(res, 200, { path: LOG_FILE, text: tailLog(n) });
-  }
-
-  if (p === '/api/logs/download' && req.method === 'GET') {
-    applySecurityHeaders(res);
-    res.writeHead(200, {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Content-Disposition': 'attachment; filename="localai-console.log"',
-      'Cache-Control': 'no-store',
-    });
-    return res.end(tailLog(5000));
   }
 
   /* ------------------------------------------------------------ 版本检查 */
