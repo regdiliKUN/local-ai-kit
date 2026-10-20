@@ -31,6 +31,7 @@ import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
 import { createPullQueue } from './pull-queue.mjs';
+import { streamChat, sanitizeMessages } from './chat.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -670,6 +671,18 @@ const server = createSafeServer(async (req, res) => {
     return;
   }
 
+  /* ------------------------------------------------------------ 试用模型 */
+  if (p === '/api/chat' && req.method === 'POST') {
+    const body = await readBody(req);
+    const model = String(body.model || cfg.model || '').trim();
+    if (!isValidModelName(model)) return json(res, 400, { error: '模型名不合法' });
+    const messages = sanitizeMessages(body.messages);
+    if (!messages.length) return json(res, 400, { error: '至少要有一条消息' });
+    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
+    await streamChat(res, { model, messages, options: body.options || {} });
+    return;
+  }
+
   /* ------------------------------------------------------------ 下载队列 */
   if (p === '/api/queue' && req.method === 'GET') {
     return json(res, 200, pullQueue.snapshot());
@@ -793,7 +806,11 @@ const server = createSafeServer(async (req, res) => {
     return res.end(html);
   }
   applySecurityHeaders(res);
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream' });
+  res.writeHead(200, {
+    'Content-Type': MIME[path.extname(full)] || 'application/octet-stream',
+    // 本地工具，缓存只会带来「改了代码但页面还是老的」这种困惑，一律不缓存
+    'Cache-Control': 'no-store',
+  });
   fs.createReadStream(full).pipe(res);
 });
 

@@ -697,7 +697,7 @@ html, body {
   padding: 16px 0; border-bottom: 1px solid var(--border);
 }
 .set-row:last-of-type { border-bottom: 0; }
-.set-text { flex: 1; }
+.set-text { flex: 1; min-width: 0; }
 .set-text .t { font-size: 13.5px; font-weight: 600; }
 .set-text .s { font-size: 12.5px; color: var(--text-dim); margin-top: 3px; line-height: 1.65; }
 
@@ -911,6 +911,80 @@ html[data-theme="dark"] {
 @media (max-width: 640px) {
   .space-body { flex-direction: column; align-items: center; }
   .space-side { width: 100%; }
+}
+
+/* ---- 试用（聊天） ---- */
+
+.chat {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 18px;
+  min-height: 220px; max-height: 52vh; overflow-y: auto;
+}
+.chat-empty { color: var(--text-dim); font-size: 13px; padding: 22px 0; text-align: center; }
+
+.msg { padding: 12px 0; border-bottom: 1px solid var(--border); }
+.msg:last-child { border-bottom: 0; }
+.msg-role { font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
+.msg.user .msg-role { color: var(--accent); }
+.msg-body { font-size: 13.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+.typing { color: var(--text-dim); font-style: italic; }
+
+.chat-input {
+  display: flex; gap: 10px; align-items: flex-end; margin-top: 12px; flex-wrap: wrap;
+}
+.chat-input textarea {
+  flex: 1; min-width: 0; width: 100%; resize: vertical;
+  padding: 10px 12px; font: inherit; font-size: 13.5px; line-height: 1.6;
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--surface); color: var(--text);
+}
+.chat-stats {
+  display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 12px;
+  font-size: 12.5px;
+}
+.chat-stats .stat { display: flex; align-items: baseline; gap: 6px; }
+.chat-stats .k { color: var(--text-dim); }
+.chat-stats .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ==================================================================
+   响应式：窗口再窄也不能把界面挤坏
+   （实测过 114px 宽的窗口 —— 侧栏会把内容顶出屏幕）
+   ================================================================== */
+
+@media (max-width: 900px) {
+  .app { flex-direction: column; }
+  .sidebar {
+    width: auto;
+    flex-direction: row; align-items: center; flex-wrap: wrap;
+    gap: 10px 16px;
+    border-right: 0; border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+  }
+  .steps { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .steps li { padding: 6px 9px; }
+  .sidebar-foot { margin-top: 0; width: 100%; }
+  .content { padding: 24px 18px; max-width: none; }
+  .console-body .content { padding-bottom: 40px; }
+
+  .set-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  .set-row .switch { align-self: flex-start; }
+  .ctx-select, .ctx-input { width: 100%; max-width: 100%; }
+  .ctx-inline { flex-wrap: wrap; }
+  .ctx-grid { grid-template-columns: 1fr; }
+
+  .dash-grid, .gauge-row { grid-template-columns: 1fr; }
+  .footer { padding: 0 16px; height: auto; min-height: 68px; flex-wrap: wrap; }
+  .status-strip { grid-template-columns: 1fr; }
+  .list-tools input[type=search] { max-width: none; }
+  .chat { max-height: none; }
+}
+
+@media (max-width: 560px) {
+  .brand { display: none; }
+  .preview-steps { grid-template-columns: 1fr; }
+  .env-grid { grid-template-columns: 1fr; }
+  .cards { grid-template-columns: 1fr; }
+  .footer-msg { display: none; }
 }
 
 /* ---- 下载队列 ---- */

@@ -82,6 +82,7 @@ async function loadState() {
   loadSpace().catch(() => {});
   loadCaps();
   renderQueue(state.queue);
+  playModels();
 }
 
 /* ------------------------------------------------------------- 系统概览 */
@@ -601,6 +602,137 @@ function renderQueue(state) {
 if ($('btnQueueClear')) {
   $('btnQueueClear').addEventListener('click', async () => {
     try { await post('/api/queue/clear', {}); } catch (e) { toast(e.message); }
+  });
+}
+
+/* ------------------------------------------------------------------ 试用 */
+
+const playHistory = [];        // 完整对话（发给模型）
+let playController = null;     // 用来「停止」
+
+function playRender() {
+  const box = $('chatBox');
+  if (!playHistory.length) {
+    box.innerHTML = '<div class="chat-empty" id="chatEmpty">还没开始。问点什么试试 —— 比如「用一句话解释什么是显存」。</div>';
+    return;
+  }
+  box.innerHTML = playHistory.map((m) => `
+    <div class="msg ${m.role}">
+      <div class="msg-role">${m.role === 'user' ? '我' : '模型'}</div>
+      <div class="msg-body">${m.pending ? '<span class="typing">正在思考…</span>' : esc(m.content)}</div>
+    </div>`).join('');
+  box.scrollTop = box.scrollHeight;
+}
+
+function playModels() {
+  const sel = $('playModel');
+  if (!sel) return;
+  const names = (state.models || []).map((m) => m.name);
+  if (!names.length) {
+    sel.innerHTML = '<option value="">（没有已安装的模型）</option>';
+    return;
+  }
+  const cur = sel.value || (state && state.model) || names[0];
+  sel.innerHTML = names.map((n) => `<option value="${esc(n)}"${n === cur ? ' selected' : ''}>${esc(n)}</option>`).join('');
+}
+
+async function playSend() {
+  const input = $('playInput');
+  const text = input.value.trim();
+  if (!text) return;
+  const model = $('playModel').value;
+  if (!model) { toast('先装一个模型再来聊天'); return; }
+
+  const system = $('playSystem').value.trim();
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  messages.push(...playHistory.filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, content: m.content })));
+  messages.push({ role: 'user', content: text });
+
+  playHistory.push({ role: 'user', content: text });
+  playHistory.push({ role: 'assistant', content: '', pending: true });
+  input.value = '';
+  playRender();
+
+  $('btnPlay').disabled = true;
+  $('btnPlayStop').hidden = false;
+  $('chatStats').innerHTML = '';
+
+  playController = new AbortController();
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-LocalAI-Token': window.__TOKEN__ || '' },
+      body: JSON.stringify({
+        model,
+        messages,
+        options: { temperature: Number($('playTemp').value), numPredict: Number($('playMax').value) },
+      }),
+      signal: playController.signal,
+    });
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`;
+      try { msg = (await r.json()).error || msg; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const last = playHistory[playHistory.length - 1];
+    last.pending = false;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload) continue;
+        let ev;
+        try { ev = JSON.parse(payload); } catch { continue; }
+        if (ev.type === 'chunk') {
+          last.content += ev.content;
+          const body = document.querySelector('.msg.assistant:last-of-type .msg-body');
+          if (body) body.textContent = last.content;
+          $('chatBox').scrollTop = $('chatBox').scrollHeight;
+        } else if (ev.type === 'error') {
+          last.content = `（出错：${ev.text}）`;
+          toast(ev.text);
+        } else if (ev.type === 'done' && ev.stats) {
+          const s = ev.stats;
+          $('chatStats').innerHTML = [
+            ['生成', `${s.tokens} tokens`],
+            ['速度', s.tokensPerSec ? `${s.tokensPerSec} tokens/s` : '—'],
+            ['提示词', `${s.promptTokens} tokens`],
+            ['总耗时', `${(s.totalMs / 1000).toFixed(1)} 秒`],
+          ].map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('');
+        }
+      }
+    }
+    if (!last.content) last.content = '（模型没有返回内容）';
+  } catch (e) {
+    const last = playHistory[playHistory.length - 1];
+    if (last) { last.pending = false; if (!last.content) last.content = `（出错：${e.message}）`; }
+    if (e.name !== 'AbortError') toast(e.message);
+  } finally {
+    playController = null;
+    $('btnPlay').disabled = false;
+    $('btnPlayStop').hidden = true;
+    playRender();
+  }
+}
+
+if ($('btnPlay')) $('btnPlay').addEventListener('click', () => playSend());
+if ($('btnPlayStop')) {
+  $('btnPlayStop').addEventListener('click', () => { if (playController) playController.abort(); });
+}
+if ($('playInput')) {
+  $('playInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); playSend(); }
   });
 }
 

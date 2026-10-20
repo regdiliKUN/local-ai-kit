@@ -21,6 +21,7 @@
     <ol class="steps" id="tabs">
       <li data-tab="dashboard" class="active"><span class="dot"></span><span class="label">系统概览</span></li>
       <li data-tab="models"><span class="dot"></span><span class="label">模型管理</span></li>
+      <li data-tab="play"><span class="dot"></span><span class="label">试用</span></li>
       <li data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
       <li data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
@@ -197,6 +198,54 @@
         <button class="btn ghost small" id="btnReloadCtx">重新读取</button>
       </div>
       <p class="row-hint" id="ctxApplyHint">应用前会自动备份原来的 配置.json 与两个 profile 文件。</p>
+    </section>
+
+    <!-- ============ 试用 ============ -->
+    <section class="view" id="view-play" hidden>
+      <h1>试用</h1>
+      <div class="guide">
+        <span class="guide-n">干嘛用</span>
+        <span>不用切到工作台，直接在这里跟模型说两句话 —— <b>换个模型试试效果</b>、<b>调提示词</b>、<b>看看它有多快</b>。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">用哪个模型</div>
+            <div class="s">只能选已安装的模型。切换后下一条消息就用新的模型。</div>
+          </div>
+          <select id="playModel" class="ctx-select"></select>
+        </div>
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">随机性 temperature</div>
+            <div class="s">0 最稳（适合代码、事实类问题），1 以上更发散（适合创意）。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="number" id="playTemp" class="ctx-input" min="0" max="2" step="0.1" value="0.7">
+            <span class="ctx-unit">输出上限 <input type="number" id="playMax" class="ctx-input" style="width:96px" min="64" max="4096" step="64" value="1024"> tokens</span>
+          </div>
+        </div>
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">系统提示（可选）</div>
+            <div class="s">给它一个角色或规则，比如「你是一个只会说人话的助手」。</div>
+          </div>
+          <input type="text" id="playSystem" class="ctx-input" style="width:280px" placeholder="留空 = 模型的默认设定">
+        </div>
+      </div>
+
+      <h2 class="sec-h">对话</h2>
+      <div class="chat" id="chatBox">
+        <div class="chat-empty" id="chatEmpty">还没开始。问点什么试试 —— 比如「用一句话解释什么是显存」。</div>
+      </div>
+
+      <div class="chat-input">
+        <textarea id="playInput" rows="2" placeholder="输入消息，Ctrl+Enter 发送"></textarea>
+        <button class="btn primary" id="btnPlay">发送</button>
+        <button class="btn ghost" id="btnPlayStop" hidden>停止</button>
+      </div>
+      <div class="chat-stats" id="chatStats"></div>
     </section>
 
     <!-- ============ 模型体检 ============ -->

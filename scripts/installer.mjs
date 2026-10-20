@@ -452,7 +452,10 @@ const server = createSafeServer(async (req, res) => {
   }
 
   applySecurityHeaders(res);
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(full)] || 'application/octet-stream' });
+  res.writeHead(200, {
+    'Content-Type': MIME[path.extname(full)] || 'application/octet-stream',
+    'Cache-Control': 'no-store',
+  });
   fs.createReadStream(full).pipe(res);
 });
 
