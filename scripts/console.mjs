@@ -22,13 +22,15 @@ import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from './config.mjs';
 import { handleStrata } from './strata.mjs';
-import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
+import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
 import { saveConfig } from './config.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
+import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
+import { createPullQueue } from './pull-queue.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -66,6 +68,16 @@ let eventLog = [];
 
 /** 限流器：GET 宽松（页面要轮询），POST 收紧（会改东西） */
 const rateLimit = createRateLimiter({ getLimit: 240, postLimit: 30 });
+
+/**
+ * 下载队列。
+ *
+ * 队列状态通过 SSE 推给页面；页面也可以随时 GET /api/queue 取一次快照
+ * （比如刚打开页面时）。
+ */
+const pullQueue = createPullQueue({
+  emit: (ev) => broadcast(ev),
+});
 
 /** 指标历史：概览页的曲线靠它 */
 const metricHistory = createHistory(120);
@@ -126,18 +138,43 @@ async function ensureOllama() {
   return waitUp(30);
 }
 
+/** 模型能力缓存：/api/show 不算慢，但模型多了没必要每次都问一遍 */
+const capsCache = new Map();
+const CAPS_TTL = 5 * 60 * 1000;
+
 async function listModels() {
   try {
     const r = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(6000) });
     const j = await r.json();
-    return (j.models || []).map((m) => ({
+    const models = (j.models || []).map((m) => ({
       name: m.name,
       sizeGB: Number(((m.size || 0) / 1e9).toFixed(2)),
       modified: m.modified_at || null,
       params: (m.details && m.details.parameter_size) || '',
       quant: (m.details && m.details.quantization_level) || '',
+      family: (m.details && m.details.family) || '',
+      digest: m.digest || '',
     }));
+    // 能力信息异步补：先返回列表，再把 capabilities 塞回去
+    for (const m of models) {
+      const cached = capsCache.get(m.name);
+      if (cached && Date.now() - cached.at < CAPS_TTL) {
+        m.capabilities = cached.caps;
+        continue;
+      }
+      m.capabilities = null;
+    }
+    return models;
   } catch { return null; }
+}
+
+/** 单独取某个模型的能力（界面上的标签靠它） */
+async function modelCaps(name) {
+  const cached = capsCache.get(name);
+  if (cached && Date.now() - cached.at < CAPS_TTL) return cached.caps;
+  const caps = await capsFor(name);
+  capsCache.set(name, { at: Date.now(), caps });
+  return caps;
 }
 
 /* --------------------------------------------------------- 开机自启开关 */
@@ -546,6 +583,24 @@ const server = createSafeServer(async (req, res) => {
 
   if (cfg.backend === 'strata') return handleStrata(req, res, { cfg, root: ROOT, ui: UI, token: TOKEN });
 
+  /* ---------------------------------------------------------- 空间分析 */
+  if (p === '/api/space') {
+    const dir = cfg.modelDir || '';
+    const primary = analyzeModelDir(dir);
+    // 全盘扫一遍：模型可能装在别的盘上（比如换过机器、或 Ollama 装在 C 盘）
+    const others = scanAllModelDirs(detectDisks(), [dir]).filter((d) => d.dir !== primary.dir);
+    return json(res, 200, { primary, others });
+  }
+
+  /* ------------------------------------------------------ 模型能力标签 */
+  // 视觉 / 工具调用能力，界面上用小标签显示
+  if (p === '/api/model-caps') {
+    const models = (await listModels()) || [];
+    const out = {};
+    for (const m of models) out[m.name] = await modelCaps(m.name);
+    return json(res, 200, out);
+  }
+
   if (p === '/api/state') {
     const running = !!(await ollamaVersion());
     const models = running ? await listModels() : [];
@@ -562,6 +617,7 @@ const server = createSafeServer(async (req, res) => {
       disks: disks.map((d) => ({ letter: d.letter, freeGB: d.freeGB, totalGB: d.totalGB })),
       modelDirFreeGB: cfg.modelDir ? freeSpaceGB(cfg.modelDir) : null,
       busy,
+      queue: pullQueue.snapshot(),
       logPath: path.join(os.tmpdir(), 'localai-console.log'),
     });
   }
@@ -582,6 +638,7 @@ const server = createSafeServer(async (req, res) => {
 
   if (p === '/api/config' && req.method === 'POST') {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    if (pullQueue.isBusy()) return json(res, 409, { error: '正在下载模型，等下载完再改配置' });
     busy = 'config';
     try {
       const body = await readBody(req);
@@ -613,6 +670,35 @@ const server = createSafeServer(async (req, res) => {
     return;
   }
 
+  /* ------------------------------------------------------------ 下载队列 */
+  if (p === '/api/queue' && req.method === 'GET') {
+    return json(res, 200, pullQueue.snapshot());
+  }
+
+  if (p === '/api/queue' && req.method === 'POST') {
+    const body = await readBody(req);
+    const model = String(body.model || '').trim();
+    if (!isValidModelName(model)) {
+      return json(res, 400, { error: '模型名不合法，例如 qwen3:8b' });
+    }
+    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，而且找不到它的安装位置' });
+    const out = pullQueue.add(model);
+    if (!out.ok) return json(res, 409, { error: out.error });
+    return json(res, 202, { started: true, state: pullQueue.snapshot() });
+  }
+
+  if (p === '/api/queue/cancel' && req.method === 'POST') {
+    const body = await readBody(req);
+    const out = pullQueue.cancel(String(body.model || '').trim());
+    if (!out.ok) return json(res, 400, { error: out.error });
+    return json(res, 200, { ok: true, state: pullQueue.snapshot() });
+  }
+
+  if (p === '/api/queue/clear' && req.method === 'POST') {
+    pullQueue.clearFinished();
+    return json(res, 200, { ok: true, state: pullQueue.snapshot() });
+  }
+
   if (p === '/api/pull' && req.method === 'POST') {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
     const body = await readBody(req);
@@ -633,6 +719,7 @@ const server = createSafeServer(async (req, res) => {
 
   if (p === '/api/delete' && req.method === 'POST') {
     if (busy) return json(res, 409, { error: `正在忙：${busy}` });
+    if (pullQueue.isBusy()) return json(res, 409, { error: '正在下载模型，等下载完再删除' });
     const body = await readBody(req);
     const model = String(body.model || '').trim();
     if (!model) return json(res, 400, { error: '缺少模型名' });

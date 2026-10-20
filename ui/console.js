@@ -79,6 +79,9 @@ async function loadState() {
   renderSettings();
   renderConfig();
   await loadContext();
+  loadSpace().catch(() => {});
+  loadCaps();
+  renderQueue(state.queue);
 }
 
 /* ------------------------------------------------------------- 系统概览 */
@@ -213,24 +216,51 @@ function renderStatus() {
 }
 
 function renderModels() {
-  const list = state.models || [];
-  $('modelCount').textContent = list.length ? `（${list.length} 个，共 ${list.reduce((n, m) => n + m.sizeGB, 0).toFixed(1)} GB）` : '';
-  if (!list.length) {
+  const all = state.models || [];
+  const q = ($('modelSearch') && $('modelSearch').value || '').trim().toLowerCase();
+  const sort = ($('modelSort') && $('modelSort').value) || 'size';
+
+  let list = all;
+  if (q) list = list.filter((m) => m.name.toLowerCase().includes(q));
+  list = list.slice().sort((a, b) => {
+    if (sort === 'name') return a.name.localeCompare(b.name);
+    if (sort === 'date') return String(b.modified || '').localeCompare(String(a.modified || ''));
+    return b.sizeGB - a.sizeGB;
+  });
+
+  const totalSize = all.reduce((n, m) => n + m.sizeGB, 0);
+  $('modelCount').textContent = all.length
+    ? `（${all.length} 个，共 ${totalSize.toFixed(1)} GB）` : '';
+  $('modelFilterCount').textContent = q ? `筛选出 ${list.length} / ${all.length} 个` : '';
+
+  if (!all.length) {
     $('modelList').innerHTML = `<div class="empty">
       <b>还没有装任何模型。</b>
       用下面的「加装新模型」下一个吧 —— 也可以回到安装向导里选。
     </div>`;
     return;
   }
-  $('modelList').innerHTML = list.map((m) => `
+  if (!list.length) {
+    $('modelList').innerHTML = `<div class="empty"><b>没有匹配「${esc(q)}」的模型。</b>换个关键字试试。</div>`;
+    return;
+  }
+
+  $('modelList').innerHTML = list.map((m) => {
+    const caps = (state.caps || {})[m.name] || [];
+    const tags = [];
+    if (caps.includes('vision')) tags.push('看图');
+    if (caps.includes('tools')) tags.push('工具调用');
+    if (caps.includes('thinking')) tags.push('深度思考');
+    return `
     <div class="mrow" data-model="${esc(m.name)}">
       <div class="mi">
-        <div class="mn">${esc(m.name)}</div>
+        <div class="mn">${esc(m.name)}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}</div>
         <div class="ms">${esc(m.params || '')} ${esc(m.quant || '')}${m.modified ? ' · ' + esc(String(m.modified).slice(0, 10)) : ''}</div>
       </div>
       <div class="mz">${m.sizeGB} GB</div>
       <div class="ma"><button class="btn ghost small danger" data-del="${esc(m.name)}">删除</button></div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   for (const b of document.querySelectorAll('[data-del]')) {
     b.addEventListener('click', () => askDelete(b.dataset.del, b));
@@ -258,9 +288,99 @@ function askDelete(model, btn) {
   });
 }
 
+if ($('modelSearch')) {
+  $('modelSearch').addEventListener('input', () => renderModels());
+}
+if ($('modelSort')) {
+  $('modelSort').addEventListener('change', () => renderModels());
+}
+
+/** 模型能力标签：单独拉一次，失败就不显示标签（不影响主流程） */
+async function loadCaps() {
+  try {
+    const caps = await (await fetch('/api/model-caps')).json();
+    state.caps = caps;
+    renderModels();
+  } catch { /* 拿不到就算了 */ }
+}
+
 function renderSettings() {
   $('swAutostart').checked = !!state.settings.autostart;
   $('swLan').checked = !!state.settings.lanShare;
+}
+
+/* ------------------------------------------------------------- 空间分析 */
+
+async function loadSpace() {
+  const panel = $('spacePanel');
+  if (!panel) return;
+  let data;
+  try {
+    data = await (await fetch('/api/space')).json();
+  } catch (e) {
+    panel.innerHTML = `<div class="issue error">读取失败：${esc(e.message)}</div>`;
+    return;
+  }
+  const p = data.primary || {};
+  if (!p.exists) {
+    panel.innerHTML = `<div class="empty"><b>还没找到模型目录。</b>${p.dir ? `配置里写的是 <code>${esc(p.dir)}</code>，但这个目录不存在。` : '装好第一个模型后这里会有统计。'}</div>`;
+    return;
+  }
+  if (!p.models.length) {
+    panel.innerHTML = `<div class="empty"><b>目录是空的。</b>模型还没下到 <code>${esc(p.dir)}</code>。</div>`;
+    return;
+  }
+
+  const total = p.models.reduce((n, m) => n + m.sizeGB, 0);
+  const segments = p.models.slice(0, 8).map((m, i) => ({
+    label: m.name, value: m.sizeGB, color: `var(--chart-${(i % 6) + 1})`,
+  }));
+  if (p.models.length > 8) {
+    segments.push({
+      label: `其它 ${p.models.length - 8} 个`,
+      value: p.models.slice(8).reduce((n, m) => n + m.sizeGB, 0),
+      color: 'var(--chart-6)',
+    });
+  }
+
+  const legend = p.models.slice(0, 8).map((m, i) => `
+    <li><i style="background:var(--chart-${(i % 6) + 1})"></i>
+      <span class="lg-name">${esc(m.name)}</span>
+      <span class="lg-size">${m.sizeGB} GB</span></li>`).join('');
+
+  const notes = [];
+  if (p.orphanGB > 0.05) {
+    notes.push(`<div class="issue warn"><div class="issue-main">有 ${p.orphanGB} GB 没有被任何模型引用</div>
+      <div class="issue-hint">多半是下载中断留下的碎片。删掉不影响已装的模型，删之前可以先确认一下。</div></div>`);
+  }
+  if (p.sharedGB > 0.05) {
+    notes.push(`<div class="issue info"><div class="issue-main">有 ${p.sharedGB} GB 被多个模型共用</div>
+      <div class="issue-hint">这是正常的：微调模型会复用基础模型的部分层，删掉其中一个不会释放这部分空间。</div></div>`);
+  }
+
+  const others = (data.others || []).filter((d) => d.models.length);
+  const othersHtml = others.length ? `
+    <h3 class="space-sub">其它盘上还有</h3>
+    <div class="summary">
+    ${others.map((d) => `<div class="row"><span class="k">${esc(d.dir)}</span>
+      <span class="v">${d.models.length} 个模型 · ${d.totalGB} GB</span></div>`).join('')}
+    </div>` : '';
+
+  panel.innerHTML = `
+    <div class="space-body">
+      <div class="space-chart">${Chart.donut(segments, { size: 168, centerText: `${total.toFixed(1)}`, centerSub: 'GB' })}</div>
+      <div class="space-side">
+        <ul class="legend">${legend}</ul>
+        ${notes.join('')}
+      </div>
+    </div>
+    <div class="summary" style="margin-top:14px">
+      <div class="row"><span class="k">模型目录</span><span class="v">${esc(p.dir)}</span></div>
+      <div class="row"><span class="k">实际占用（去重后）</span><span class="v">${p.totalGB} GB</span></div>
+      <div class="row"><span class="k">模型数量</span><span class="v">${p.models.length} 个</span></div>
+      <div class="row"><span class="k">分片文件数</span><span class="v">${p.blobCount}</span></div>
+    </div>
+    ${othersHtml}`;
 }
 
 function renderConfig() {
@@ -430,6 +550,60 @@ if ($('btnApplyCtx')) {
   });
 }
 
+/* ------------------------------------------------------------------ 队列 */
+
+const QUEUE_STATUS = {
+  queued: { text: '排队中', cls: 'queued' },
+  running: { text: '下载中', cls: 'running' },
+  cancelling: { text: '正在取消', cls: 'warn' },
+  done: { text: '已完成', cls: 'done' },
+  error: { text: '失败', cls: 'error' },
+  cancelled: { text: '已取消', cls: 'warn' },
+};
+
+function renderQueue(state) {
+  const panel = $('queuePanel');
+  if (!panel) return;
+  const items = (state && state.items) || [];
+  panel.hidden = items.length === 0;
+  if (!items.length) return;
+
+  const done = items.filter((it) => it.status === 'done').length;
+  $('queueCount').textContent = `${items.length} 个任务 · 已完成 ${done}`;
+
+  $('queueList').innerHTML = items.map((it) => {
+    const meta = QUEUE_STATUS[it.status] || { text: it.status, cls: '' };
+    const stats = [];
+    if (it.total > 0) stats.push(`${fmtBytes(it.got)} / ${fmtBytes(it.total)}`);
+    if (it.speed > 0) stats.push(`${fmtBytes(it.speed)}/s`);
+    if (it.eta > 0) stats.push(`剩余 ${fmtEta(it.eta)}`);
+    const canCancel = ['queued', 'running'].includes(it.status);
+    return `
+      <div class="qitem ${meta.cls}">
+        <div class="qi">
+          <div class="qn">${esc(it.model)}</div>
+          <div class="qs">${esc(meta.text)}${it.error ? ` · ${esc(it.error)}` : (stats.length ? ' · ' + esc(stats.join(' · ')) : '')}</div>
+        </div>
+        <div class="qbar"><div class="bar" style="width:${Math.max(0, Math.min(100, it.percent || 0))}%"></div></div>
+        <div class="qp">${it.status === 'running' ? `${Math.round(it.percent || 0)}%` : ''}</div>
+        <div class="qa">${canCancel ? `<button class="btn ghost small danger" data-qcancel="${esc(it.model)}">取消</button>` : ''}</div>
+      </div>`;
+  }).join('');
+
+  for (const b of document.querySelectorAll('[data-qcancel]')) {
+    b.addEventListener('click', async () => {
+      try { await post('/api/queue/cancel', { model: b.dataset.qcancel }); }
+      catch (e) { toast(e.message); }
+    });
+  }
+}
+
+if ($('btnQueueClear')) {
+  $('btnQueueClear').addEventListener('click', async () => {
+    try { await post('/api/queue/clear', {}); } catch (e) { toast(e.message); }
+  });
+}
+
 /* ------------------------------------------------------------------ 体检 */
 
 let healthDone = 0;
@@ -526,6 +700,8 @@ function connectSSE() {
       toast(ev.action === 'delete' ? `${ev.model} 已删除` : `${ev.model} 下载完成`);
       setBusy(false);
       setTimeout(loadState, 400);
+    } else if (ev.type === 'queue') {
+      renderQueue(ev.state);
     } else if (ev.type === 'health-item') {
       healthDone++;
       const pct = Math.min(100, Math.round((healthDone / HEALTH_TOTAL) * 100));
@@ -572,15 +748,12 @@ function setupButtons() {
   $('btnPull').addEventListener('click', async () => {
     const model = $('newModel').value.trim();
     if (!model) { toast('先填一个模型名'); return; }
-    $('log').textContent = '';
-    showLog(true);
-    $('progressWrap').hidden = false;
-    $('progressTitle').textContent = `下载 ${model}`;
-    $('progressPct').textContent = '0%';
-    $('progressBar').style.width = '0%';
-    $('progressStats').innerHTML = '';
-    setBusy(true);
-    try { await post('/api/pull', { model }); } catch (e) { toast(e.message); setBusy(false); }
+    try {
+      const out = await post('/api/queue', { model });
+      renderQueue(out.state);
+      $('newModel').value = '';
+      toast(`「${model}」已加入下载队列`);
+    } catch (e) { toast(e.message); }
   });
 
   $('swAutostart').addEventListener('change', async (e) => {

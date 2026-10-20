@@ -2,11 +2,19 @@
 配置.json
 配置.json.*.bak
 配置.json.*.tmp
+配置.json.broken
+配置.json.stratabak
 dsh-runtime/
 ui/index.html.bak
 healthcheck/check_out/
 healthcheck/probe_out/
 __pycache__/
+
+# 打包产物 / 本地部署残留
+*.zip
+*.tar.gz
+node_modules/
+.cache/
 
 # 系统文件
 Thumbs.db
