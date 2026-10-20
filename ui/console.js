@@ -2237,6 +2237,59 @@ if ($('btnCopyChat')) {
 
 /* ------------------------------------------------------- 配置检查点 */
 
+/**
+ * 配置差异弹窗。
+ *
+ * 回滚是不可逆操作（虽然会先备份），所以点之前得让用户看到会改掉什么。
+ * 只列有变化的项，没变的折成一句「其余 N 项没变」。
+ */
+async function showConfigDiff(file) {
+  const mask = document.createElement('div');
+  mask.className = 'modal-mask';
+  mask.innerHTML = '<div class="modal"><p>正在对比…</p></div>';
+  mask.addEventListener('click', (e) => { if (e.target === mask) mask.remove(); });
+  document.body.appendChild(mask);
+
+  try {
+    const r = await (await fetch(`/api/config/diff?file=${encodeURIComponent(file)}`)).json();
+    if (r.error) throw new Error(r.error);
+
+    const row = (cls, label, from, to) => `
+      <div class="diff-row ${cls}">
+        <span class="diff-k">${esc(label)}</span>
+        <span class="diff-v">${from === undefined ? '<i class="dim">（原本没有）</i>' : esc(from)}</span>
+        ${to === undefined ? '' : `<span class="diff-arrow">→</span><span class="diff-v to">${esc(to)}</span>`}
+      </div>`;
+
+    const body = !r.total
+      ? '<p>这份检查点和当前配置<b>完全一样</b>，回滚不会有任何变化。</p>'
+      : `
+        ${r.changed.length ? `<div class="diff-sec">改过的 ${r.changed.length} 项</div>
+          ${r.changed.map((x) => row('changed', x.label, x.from, x.to)).join('')}` : ''}
+        ${r.added.length ? `<div class="diff-sec">新增的 ${r.added.length} 项</div>
+          ${r.added.map((x) => row('added', x.label, undefined, x.to)).join('')}` : ''}
+        ${r.removed.length ? `<div class="diff-sec">删掉的 ${r.removed.length} 项</div>
+          ${r.removed.map((x) => row('removed', x.label, x.from, undefined)).join('')}` : ''}
+        ${r.same ? `<p class="modal-hint">其余 ${r.same} 项没有变化。</p>` : ''}`;
+
+    mask.innerHTML = `<div class="modal" style="max-width:560px">
+      <h2>这个检查点 vs 当前配置</h2>
+      <p class="modal-hint">${new Date(r.at).toLocaleString()} 的快照。箭头左边是快照里的值，右边是现在的值。</p>
+      <div class="diff-list">${body}</div>
+      <div class="modal-actions">
+        <button class="btn ghost" id="diffClose">知道了</button>
+      </div>
+    </div>`;
+    $('diffClose').addEventListener('click', () => mask.remove());
+  } catch (e) {
+    mask.innerHTML = `<div class="modal">
+      <h2>对比失败</h2><p>${esc(e.message)}</p>
+      <div class="modal-actions"><button class="btn ghost" id="diffClose">关闭</button></div>
+    </div>`;
+    $('diffClose').addEventListener('click', () => mask.remove());
+  }
+}
+
 async function loadCheckpoints() {
   const box = $('checkpointList');
   if (!box) return;
@@ -2252,8 +2305,14 @@ async function loadCheckpoints() {
           <div class="mn">${new Date(c.at).toLocaleString()}</div>
           <div class="ms">${esc(c.file)} · ${Math.round(c.size / 1024)} KB</div>
         </div>
-        <div class="ma"><button class="btn ghost small" data-restore="${esc(c.file)}">回滚到这里</button></div>
+        <div class="ma">
+          <button class="btn ghost small" data-diff="${esc(c.file)}">看差异</button>
+          <button class="btn ghost small" data-restore="${esc(c.file)}">回滚到这里</button>
+        </div>
       </div>`).join('');
+    for (const b of box.querySelectorAll('[data-diff]')) {
+      b.addEventListener('click', () => showConfigDiff(b.dataset.diff));
+    }
     for (const b of box.querySelectorAll('[data-restore]')) {
       b.addEventListener('click', async () => {
         if (!confirm(`确定要回滚到 ${b.dataset.restore} 吗？\n（当前配置会先另存一份，回滚错了还能再退回来）`)) return;

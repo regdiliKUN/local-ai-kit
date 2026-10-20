@@ -29,6 +29,7 @@ import { makeLnk } from './make-lnk.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
 import { makeZip } from './zip.mjs';
 import { recordUse, usageReport, forgetModel } from './usage.mjs';
+import { diffConfig, labelOf, textOf } from './configdiff.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
 import { analyzeModelDir, scanAllModelDirs } from './space.mjs';
@@ -1044,6 +1045,38 @@ const server = createSafeServer(async (req, res) => {
       size: (() => { try { return fs.statSync(b.file).size; } catch { return 0; } })(),
     }));
     return json(res, 200, { items: list, current: path.basename(path.join(ROOT, '配置.json')) });
+  }
+
+  if (p === '/api/config/diff' && req.method === 'GET') {
+    // 对比某个检查点和当前配置。回滚前先看清楚会改掉什么，
+    // 而不是只凭时间戳猜「哪个是对的」。
+    const name = path.basename(String(new URL(req.url, 'http://x').searchParams.get('file') || ''));
+    if (!name || !name.startsWith('配置.json.') || !name.endsWith('.bak')) {
+      return json(res, 400, { error: '备份文件名不合法' });
+    }
+    const file = path.join(ROOT, name);
+    if (!fs.existsSync(file)) return json(res, 404, { error: '找不到这个备份' });
+    let before;
+    try { before = JSON.parse(fs.readFileSync(file, 'utf8')); }
+    catch (e) { return json(res, 400, { error: `备份文件损坏：${e.message}` }); }
+    const after = loadConfig(ROOT) || {};
+    const d = diffConfig(before, after);
+    // 顺便把键名和值翻成人话，前端直接渲染
+    const humanize = (list, withTo) => list.map((x) => ({
+      key: x.key,
+      label: labelOf(x.key),
+      from: withTo ? textOf(x.from) : undefined,
+      to: textOf(withTo ? x.to : x.to),
+    }));
+    return json(res, 200, {
+      file: name,
+      at: (() => { try { return fs.statSync(file).mtimeMs; } catch { return null; } })(),
+      changed: humanize(d.changed, true),
+      added: humanize(d.added, false),
+      removed: humanize(d.removed, false),
+      same: d.same,
+      total: d.total,
+    });
   }
 
   if (p === '/api/config/restore' && req.method === 'POST') {

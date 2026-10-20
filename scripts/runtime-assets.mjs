@@ -17,6 +17,8 @@ export const SCRIPT_FILES = [
   'zip.mjs',
   // v1.7.3 新增
   'usage.mjs',
+  // v1.7.5 新增
+  'configdiff.mjs',
 ];
 
 export function copyRuntime(kitDir, root) {

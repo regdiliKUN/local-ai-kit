@@ -1451,3 +1451,23 @@ html[data-theme="dark"] {
 .idle-text > b { font-size: 14px; }
 .idle-line { font-size: 12px; color: var(--text-dim); margin-top: 5px; line-height: 1.6; }
 .idle-line b { color: var(--warn); }
+
+
+/* ---------------------------------------------------------------- 配置差异 */
+.diff-list { max-height: 46vh; overflow-y: auto; margin: 6px 0 4px; }
+.diff-sec {
+  font-size: 12px; color: var(--text-dim); margin: 14px 0 6px;
+  padding-bottom: 5px; border-bottom: 1px solid var(--border);
+}
+.diff-row {
+  display: grid; grid-template-columns: 120px 1fr auto 1fr;
+  gap: 8px; align-items: baseline; padding: 6px 0;
+  font-size: 12.5px; border-bottom: 1px dashed var(--border);
+}
+.diff-row:last-child { border-bottom: none; }
+.diff-k { color: var(--text-dim); }
+.diff-v { word-break: break-all; }
+.diff-v.to { color: var(--accent); font-weight: 500; }
+.diff-arrow { color: var(--text-dim); font-size: 11px; }
+.diff-row.added .diff-v.to { color: var(--ok); }
+.diff-row.removed .diff-v { color: var(--err); text-decoration: line-through; }
