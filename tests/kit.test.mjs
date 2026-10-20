@@ -97,11 +97,15 @@ test('rocm-smi 的 json 输出能被正确解析', () => {
   assert.deepEqual(parseRocmSmi('not json'), []);
 });
 
-test('磁盘用量能算出来，拿不到就返回 null', () => {
+test('磁盘用量能算出来', () => {
   const d = diskUsage(os.tmpdir());
   assert.ok(d && d.totalGB > 0);
   assert.ok(d.freeGB <= d.totalGB);
-  assert.equal(diskUsage('Z:\\definitely-not-a-drive'), null);
+  // 只有「根目录本身取不到」时才会是 null。
+  // Windows 上是「不存在的盘」；Linux 上根目录总是存在，所以这条只在 Windows 上验。
+  if (process.platform === 'win32') {
+    assert.equal(diskUsage('Z:\\definitely-not-a-drive'), null);
+  }
 });
 
 test('系统信息能读到 CPU 核数和内存', () => {

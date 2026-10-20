@@ -8,8 +8,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test \"tests/*.test.mjs\"",
-    "lint": "node --check scripts/console.mjs && node --check scripts/installer.mjs && node --check ui/app.js && node --check ui/console.js && node --check ui/charts.js",
+    "test": "node --test",
+    "lint": "node --check scripts/console.mjs && node --check scripts/installer.mjs && node --check ui/app.js && node --check ui/console.js && node --check ui/charts.js && node --check ui/strata.js",
     "console": "node scripts/console.mjs",
     "installer": "node scripts/installer.mjs"
   },
