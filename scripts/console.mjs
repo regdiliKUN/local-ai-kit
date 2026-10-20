@@ -22,7 +22,7 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
-import { strataState, runStrataAction } from './strata.mjs';
+import { strataState, runStrataAction, handleStrata } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
@@ -1406,6 +1406,10 @@ const server = createSafeServer(async (req, res) => {
     applySecurityHeaders(res);
     res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' });
     return res.end(html);
+  }
+  if (file === 'strata.html') {
+    // 独立版 Strata 页面（/strata.html）交给共享的适配器处理 —— 令牌注入只有一份实现
+    return handleStrata(req, res, { cfg, root: ROOT, ui: UI, token: TOKEN });
   }
   applySecurityHeaders(res);
   pipeFile(res, full, {
