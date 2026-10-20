@@ -361,7 +361,92 @@ const Chart = (() => {
     return `${n}${unit || ''}`;
   }
 
-  return { sparkline, donut, gauge, bars, radar, waterfall, line, esc };
+  /**
+   * 热力图（按日期的通过率）。
+   *
+   * @param {{date:string, value:number, text?:string}[]} items
+   */
+  function heatmap(items, opts = {}) {
+    const list = items || [];
+    if (!list.length) return '<div class="chart-empty">还没有数据</div>';
+    const weeks = opts.weeks || 10;
+    const cell = opts.cell || 15;
+    const gap = opts.gap || 3;
+    const padL = 30;
+    const padT = 14;
+    const width = padL + weeks * (cell + gap);
+    const height = padT + 7 * (cell + gap);
+
+    // 按周分组：从周一开始
+    const byWeek = new Map();
+    for (const it of list) {
+      const d = new Date(it.date);
+      if (Number.isNaN(d.getTime())) continue;
+      const day = (d.getDay() + 6) % 7;             // 周一 = 0
+      const week = Math.floor((d.getTime() - d.getTimezoneOffset() * 60000) / 86400000 / 7);
+      if (!byWeek.has(week)) byWeek.set(week, new Array(7).fill(null));
+      byWeek.get(week)[day] = it;
+    }
+    const weeksList = [...byWeek.keys()].sort((a, b) => b - a).slice(0, weeks);
+    const firstWeek = weeksList.length ? weeksList[weeksList.length - 1] : 0;
+
+    let cells = '';
+    let lastMonth = -1;
+    weeksList.forEach((week, wi) => {
+      const dayArr = byWeek.get(week) || [];
+      for (let d = 0; d < 7; d++) {
+        const it = dayArr[d];
+        const x = padL + (weeks - 1 - wi) * (cell + gap);
+        const y = padT + d * (cell + gap);
+        if (!it) {
+          cells += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="3" class="hm-cell none" />`;
+          continue;
+        }
+        const v = Math.max(0, Math.min(100, Number(it.value) || 0));
+        const level = v >= 90 ? 4 : v >= 75 ? 3 : v >= 50 ? 2 : 1;
+        const dt = new Date(it.date);
+        const month = dt.getMonth();
+        if (d === 0 && month !== lastMonth) {
+          cells += `<text x="${x}" y="${padT - 4}" class="hm-month">${dt.getMonth() + 1}月</text>`;
+          lastMonth = month;
+        }
+        cells += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="3" class="hm-cell l${level}">
+          <title>${esc((it.text || dt.toLocaleDateString()) + ' · ' + Math.round(v) + '%')}</title></rect>`;
+      }
+    });
+
+    const legend = [0, 1, 2, 3, 4].map((l) => `<rect x="${padL + l * 16}" y="${height + 6}" width="12" height="12" rx="3" class="hm-cell l${l}" />`).join('');
+    return `<svg class="chart-heat" viewBox="0 0 ${width} ${height + 24}" width="${width}" height="${height + 24}" role="img">
+      ${cells}
+      ${legend}
+      <text x="${padL + 5 * 16 + 6}" y="${height + 16}" class="hm-legend-tx">低</text>
+      <text x="${width - 6}" y="${height + 16}" class="hm-legend-tx" text-anchor="end">高</text>
+    </svg>`;
+  }
+
+  /**
+   * 环形进度（用在一个比例上）。
+   */
+  function ring(percent, opts = {}) {
+    const size = opts.size || 120;
+    const thickness = opts.thickness || 12;
+    const pct = Math.max(0, Math.min(100, Number(percent) || 0));
+    const r = (size - thickness) / 2;
+    const cx = size / 2;
+    const cy = size / 2;
+    const c = 2 * Math.PI * r;
+    const level = pct >= 90 ? 'err' : pct >= 70 ? 'warn' : '';
+    return `<svg class="chart-ring" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="${Math.round(pct)}%">
+      <circle cx="${cx}" cy="${cy}" r="${r}" class="ring-track" fill="none" stroke-width="${thickness}" />
+      <circle cx="${cx}" cy="${cy}" r="${r}" class="ring-fill ${level}" fill="none" stroke-width="${thickness}"
+        stroke-linecap="round" stroke-dasharray="${(c * pct / 100).toFixed(1)} ${c.toFixed(1)}"
+        transform="rotate(-90 ${cx} ${cy})" />
+      <text x="${cx}" y="${cy - 2}" class="ring-value" text-anchor="middle">${Math.round(pct)}<tspan class="ring-unit">%</tspan></text>
+      ${opts.label ? `<text x="${cx}" y="${cy + 16}" class="ring-label" text-anchor="middle">${esc(opts.label)}</text>` : ''}
+    </svg>`;
+  }
+
+  return { sparkline, donut, gauge, bars, radar, waterfall, line, heatmap, ring, esc };
 })();
 
 window.Chart = Chart;

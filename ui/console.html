@@ -28,10 +28,19 @@
       <li data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
       <li data-tab="fix"><span class="dot"></span><span class="label">修复中心</span></li>
       <li data-tab="tools"><span class="dot"></span><span class="label">诊断与维护</span></li>
+      <li data-tab="services"><span class="dot"></span><span class="label">服务</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
 
     <div class="sidebar-foot" id="sideInfo"></div>
+
+    <div class="notif-wrap">
+      <button class="bell" id="btnBell" title="通知">🔔<span class="badge-count" id="bellCount" hidden>0</span></button>
+      <div class="notif-panel" id="notifPanel" hidden>
+        <div class="notif-head">通知<button class="btn ghost small" id="btnNotifClear">清空</button></div>
+        <ul class="notif-list" id="notifList"></ul>
+      </div>
+    </div>
   </aside>
 
   <main class="content">
@@ -50,6 +59,17 @@
         <span class="row-hint" id="dashStamp">—</span>
       </div>
 
+      <div class="quickbar">
+        <span class="qb-title">快速操作</span>
+        <button class="btn ghost small" data-quick="models">装模型</button>
+        <button class="btn ghost small" data-quick="health">跑体检</button>
+        <button class="btn ghost small" data-quick="bench">测速度</button>
+        <button class="btn ghost small" data-quick="play">聊两句</button>
+        <button class="btn ghost small" data-quick="backup">备份配置</button>
+        <button class="btn ghost small" data-quick="report">导出报告</button>
+        <button class="btn ghost small" data-quick="fix">修问题</button>
+      </div>
+
       <div class="gauge-row" id="dashGauges">
         <div class="gauge-card"><div class="gk">显卡显存</div><div class="gv" id="gVram">—</div><div class="gs" id="gVramSub">等待数据</div><div class="gsp" id="gVramSpark"></div></div>
         <div class="gauge-card"><div class="gk">CPU 占用</div><div class="gv" id="gCpu">—</div><div class="gs" id="gCpuSub">等待数据</div><div class="gsp" id="gCpuSpark"></div></div>
@@ -66,6 +86,11 @@
           <div class="panel-h">正在运行的模型</div>
           <div id="dashModels" class="panel-b"><div class="loading"><span class="spinner"></span> 读取中…</div></div>
         </div>
+      </div>
+
+      <h2 class="sec-h">显存去哪了</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashVram"><div class="chart-empty">读取中…</div></div>
       </div>
 
       <h2 class="sec-h">机器信息</h2>
@@ -111,6 +136,19 @@
           <div class="custom-row" style="border:0;margin:0;padding:0">
             <input type="search" id="libQuery" placeholder="例如 qwen、llama、coder" spellcheck="false">
             <button class="btn primary small" id="btnLibSearch">搜索</button>
+          </div>
+          <div class="lib-filters">
+            <span class="lff">能力</span>
+            <label class="check"><input type="checkbox" data-libcap="tools"><span>工具调用</span></label>
+            <label class="check"><input type="checkbox" data-libcap="vision"><span>看图</span></label>
+            <label class="check"><input type="checkbox" data-libcap="thinking"><span>深度思考</span></label>
+            <label class="check"><input type="checkbox" data-libcap="embedding"><span>向量化</span></label>
+            <span class="lff">排序</span>
+            <select id="libSort" class="ctx-select" style="min-width:120px;padding:6px 9px;font-size:12.5px">
+              <option value="pulls">下载最多</option>
+              <option value="name">名称</option>
+              <option value="sizes">尺寸多</option>
+            </select>
           </div>
           <div id="libResults" class="lib-results"><p class="row-hint">搜一下官方库，几百个模型里挑一个合适的。</p></div>
         </div>
@@ -274,6 +312,10 @@
       </div>
       <div class="chat-stats" id="chatStats"></div>
       <div class="chat-stats" id="ctxUsage"></div>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnExportChat">导出对话（Markdown）</button>
+        <button class="btn ghost small" id="btnCopyChat">复制对话</button>
+      </div>
     </section>
 
     <!-- ============ 性能基准 ============ -->
@@ -335,6 +377,11 @@
         <button class="btn ghost small" id="btnClearBench">清空测速历史</button>
         <button class="btn ghost small" id="btnCsvBench">导出 CSV</button>
         <span class="row-hint" id="benchHistoryPath"></span>
+      </div>
+
+      <h2 class="sec-h">和历史最佳比</h2>
+      <div class="summary" id="benchCompare">
+        <div class="row"><span class="k">—</span><span class="v">还没有历史数据</span></div>
       </div>
 
       <h2 class="sec-h">这说明什么</h2>
@@ -473,6 +520,22 @@
       </div>
     </section>
 
+    <!-- ============ 服务 ============ -->
+    <section class="view" id="view-services" hidden>
+      <h1>服务</h1>
+      <div class="guide">
+        <span class="guide-n">一句话</span>
+        <span>这一页是「现在有哪些东西在跑」。<b>停服务前先看一眼</b>，别把不该关的关了。</span>
+      </div>
+
+      <div id="svcCards" class="svc-grid">
+        <div class="loading"><span class="spinner"></span> 读取中…</div>
+      </div>
+
+      <div class="row-actions" id="svcActions"></div>
+      <p class="row-hint" id="svcHint"></p>
+    </section>
+
     <!-- ============ 修复中心 ============ -->
     <section class="view" id="view-fix" hidden>
       <h1>修复中心</h1>
@@ -557,6 +620,23 @@
         <pre id="consoleLog"></pre>
       </details>
 
+      <h2 class="sec-h">服务自愈</h2>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">Ollama 掉了自动重启</div>
+            <div class="s">显卡驱动更新、误关托盘程序、休眠没恢复时，Ollama 会意外退出。
+              打开这个开关，控制台会每 15 秒检查一次，发现掉了就自动拉起来。
+              <b>默认关闭</b> —— 擅自拉起服务会占显存。</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="swSelfHeal"><span class="track"><span class="knob"></span></span></label>
+        </div>
+      </div>
+
+      <h2 class="sec-h">配置检查点</h2>
+      <p class="lead">每次改配置前都会自动留一份。改坏了可以一键退回来。</p>
+      <div id="checkpointList" class="stack"><div class="loading"><span class="spinner"></span> 读取中…</div></div>
+
       <h2 class="sec-h">卸载</h2>
       <div class="row-actions">
         <button class="btn ghost small danger" id="btnUninstall">卸载本地 AI</button>
@@ -614,6 +694,7 @@
 </div>
 
 <script src="charts.js"></script>
+<script src="guidance.js"></script>
 <script src="console.js"></script>
 </body>
 </html>

@@ -64,6 +64,7 @@ for (const li of document.querySelectorAll('#tabs li')) {
     if (li.dataset.tab === 'health') loadTrend('health').catch(() => {});
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
     if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
+    if (li.dataset.tab === 'settings') loadCheckpoints().catch(() => {});
   });
 }
 
@@ -111,7 +112,7 @@ function currentTheme() {
  */
 const KEYMAP = {
   '1': 'dashboard', '2': 'models', '3': 'play', '4': 'compare', '5': 'bench',
-  '6': 'context', '7': 'health', '8': 'fix', '9': 'tools', '0': 'settings',
+  '6': 'context', '7': 'health', '8': 'fix', '9': 'tools', '0': 'services',
 };
 
 document.addEventListener('keydown', (e) => {
@@ -134,6 +135,48 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/') { const s = $('modelSearch'); if (s) { s.focus(); e.preventDefault(); } }
   if (e.key === '?') { toast('快捷键：1-8 切换页面 · R 刷新 · / 搜索'); }
 });
+
+/* ------------------------------------------------------------ 引导助手 */
+
+/**
+ * 统一的空状态渲染。
+ *
+ * 界面上的「暂无数据」对用户没有任何价值 —— 要告诉他「现在该做什么」。
+ */
+function emptyBox(key, extra) {
+  const g = (window.Guidance && Guidance.EMPTY[key]) || { title: '暂无数据', hint: '', action: null, where: null };
+  const action = g.action
+    ? `<button class="btn ghost small" data-goto="${esc(g.where || '')}">${esc(g.action)}</button>`
+    : '';
+  return `<div class="empty">
+    <b>${esc(g.title)}</b>
+    ${g.hint ? `<div class="ehint">${esc(g.hint)}</div>` : ''}
+    ${extra || ''}
+    ${action}
+  </div>`;
+}
+
+/** 给页面里所有「跳到某页」的按钮接上事件 */
+function bindGoto(root) {
+  for (const b of (root || document).querySelectorAll('[data-goto]')) {
+    b.addEventListener('click', () => {
+      const tab = b.dataset.goto;
+      if (tab) gotoTab(tab);
+    });
+  }
+}
+
+/** 把一段报错翻译成人话 + 修复动作 */
+function explainError(text) {
+  const e = (window.Guidance && Guidance.explain) ? Guidance.explain(text) : null;
+  if (!e) return null;
+  return `<div class="errcard">
+    <div class="ec-title">${esc(e.title)}</div>
+    <div class="ec-why">${esc(e.why)}</div>
+    <div class="ec-fix">建议：${esc(e.fix)}</div>
+    ${e.where ? `<button class="btn ghost small" data-goto="${esc(e.where)}">去处理</button>` : ''}
+  </div>`;
+}
 
 /* ------------------------------------------------------------------ 状态 */
 
@@ -166,6 +209,7 @@ async function loadState() {
   playModels();
   benchModels();
   compareModels();
+  renderServices();
   loadSessions().then(() => {
     // 打开页面就接着上次的对话
     if (playSessions.length) {
@@ -263,10 +307,12 @@ function renderMetrics(data) {
       rows.map(([k, v]) => `<div class="row"><span class="k">${esc(k)}</span><span class="v">${esc(v)}</span></div>`).join('');
   }
 
+  renderVramBreakdown(m);
+
   /* ---- 正在跑的模型 ---- */
   const running = (m.ollama && m.ollama.models) || [];
   if (!running.length) {
-    $('dashModels').innerHTML = '<div class="chart-empty">现在没有模型驻留显存。<br>这说明显存已经全部还给游戏 / 渲染软件了。</div>';
+    $('dashModels').innerHTML = emptyBox('modelsNoneRunning');
   } else {
     const totalVram = running.reduce((n, r) => n + (r.sizeVramGB || 0), 0);
     $('dashModels').innerHTML = running.map((r) => `
@@ -360,10 +406,8 @@ function renderModels() {
   $('modelFilterCount').textContent = q ? `筛选出 ${list.length} / ${all.length} 个` : '';
 
   if (!all.length) {
-    $('modelList').innerHTML = `<div class="empty">
-      <b>还没有装任何模型。</b>
-      用下面的「加装新模型」下一个吧 —— 也可以回到安装向导里选。
-    </div>`;
+    $('modelList').innerHTML = emptyBox('models');
+    bindGoto($('modelList'));
     return;
   }
   if (!list.length) {
@@ -377,11 +421,15 @@ function renderModels() {
     if (caps.includes('vision')) tags.push('看图');
     if (caps.includes('tools')) tags.push('工具调用');
     if (caps.includes('thinking')) tags.push('深度思考');
+    // 体积对比条：一眼看出哪个模型最占地方
+    const maxSize = Math.max(1, ...all.map((x) => x.sizeGB || 0));
+    const w = Math.max(3, Math.round(((m.sizeGB || 0) / maxSize) * 100));
     return `
     <div class="mrow" data-model="${esc(m.name)}">
       <div class="mi">
         <div class="mn">${esc(m.name)}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}</div>
         <div class="ms">${esc(m.params || '')} ${esc(m.quant || '')}${m.modified ? ' · ' + esc(String(m.modified).slice(0, 10)) : ''}</div>
+        <div class="msize"><i style="width:${w}%"></i></div>
       </div>
       <div class="mz">${m.sizeGB} GB</div>
       <div class="ma"><button class="btn ghost small danger" data-del="${esc(m.name)}">删除</button></div>
@@ -433,6 +481,21 @@ async function loadCaps() {
 function renderSettings() {
   $('swAutostart').checked = !!state.settings.autostart;
   $('swLan').checked = !!state.settings.lanShare;
+  if ($('swSelfHeal')) $('swSelfHeal').checked = !!(state && state.selfHeal);
+}
+
+if ($('swSelfHeal')) {
+  $('swSelfHeal').addEventListener('change', async (e) => {
+    const on = e.target.checked;
+    try {
+      const r = await post('/api/settings', { selfHeal: on });
+      toast(on ? '已开启自愈：Ollama 掉了会自动重启' : '已关闭自愈');
+      if (r.selfHeal !== undefined) state.selfHeal = r.selfHeal;
+    } catch (err) {
+      toast(err.message);
+      e.target.checked = !on;
+    }
+  });
 }
 
 /* ------------------------------------------------------------- 空间分析 */
@@ -449,11 +512,14 @@ async function loadSpace() {
   }
   const p = data.primary || {};
   if (!p.exists) {
-    panel.innerHTML = `<div class="empty"><b>还没找到模型目录。</b>${p.dir ? `配置里写的是 <code>${esc(p.dir)}</code>，但这个目录不存在。` : '装好第一个模型后这里会有统计。'}</div>`;
+    panel.innerHTML = emptyBox('space', p.dir
+      ? `<div class="ehint">配置里写的是 <code>${esc(p.dir)}</code>，但这个目录不存在。</div>` : '');
+    bindGoto(panel);
     return;
   }
   if (!p.models.length) {
-    panel.innerHTML = `<div class="empty"><b>目录是空的。</b>模型还没下到 <code>${esc(p.dir)}</code>。</div>`;
+    panel.innerHTML = emptyBox('space', `<div class="ehint">模型还没下到 <code>${esc(p.dir)}</code>。</div>`);
+    bindGoto(panel);
     return;
   }
 
@@ -993,6 +1059,33 @@ function renderBench(r) {
   $('benchAdvice').innerHTML = (v.advice || []).map((t) =>
     `<div class="row"><span class="k">·</span><span class="v">${esc(t)}</span></div>`).join('')
     || '<div class="row"><span class="k">—</span><span class="v">没有建议</span></div>';
+
+  // 和历史最好的一次比一比
+  benchCompare(r);
+}
+
+/** 与历史最佳成绩对比 —— 换了配置之后是变快还是变慢，一眼就知道 */
+async function benchCompare(r) {
+  const box = $('benchCompare');
+  if (!box) return;
+  try {
+    const res = await (await fetch('/api/history?kind=bench')).json();
+    const items = (res.items || []).filter((x) => x.model === r.model && x.gen);
+    if (items.length < 2) {
+      box.innerHTML = '<div class="row"><span class="k">对比</span><span class="v">再测一次就能和上次比了</span></div>';
+      return;
+    }
+    const best = Math.max(...items.map((x) => x.gen));
+    const avg = Math.round(items.reduce((n, x) => n + x.gen, 0) / items.length);
+    const now = r.verdict ? r.verdict.genTokensPerSec : 0;
+    const diff = best > 0 ? Math.round(((now - best) / best) * 100) : 0;
+    const tone = diff >= 0 ? 'ctx-good' : 'ctx-bad';
+    box.innerHTML = [
+      `<div class="row"><span class="k">历史最佳</span><span class="v">${best} t/s</span></div>`,
+      `<div class="row"><span class="k">历史平均</span><span class="v">${avg} t/s（共 ${items.length} 次）</span></div>`,
+      `<div class="row"><span class="k">这次</span><span class="v ${tone}">${now} t/s（比最佳${diff >= 0 ? '快' : '慢'} ${Math.abs(diff)}%）</span></div>`,
+    ].join('');
+  } catch { /* ignore */ }
 }
 
 async function startBench() {
@@ -1027,7 +1120,7 @@ async function loadTrend(kind) {
     const pathHint = $(kind === 'health' ? 'healthHistoryPath' : 'benchHistoryPath');
     if (pathHint) pathHint.textContent = `记录文件：${r.path || ''}`;
     if (!items.length) {
-      box.innerHTML = '<div class="chart-empty">还没有历史记录</div>';
+      box.innerHTML = emptyBox('trend');
       return;
     }
     if (kind === 'health') {
@@ -1037,7 +1130,14 @@ async function loadTrend(kind) {
         text: it.passed != null ? `${it.passed}/${it.total}` : '',
       }));
       box.innerHTML = Chart.line(points, { width: 460, height: 160, min: 0, max: 100, unit: '%' })
-        + '<p class="row-hint" style="margin-top:8px">每次体检的成绩。曲线掉下来 = 换配置或换模型之后变差了。</p>';
+        + '<p class="row-hint" style="margin-top:8px">每次体检的成绩。曲线掉下来 = 换配置或换模型之后变差了。</p>'
+        + '<h3 class="space-sub">日历热力图</h3>'
+        + Chart.heatmap(items.map((it) => ({
+          date: new Date(it.at).toISOString().slice(0, 10),
+          value: it.rate == null ? 0 : Math.round(it.rate * 100),
+          text: it.passed != null ? `${it.passed}/${it.total}` : '',
+        })), { weeks: 12 })
+        + '<p class="row-hint" style="margin-top:6px">颜色越绿说明当天体检成绩越好。</p>';
     } else {
       const points = items.map((it) => ({
         label: new Date(it.at).toLocaleDateString(),
@@ -1078,6 +1178,71 @@ const CAP_TEXT = {
   embedding: '向量化', audio: '语音', cloud: '云端',
 };
 
+/** "603.2K" → 603200，用来排序 */
+function pullNumber(text) {
+  const m = /^([\d.]+)\s*([KMB])?$/i.exec(String(text || '').trim());
+  if (!m) return 0;
+  const n = Number(m[1]) || 0;
+  const u = (m[2] || '').toUpperCase();
+  return u === 'K' ? n * 1e3 : u === 'M' ? n * 1e6 : u === 'B' ? n * 1e9 : n;
+}
+
+let libItems = [];
+
+/** 按界面上的筛选条件过滤 + 排序 */
+function libFilter(items) {
+  const caps = Array.from(document.querySelectorAll('[data-libcap]:checked')).map((i) => i.dataset.libcap);
+  const sort = ($('libSort') && $('libSort').value) || 'pulls';
+  let out = items;
+  if (caps.length) out = out.filter((m) => caps.every((c) => (m.capabilities || []).includes(c)));
+  out = out.slice().sort((a, b) => {
+    if (sort === 'name') return a.name.localeCompare(b.name);
+    if (sort === 'sizes') return (b.sizes || []).length - (a.sizes || []).length;
+    return pullNumber(b.pulls) - pullNumber(a.pulls);
+  });
+  return out;
+}
+
+function libRender() {
+  const box = $('libResults');
+  if (!box) return;
+  const items = libFilter(libItems);
+  if (!items.length) {
+    box.innerHTML = libItems.length
+      ? '<p class="row-hint">当前筛选条件下没有模型 —— 取消几个能力筛选试试。</p>'
+      : '<p class="row-hint">没找到匹配的模型。</p>';
+    return;
+  }
+  box.innerHTML = items.map((m) => `
+    <div class="libitem">
+      <div class="li">
+        <div class="ln">${esc(m.name)}</div>
+        <div class="ld">${esc((m.description || '').slice(0, 120))}</div>
+        <div class="lt">${(m.capabilities || []).map((c) => `<span class="tag">${esc(CAP_TEXT[c] || c)}</span>`).join('')}
+          ${(m.sizes || []).slice(0, 8).map((s) => `<span class="tag plain">${esc(s)}</span>`).join('')}</div>
+      </div>
+      <div class="la">
+        ${m.pulls ? `<div class="lp">${esc(m.pulls)} 次下载</div>` : ''}
+        <button class="btn ghost small" data-lib="${esc(m.name)}">下载</button>
+      </div>
+    </div>`).join('');
+
+  for (const b of box.querySelectorAll('[data-lib]')) {
+    b.addEventListener('click', async () => {
+      const name = b.dataset.lib;
+      b.disabled = true;
+      b.textContent = '加入中…';
+      try {
+        const out = await post('/api/queue', { model: `${name}:latest` });
+        renderQueue(out.state);
+        toast(`「${name}:latest」已加入下载队列`);
+      } catch (e) { toast(e.message); }
+      b.disabled = false;
+      b.textContent = '下载';
+    });
+  }
+}
+
 async function searchLibrary() {
   const q = $('libQuery').value.trim();
   const box = $('libResults');
@@ -1086,40 +1251,11 @@ async function searchLibrary() {
     const r = await (await fetch(`/api/library?q=${encodeURIComponent(q)}`)).json();
     if (r.error && !r.items.length) {
       box.innerHTML = `<p class="row-hint">${esc(r.error)}。离线时可以用下面的输入框直接写模型名。</p>`;
+      libItems = [];
       return;
     }
-    if (!r.items.length) {
-      box.innerHTML = '<p class="row-hint">没找到匹配的模型。</p>';
-      return;
-    }
-    box.innerHTML = r.items.map((m) => `
-      <div class="libitem">
-        <div class="li">
-          <div class="ln">${esc(m.name)}</div>
-          <div class="ld">${esc((m.description || '').slice(0, 120))}</div>
-          <div class="lt">${(m.capabilities || []).map((c) => `<span class="tag">${esc(CAP_TEXT[c] || c)}</span>`).join('')}
-            ${(m.sizes || []).slice(0, 8).map((s) => `<span class="tag plain">${esc(s)}</span>`).join('')}</div>
-        </div>
-        <div class="la">
-          ${m.pulls ? `<div class="lp">${esc(m.pulls)} 次下载</div>` : ''}
-          <button class="btn ghost small" data-lib="${esc(m.name)}">下载</button>
-        </div>
-      </div>`).join('');
-
-    for (const b of box.querySelectorAll('[data-lib]')) {
-      b.addEventListener('click', async () => {
-        const name = b.dataset.lib;
-        b.disabled = true;
-        b.textContent = '加入中…';
-        try {
-          const out = await post('/api/queue', { model: `${name}:latest` });
-          renderQueue(out.state);
-          toast(`「${name}:latest」已加入下载队列`);
-        } catch (e) { toast(e.message); }
-        b.disabled = false;
-        b.textContent = '下载';
-      });
-    }
+    libItems = r.items || [];
+    libRender();
   } catch (e) {
     box.innerHTML = `<p class="row-hint">搜索失败：${esc(e.message)}</p>`;
   }
@@ -1129,6 +1265,10 @@ if ($('btnLibSearch')) $('btnLibSearch').addEventListener('click', searchLibrary
 if ($('libQuery')) {
   $('libQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter') searchLibrary(); });
 }
+for (const box of document.querySelectorAll('[data-libcap]')) {
+  box.addEventListener('change', libRender);
+}
+if ($('libSort')) $('libSort').addEventListener('change', libRender);
 
 /* ------------------------------------------------------------ 上下文占用 */
 
@@ -1156,10 +1296,13 @@ function renderCtxUsage() {
   const pct = Math.min(100, Math.round((tokens / window_) * 100));
   const left = Math.max(0, window_ - tokens);
   const perTurn = Math.round(messages.reduce((n, m) => n + estimateTokens(m.content) + 4, 0) / messages.length);
-  box.innerHTML = [
-    ['上下文占用', `约 ${tokens} / ${window_} tokens（${pct}%）`],
-    ['还能聊', `大概还能再聊 ${Math.floor(left / Math.max(1, perTurn))} 轮`],
-  ].map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('');
+  box.innerHTML = `
+    <div class="ctx-ring">${Chart.ring(pct, { label: '上下文', size: 104, thickness: 10 })}</div>
+    <div class="ctx-nums">
+      <div class="stat"><span class="k">上下文占用</span><span class="v">约 ${tokens} / ${window_} tokens（${pct}%）</span></div>
+      <div class="stat"><span class="k">还能聊</span><span class="v">大概还能再聊 ${Math.floor(left / Math.max(1, perTurn))} 轮</span></div>
+      <div class="stat"><span class="k">提醒</span><span class="v">${pct > 85 ? '快满了 —— 再聊下去就该触发压缩了' : pct > 60 ? '用掉一半以上了' : '还很宽裕'}</span></div>
+    </div>`;
 }
 
 const compareState = {};   // model -> { content, status, stats }
@@ -1181,7 +1324,7 @@ function renderCompare() {
   const box = $('compareResults');
   const models = Object.keys(compareState);
   if (!models.length) {
-    box.innerHTML = '<div class="empty">选好模型，点「开始对比」。</div>';
+    box.innerHTML = emptyBox('compare');
     return;
   }
   box.innerHTML = models.map((m) => {
@@ -1286,7 +1429,7 @@ async function renderFitRadar() {
   if (!box) return;
   const models = state.models || [];
   if (!models.length) {
-    box.innerHTML = '<div class="chart-empty">还没有已安装的模型</div>';
+    box.innerHTML = emptyBox('models');
     return;
   }
   let vramGB = 0;
@@ -1406,39 +1549,30 @@ if ($('btnReport')) {
 
 const TOUR_KEY = 'localai-tour-done';
 
-const TOUR = [
-  {
-    title: '欢迎来到本地 AI 控制台',
-    text: '这里能管模型、聊模型、测模型、修问题。花一分钟看完这四点，以后就不用再问了。',
-  },
-  {
-    title: 'Ctrl+K 打开命令面板',
-    text: '10 个页面、20 多个动作，输入关键字直接跳过去 —— 不用在一堆标签页里翻。',
-  },
-  {
-    title: '「系统概览」先看一眼',
-    text: '显存被模型占了多少、还剩多少，准备打游戏之前来这里确认一下就知道。',
-  },
-  {
-    title: '出问题先别重装',
-    text: '「诊断与维护」能查网络、清理下载残留、导出诊断报告；「修复中心」能一键修好常见问题。',
-  },
-];
-
+/** 三套引导：第一次用 / 出问题时 / 想换模型 */
+let tourScenario = 'first';
 let tourIndex = 0;
 
-function tourRender() {
-  const step = TOUR[tourIndex];
-  $('tourStep').textContent = `${tourIndex + 1} / ${TOUR.length}`;
-  $('tourTitle').textContent = step.title;
-  $('tourText').textContent = step.text;
-  $('tourDots').innerHTML = TOUR.map((_, i) =>
-    `<i class="${i === tourIndex ? 'on' : ''}"></i>`).join('');
-  $('tourPrev').disabled = tourIndex === 0;
-  $('tourNext').textContent = tourIndex === TOUR.length - 1 ? '开始使用' : '下一步';
+function tourSteps() {
+  const all = (window.Guidance && Guidance.TOURS) || {};
+  return all[tourScenario] || all.first || [];
 }
 
-function tourOpen() {
+function tourRender() {
+  const steps = tourSteps();
+  if (!steps.length) return;
+  const step = steps[tourIndex];
+  $('tourStep').textContent = `${tourIndex + 1} / ${steps.length}`;
+  $('tourTitle').textContent = step.title;
+  $('tourText').textContent = step.text;
+  $('tourDots').innerHTML = steps.map((_, i) =>
+    `<i class="${i === tourIndex ? 'on' : ''}"></i>`).join('');
+  $('tourPrev').disabled = tourIndex === 0;
+  $('tourNext').textContent = tourIndex === steps.length - 1 ? '开始使用' : '下一步';
+}
+
+function tourOpen(scenario) {
+  tourScenario = scenario || 'first';
   tourIndex = 0;
   $('tourMask').hidden = false;
   tourRender();
@@ -1451,7 +1585,8 @@ function tourClose() {
 
 if ($('tourNext')) {
   $('tourNext').addEventListener('click', () => {
-    if (tourIndex >= TOUR.length - 1) tourClose();
+    const steps = tourSteps();
+    if (tourIndex >= steps.length - 1) tourClose();
     else { tourIndex += 1; tourRender(); }
   });
 }
@@ -1467,18 +1602,323 @@ if ($('tourMask')) {
 
 // 第一次打开才引导
 try {
-  if (!localStorage.getItem(TOUR_KEY)) setTimeout(tourOpen, 600);
+  if (!localStorage.getItem(TOUR_KEY)) setTimeout(() => tourOpen('first'), 600);
 } catch { /* ignore */ }
+
+/* ------------------------------------------------------------ 通知中心 */
+
+const notifications = [];
+let unread = 0;
+
+/** 记一条通知 */
+function notify(title, detail, tone) {
+  notifications.unshift({ title, detail: detail || '', tone: tone || 'info', at: Date.now() });
+  if (notifications.length > 50) notifications.pop();
+  unread += 1;
+  renderNotifications();
+}
+
+function renderNotifications() {
+  const bell = $('bellCount');
+  if (bell) {
+    bell.textContent = unread > 9 ? '9+' : String(unread);
+    bell.hidden = unread === 0;
+  }
+  const list = $('notifList');
+  if (!list) return;
+  list.innerHTML = notifications.length
+    ? notifications.map((n) => `<li class="notif ${esc(n.tone)}">
+        <div class="nt">${esc(n.title)}</div>
+        ${n.detail ? `<div class="nd">${esc(n.detail)}</div>` : ''}
+        <div class="nw">${new Date(n.at).toLocaleTimeString()}</div>
+      </li>`).join('')
+    : '<li class="none">还没有通知</li>';
+}
+
+if ($('btnBell')) {
+  $('btnBell').addEventListener('click', () => {
+    unread = 0;
+    renderNotifications();
+    const panel = $('notifPanel');
+    panel.hidden = !panel.hidden;
+  });
+}
+if ($('btnNotifClear')) {
+  $('btnNotifClear').addEventListener('click', () => {
+    notifications.length = 0;
+    unread = 0;
+    renderNotifications();
+  });
+}
+
+/* ------------------------------------------------------------------ 服务 */
+
+const SVC_ACTIONS = {
+  engine: { label: '启动引擎', ok: '引擎运行中' },
+  webui: { label: '启动 WebUI', ok: 'WebUI 运行中' },
+  workbench: { label: '启动工作台', ok: '工作台运行中' },
+  stop: { label: '停止全部服务', ok: '服务已停止' },
+};
+
+function renderServices() {
+  const box = $('svcCards');
+  const strata = state && state.strata;
+  const cards = [];
+
+  if (strata) {
+    for (const name of ['engine', 'webui', 'dsh']) {
+      const s = strata[name];
+      const port = strata.ports[name === 'dsh' ? 'dsh' : name === 'webui' ? 'webui' : 'engine'];
+      const label = name === 'engine' ? 'Strata 引擎' : name === 'webui' ? 'WebUI（聊天/文件）' : 'DeepSeek Harness';
+      const action = name === 'dsh' ? 'workbench' : name;
+      cards.push({
+        key: name, title: label, port,
+        online: !!s.online,
+        detail: s.startupError || (s.online ? '运行中' : '未就绪'),
+        error: !!s.startupError,
+        action: s.online ? null : action,
+      });
+    }
+  }
+
+  // Ollama 那一侧（两种部署都有可能是真的在跑）
+  cards.push({
+    key: 'ollama', title: 'Ollama（模型服务）',
+    port: 11434,
+    online: !!(state && state.running),
+    detail: state && state.running ? `运行中 · ${(state.models || []).length} 个模型` : '未运行',
+    error: false,
+    action: state && state.running ? null : 'ollama',
+  });
+
+  box.innerHTML = cards.map((c) => `
+    <div class="svccard ${c.online ? 'on' : 'off'}">
+      <div class="svchead">
+        <span class="dot"></span>
+        <b>${esc(c.title)}</b>
+        <span class="svcdot">:${c.port}</span>
+      </div>
+      <div class="svcdetail ${c.error ? 'bad' : ''}">${esc(c.detail)}</div>
+      ${c.action ? `<button class="btn ghost small" data-svc="${esc(c.action)}">${esc((SVC_ACTIONS[c.action] || {}).label || '启动')}</button>` : ''}
+    </div>`).join('');
+
+  for (const b of box.querySelectorAll('[data-svc]')) {
+    b.addEventListener('click', async () => {
+      const action = b.dataset.svc;
+      b.disabled = true;
+      b.textContent = '处理中…';
+      try {
+        if (action === 'ollama') {
+          await post('/api/settings', { ensureOllama: true });
+          toast('Ollama 已启动');
+        } else {
+          const out = await post('/api/strata/service', { action });
+          toast(out.message || '已处理');
+        }
+        setTimeout(() => loadState().catch(() => {}), 1200);
+      } catch (e) { toast(e.message); }
+      b.disabled = false;
+    });
+  }
+
+  const actions = $('svcActions');
+  actions.innerHTML = strata
+    ? '<button class="btn ghost danger" id="svcStopAll">停止全部服务</button>'
+    : '<button class="btn ghost small" id="btnStartSvc2">启动工作台</button><button class="btn ghost small" id="btnStopSvc2">停止服务并释放显存</button>';
+  $('svcHint').textContent = strata
+    ? '「停止全部服务」会关掉引擎、WebUI 和工作台，显存会立刻释放。'
+    : '停止服务会把显存还给游戏和渲染软件。';
+
+  if ($('svcStopAll')) {
+    $('svcStopAll').addEventListener('click', async () => {
+      if (!confirm('确定要停止全部服务吗？\n（引擎、WebUI、工作台都会关掉，显存会释放）')) return;
+      try {
+        const out = await post('/api/strata/service', { action: 'stop' });
+        toast(out.message || '已停止');
+        setTimeout(() => loadState().catch(() => {}), 1500);
+      } catch (e) { toast(e.message); }
+    });
+  }
+  if ($('btnStartSvc2')) {
+    $('btnStartSvc2').addEventListener('click', async () => {
+      try { await post('/api/service', { action: 'start' }); toast('已启动'); } catch (e) { toast(e.message); }
+    });
+  }
+  if ($('btnStopSvc2')) {
+    $('btnStopSvc2').addEventListener('click', async () => {
+      try { await post('/api/service', { action: 'stop' }); toast('已停止'); } catch (e) { toast(e.message); }
+    });
+  }
+}
+
+/* --------------------------------------------------------- 显存分账 */
+
+/**
+ * 把显存拆成三块：模型权重 / KV cache / 其它占用。
+ *
+ * 用户只会问一句「我的显存怎么满了」—— 拆开看才知道该关上下文还是该换模型。
+ * KV cache 用的是和安装向导同一套估算公式（按参数量线性缩放）。
+ */
+function renderVramBreakdown(m) {
+  const box = $('dashVram');
+  if (!box) return;
+  const gpu = (m.gpu || [])[0];
+  if (!gpu || !gpu.memoryTotalMB) {
+    box.innerHTML = '<div class="chart-empty">没有独立显卡，无法拆分显存占用。</div>';
+    return;
+  }
+  const totalGB = gpu.memoryTotalMB / 1024;
+  const usedGB = (gpu.memoryUsedMB || 0) / 1024;
+
+  const running = (m.ollama && m.ollama.models) || [];
+  let weights = 0;
+  let kv = 0;
+  const ctxWindow = (ctxState && ctxState.contextWindow) || 8192;
+  for (const r of running) {
+    const w = r.sizeGB || 0;
+    weights += w;
+    // KV cache ≈ 每 1K token 的开销 × 上下文长度；用参数量反推
+    const params = estimateParams(r.name);
+    const per1k = 0.092 * ((params || 8) / 27);
+    kv += per1k * (ctxWindow / 1000);
+  }
+  weights = Math.min(weights, usedGB);
+  kv = Math.min(kv, Math.max(0, usedGB - weights));
+  const other = Math.max(0, usedGB - weights - kv);
+  const free = Math.max(0, totalGB - usedGB);
+
+  const parts = [
+    { label: '模型权重', value: weights, text: `${weights.toFixed(1)} GB`, tone: 'good' },
+    { label: 'KV cache', value: kv, text: `${kv.toFixed(1)} GB`, tone: 'warn' },
+    { label: '其它程序', value: other, text: `${other.toFixed(1)} GB` },
+    { label: '空闲', value: free, text: `${free.toFixed(1)} GB` },
+  ];
+  const pct = Math.round((usedGB / totalGB) * 100);
+  // 显存被模型占的不到一半 → 说明大头是别的程序（游戏、渲染软件、别的 AI）
+  const note = other > weights + kv && other > 2
+    ? '⚠️ 显存的大头不是模型占的 —— 可能是游戏、渲染软件或别的 AI 程序，关掉它们能立刻腾出空间。'
+    : '上下文越大，KV cache 占得越多 —— 上下文从 8K 开到 32K，光 KV cache 就会多吃几 GB。';
+  box.innerHTML = `
+    <div class="vram-split">
+      <div class="vs-chart">${Chart.waterfall(parts, { width: 360, labelW: 78, valueW: 62 })}</div>
+      <div class="vs-ring">${Chart.ring(pct, { label: '显存已用', size: 128 })}</div>
+    </div>
+    <p class="row-hint" style="margin-top:10px">${note}
+      ${running.length ? `当前上下文 ${ctxWindow} tokens。` : '现在没有模型驻留显存。'}
+    </p>`;
+}
+
+/** 从模型名里粗略猜参数量（B）—— 名字里带数字的按那个算 */
+function estimateParams(name) {
+  const s = String(name || '');
+  const m = /(\d+(?:\.\d+)?)\s*b/i.exec(s);
+  if (m) return Number(m[1]);
+  if (/0\.5b|1\.5b/.test(s)) return 0.5;
+  return 8;
+}
+
+/* ------------------------------------------------------------ 快速操作 */
+
+/** 首页那排「快速操作」按钮 */
+const QUICK_ACTIONS = {
+  models: () => gotoTab('models'),
+  health: () => { gotoTab('health'); $('btnHealth') && $('btnHealth').click(); },
+  bench: () => { gotoTab('bench'); $('btnBench') && $('btnBench').click(); },
+  play: () => { gotoTab('play'); $('playInput') && $('playInput').focus(); },
+  backup: () => { gotoTab('settings'); $('btnExportCfg') && $('btnExportCfg').click(); },
+  report: () => { gotoTab('tools'); $('btnReport') && $('btnReport').click(); },
+  fix: () => { gotoTab('fix'); $('btnDiagnose') && $('btnDiagnose').click(); },
+};
+
+for (const b of document.querySelectorAll('[data-quick]')) {
+  b.addEventListener('click', () => {
+    const fn = QUICK_ACTIONS[b.dataset.quick];
+    if (fn) fn();
+  });
+}
+
+/* ------------------------------------------------------------ 对话导出 */
+
+/** 把当前对话导成 Markdown */
+function chatMarkdown() {
+  const lines = [`# 与 ${$('playModel').value || '本地模型'} 的对话`, '', `> 导出于 ${new Date().toLocaleString()}`, ''];
+  for (const m of playHistory) {
+    if (m.role !== 'user' && m.role !== 'assistant') continue;
+    lines.push(`**${m.role === 'user' ? '我' : '模型'}**`, '', m.content, '');
+  }
+  return lines.join('\n');
+}
+
+if ($('btnExportChat')) {
+  $('btnExportChat').addEventListener('click', () => {
+    if (!playHistory.length) { toast('还没有对话'); return; }
+    const blob = new Blob([chatMarkdown()], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `localai-chat-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('已导出为 Markdown');
+  });
+}
+if ($('btnCopyChat')) {
+  $('btnCopyChat').addEventListener('click', async () => {
+    if (!playHistory.length) { toast('还没有对话'); return; }
+    try {
+      await navigator.clipboard.writeText(chatMarkdown());
+      toast('已复制到剪贴板');
+    } catch (e) { toast('复制失败：' + e.message); }
+  });
+}
+
+/* ------------------------------------------------------- 配置检查点 */
+
+async function loadCheckpoints() {
+  const box = $('checkpointList');
+  if (!box) return;
+  try {
+    const r = await (await fetch('/api/config/checkpoints')).json();
+    if (!r.items.length) {
+      box.innerHTML = '<div class="empty"><b>还没有检查点。</b>改一次配置就会自动留一份。</div>';
+      return;
+    }
+    box.innerHTML = r.items.map((c) => `
+      <div class="mrow">
+        <div class="mi">
+          <div class="mn">${new Date(c.at).toLocaleString()}</div>
+          <div class="ms">${esc(c.file)} · ${Math.round(c.size / 1024)} KB</div>
+        </div>
+        <div class="ma"><button class="btn ghost small" data-restore="${esc(c.file)}">回滚到这里</button></div>
+      </div>`).join('');
+    for (const b of box.querySelectorAll('[data-restore]')) {
+      b.addEventListener('click', async () => {
+        if (!confirm(`确定要回滚到 ${b.dataset.restore} 吗？\n（当前配置会先另存一份，回滚错了还能再退回来）`)) return;
+        try {
+          await post('/api/config/restore', { file: b.dataset.restore });
+          toast('已回滚');
+          await loadState();
+          await loadCheckpoints();
+        } catch (e) { toast(e.message); }
+      });
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="issue error">读取失败：${esc(e.message)}</div>`;
+  }
+}
 
 /* ---------------------------------------------------------------- 修复中心 */
 
 const FIX_LEVEL = { ok: { text: '正常', cls: 'ok' }, warn: { text: '注意', cls: 'warn' }, error: { text: '有问题', cls: 'error' } };
+let lastDiagnoseAt = 0;
 
 function renderFix(report) {
   const list = $('fixList');
   const summary = $('fixSummary');
   if (!report) {
-    list.innerHTML = '<div class="empty">没有拿到检查结果</div>';
+    list.innerHTML = emptyBox('services');
     return;
   }
   const problems = (report.checks || []).filter((c) => c.level !== 'ok');
@@ -1487,6 +1927,12 @@ function renderFix(report) {
   summary.innerHTML = problems.length
     ? `<b>发现 ${problems.length} 个问题</b><span>${esc(problems.map((c) => c.label).join('、'))}</span>`
     : '<b>一切正常</b><span>这套配置现在是可以用的。</span>';
+
+  // 有问题就提醒一下，并给出「怎么排查」的引导入口
+  if (problems.length && report.at && report.at !== lastDiagnoseAt) {
+    lastDiagnoseAt = report.at;
+    notify(`体检发现 ${problems.length} 个问题`, problems.map((c) => c.label).join('、'), 'warn');
+  }
 
   list.innerHTML = (report.checks || []).map((c) => {
     const meta = FIX_LEVEL[c.level] || FIX_LEVEL.ok;
@@ -1548,6 +1994,7 @@ const COMMANDS = [
   { name: '模型体检', hint: '页面', run: () => gotoTab('health') },
   { name: '修复中心', hint: '页面', run: () => gotoTab('fix') },
   { name: '诊断与维护', hint: '页面', run: () => gotoTab('tools') },
+  { name: '服务', hint: '页面', run: () => gotoTab('services') },
   { name: '服务设置', hint: '页面', run: () => gotoTab('settings') },
 
   { name: '开始体检', hint: '动作', run: () => { gotoTab('health'); $('btnHealth') && $('btnHealth').click(); } },
@@ -1566,6 +2013,9 @@ const COMMANDS = [
   { name: '导出配置', hint: '动作', run: () => { gotoTab('settings'); $('btnExportCfg').click(); } },
   { name: '导入配置', hint: '动作', run: () => { gotoTab('settings'); $('btnImportCfg').click(); } },
   { name: '切换深色 / 浅色', hint: '动作', run: () => $('btnTheme').click() },
+  { name: '用不上时怎么排查', hint: '引导', run: () => tourOpen('broken') },
+  { name: '怎么换模型', hint: '引导', run: () => tourOpen('swap') },
+  { name: '重新看一遍使用引导', hint: '引导', run: () => tourOpen('first') },
   { name: '停止服务并释放显存', hint: '动作', run: () => { gotoTab('settings'); $('btnStopSvc').click(); } },
   { name: '启动工作台', hint: '动作', run: () => { gotoTab('settings'); $('btnStartSvc').click(); } },
 ];
@@ -1580,7 +2030,27 @@ let paletteHits = [];
 
 function paletteRender() {
   const q = $('paletteInput').value.trim().toLowerCase();
-  paletteHits = COMMANDS.filter((c) => !q || c.name.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q));
+  let hits = COMMANDS.filter((c) => !q || c.name.toLowerCase().includes(q) || c.hint.toLowerCase().includes(q));
+
+  // 已装的模型也能搜到：搜到就能直接拿去聊
+  const models = (state && state.models) || [];
+  for (const m of models) {
+    if (!q || m.name.toLowerCase().includes(q)) {
+      hits.push({
+        name: m.name,
+        hint: '已装模型',
+        run: () => {
+          gotoTab('play');
+          const sel = $('playModel');
+          if (sel) sel.value = m.name;
+          const input = $('playInput');
+          if (input) input.focus();
+        },
+      });
+    }
+  }
+
+  paletteHits = hits;
   paletteIndex = 0;
   $('paletteList').innerHTML = paletteHits.length
     ? paletteHits.map((c, i) => `<li class="${i === 0 ? 'on' : ''}" data-i="${i}">
@@ -1666,7 +2136,7 @@ function renderHealthResult(s, ok) {
   const box = $('healthChart');
   if (box) {
     if (!cats.length) {
-      box.innerHTML = '<div class="chart-empty">没有拿到分类明细</div>';
+      box.innerHTML = emptyBox('health');
     } else {
       const overall = Math.round(cats.reduce((n, c) => n + c.rate, 0) / cats.length * 100);
       const items = cats.map((c) => ({
@@ -1759,6 +2229,16 @@ function connectSSE() {
       loadTrend('bench').catch(() => {});
     } else if (ev.type === 'queue') {
       renderQueue(ev.state);
+      for (const it of (ev.state && ev.state.items) || []) {
+        if (it._notified) continue;
+        if (it.status === 'done') {
+          it._notified = true;
+          notify(`「${it.model}」下载完成`, '可以在「试用」页直接跟它对话了', 'ok');
+        } else if (it.status === 'error') {
+          it._notified = true;
+          notify(`「${it.model}」下载失败`, it.error || '', 'error');
+        }
+      }
     } else if (ev.type === 'health-item') {
       healthDone++;
       const pct = Math.min(100, Math.round((healthDone / HEALTH_TOTAL) * 100));
@@ -1771,6 +2251,9 @@ function connectSSE() {
       renderHealthResult(ev.summary, ev.ok);
       $('healthWrap').hidden = true;
       loadTrend('health').catch(() => {});
+      const rate = ev.summary && ev.summary.eval ? Math.round(ev.summary.eval.rate * 100) : null;
+      if (ev.ok) notify('体检全部达标', rate != null ? `质量基线通过率 ${rate}%` : '', 'ok');
+      else notify('体检有不达标项', '去「模型体检」看是哪一类掉了', 'warn');
     } else if (ev.type === 'health-error') {
       appendHealthLog('错误：' + ev.text);
       $('healthResult').innerHTML =

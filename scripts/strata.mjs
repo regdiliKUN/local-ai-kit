@@ -86,7 +86,27 @@ function json(res, code, value) {
   res.end(JSON.stringify(value));
 }
 
-export async function handleStrata(req, res, { cfg, ui, token, metrics }) {
+/**
+ * Strata 部署的服务控制。
+ *
+ * 以前 Strata 模式会把整个控制台「接管」掉 —— 只剩三个服务的启停，
+ * 模型管理这些全被挡掉。现在改成**并存**：控制台的通用功能照常可用，
+ * Strata 的服务状态作为一个额外的信息源并进来。
+ */
+
+/** 找出占用某个端口的进程号（0.0.0.0 / :: / 127.0.0.1 都算） */
+export function pidOnPort(port) {
+  try {
+    const out = execSync('netstat -ano -p TCP', { encoding: 'utf8' });
+    for (const line of out.split(/\r?\n/)) {
+      const m = line.match(/^\s*TCP\s+(?:0\.0\.0\.0|\[::\]|[\d.]+):(\d+)\s+\S+\s+LISTENING\s+(\d+)/);
+      if (m && Number(m[1]) === port) return Number(m[2]);
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export async function handleStrata(req, res, { cfg, root, ui, token, metrics }) {
   const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
   if (pathname === '/api/state' && req.method === 'GET') return json(res, 200, await strataState(cfg));
   if (pathname === '/api/service' && req.method === 'POST') {
@@ -102,11 +122,12 @@ export async function handleStrata(req, res, { cfg, ui, token, metrics }) {
     } catch (error) { return json(res, 400, { error: error.message }); }
     finally { operation = null; }
   }
-  // Block Ollama-specific APIs while using Strata, including model downloads and profile edits.
-  if (pathname.startsWith('/api/')) return json(res, 409, { error: '当前为 Strata 部署，请使用工作台维护模型与配置' });
-  // Strata 模式只提供这几张页面：控制台本体、它的脚本和图表库。
-  // 注意用 resolveStaticPath 校验，别让 ../ 之类的路径穿出去。
-  if (req.method === 'GET' && ['/', '/strata.html', '/strata.js', '/charts.js'].includes(pathname)) {
+  // 其余的 /api/* 不再拦截 —— 控制台的通用功能（模型管理、测速、体检……）
+  // 在 Strata 部署下同样能用：Strata 走自己的引擎，但 Ollama 也可能装着模型，
+  // 那些功能对 Ollama 那部分是真的有用。
+
+  // 独立访问 /strata.html 时仍然提供这页（给只想看服务状态的人用）
+  if (req.method === 'GET' && ['/strata.html', '/strata.js', '/charts.js'].includes(pathname)) {
     const file = pathname === '/' ? 'strata.html' : pathname.replace(/^\/+/, '');
     const full = resolveStaticPath(ui, file);
     if (!full || !fs.existsSync(full)) return json(res, 404, { error: 'not found' });

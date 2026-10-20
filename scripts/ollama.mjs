@@ -5,6 +5,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 
@@ -149,4 +150,35 @@ export async function modelCapabilities(model) {
 /** 模型名校验：只允许 Ollama 合法的名字，防止注入到命令行 / YAML 配置 */
 export function isValidModelName(s) {
   return typeof s === 'string' && s.length <= 120 && /^[a-z0-9][a-z0-9._\-/]*(:[a-z0-9._\-]+)?$/i.test(s);
+}
+
+/**
+ * 找出 Ollama 真正在用的模型目录。
+ *
+ * 为什么需要它：配置里的 modelDir 可能是别的部署留下的（比如 Strata 的数据目录），
+ * 而控制台的「模型管理」「空间分析」要对着**实际装着模型的那个目录**才有意义。
+ * 所以这里不信任配置，而是从环境变量和常见位置里找一个真的有模型的目录。
+ */
+export function resolveModelDir(explicit) {
+  const candidates = [];
+  if (explicit) candidates.push(explicit);
+  if (process.env.OLLAMA_MODELS) candidates.push(process.env.OLLAMA_MODELS);
+  const home = os.homedir();
+  candidates.push(path.join(home, '.ollama', 'models'));
+  for (const letter of ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']) {
+    candidates.push(`${letter}:\\ollama\\models`);
+  }
+
+  const seen = new Set();
+  for (const dir of candidates) {
+    if (!dir) continue;
+    const key = String(dir).toLowerCase().replace(/[\\/]+$/, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      // 只有真的有 manifest 目录才算「装着模型」
+      if (fs.existsSync(path.join(dir, 'manifests'))) return dir;
+    } catch { /* ignore */ }
+  }
+  return explicit || process.env.OLLAMA_MODELS || '';
 }

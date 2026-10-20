@@ -21,12 +21,11 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { loadConfig } from './config.mjs';
-import { handleStrata } from './strata.mjs';
-import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv } from './ollama.mjs';
+import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
+import { handleStrata, strataState, runStrataAction } from './strata.mjs';
+import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
-import { saveConfig } from './config.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
 import { collectMetrics } from './metrics.mjs';
 import { createHistory } from './history.mjs';
@@ -614,7 +613,7 @@ async function buildMetrics() {
   if (now - metricsAt < 1000 && lastMetrics) {
     current = lastMetrics;
   } else {
-    current = await collectMetrics({ modelDir: cfg.modelDir || '' });
+    current = await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir) });
     lastMetrics = current;
     metricHistory.push({
       at: current.at,
@@ -660,22 +659,83 @@ async function buildState() {
   const models = running ? await listModels() : [];
   const settings = readSettings();
   const disks = detectDisks();
+  // 模型目录以「Ollama 实际在用的那个」为准 —— 配置里的 modelDir 可能是别的部署留下的
+  const modelDir = resolveModelDir(cfg.modelDir);
   return {
     root: ROOT,
+    backend: cfg.backend || 'ollama',
     model: cfg.model || '',
-    modelDir: cfg.modelDir || '',
+    modelDir,
+    configModelDir: cfg.modelDir || '',
     contextWindow: cfg.contextWindow || 8192,
     running,
     models: models || [],
     settings,
     disks: disks.map((d) => ({ letter: d.letter, freeGB: d.freeGB, totalGB: d.totalGB })),
-    modelDirFreeGB: cfg.modelDir ? freeSpaceGB(cfg.modelDir) : null,
+    modelDirFreeGB: modelDir ? freeSpaceGB(modelDir) : null,
     busy,
     queue: pullQueue.snapshot(),
     bench: lastBench,
     health: lastHealth,
     logPath: path.join(os.tmpdir(), 'localai-console.log'),
+    selfHeal: healStore.enabled,
+    // Strata 部署时把三个服务的信息一并带出来（并入同一个界面）
+    strata: cfg.backend === 'strata' ? await strataState(cfg) : null,
   };
+}
+
+/* ------------------------------------------------------------ 服务自愈 */
+
+/**
+ * 看门狗：Ollama 意外退出时自动把它拉起来。
+ *
+ * 常见场景：显卡驱动更新后进程崩了、用户误关了托盘程序、系统休眠后没恢复。
+ * 这时候工作台会一直报「连不上」，用户往往不知道该做什么。
+ *
+ * 默认关闭 —— 擅自拉起服务可能不是用户想要的（比如他就是想省显存）。
+ */
+const healStore = { enabled: false };
+let healTimer = null;
+let lastOllamaUp = null;
+
+function loadHealSetting() {
+  try {
+    const list = readList('notes');
+    const item = list.find((n) => n && n.kind === 'selfheal');
+    if (item) healStore.enabled = !!item.enabled;
+  } catch { /* ignore */ }
+}
+
+function saveHealSetting(enabled) {
+  healStore.enabled = !!enabled;
+  try {
+    const list = readList('notes').filter((n) => !(n && n.kind === 'selfheal'));
+    list.push({ kind: 'selfheal', enabled: healStore.enabled, at: Date.now() });
+    writeList('notes', list);
+  } catch { /* ignore */ }
+}
+
+async function healTick() {
+  const up = await isUp(`${OLLAMA_BASE}/api/version`, 1500);
+  if (lastOllamaUp === null) lastOllamaUp = up;
+  if (lastOllamaUp && !up) {
+    // 之前是活的，现在没了 —— 尝试拉起来
+    logLine('[自愈] 检测到 Ollama 掉了，正在重启');
+    const ok = await ensureOllama();
+    logLine(ok ? '[自愈] Ollama 已重启' : '[自愈] 重启失败');
+    if (ok) broadcast({ type: 'notice', text: 'Ollama 意外退出，已自动重启', tone: 'warn' });
+    else broadcast({ type: 'notice', text: 'Ollama 意外退出，自动重启没成功 —— 去「修复中心」看看', tone: 'error' });
+  }
+  lastOllamaUp = up;
+}
+
+function startHealWatchdog() {
+  if (healTimer) clearInterval(healTimer);
+  healTimer = null;
+  if (!healStore.enabled) return;
+  lastOllamaUp = null;
+  healTimer = setInterval(() => { healTick().catch(() => {}); }, 15000);
+  if (typeof healTimer.unref === 'function') healTimer.unref();
 }
 
 /* ------------------------------------------------------------------ 路由 */
@@ -726,7 +786,7 @@ const server = createSafeServer(async (req, res) => {
       : buildReport({
         root: ROOT,
         cfg,
-        metrics: await collectMetrics({ modelDir: cfg.modelDir || '' }),
+        metrics: await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir) }),
         diagnose: await diagnose({ root: ROOT, cfg, kitDir: ROOT }),
         health: lastHealth,
         bench: lastBench,
@@ -742,16 +802,37 @@ const server = createSafeServer(async (req, res) => {
     return res.end(text);
   }
 
+  /* ------------------------------------------------- Strata 服务（并存模式） */
+  // Strata 部署不再「接管」控制台，而是把它的三个服务并进来一起看。
   if (cfg.backend === 'strata') {
-    return handleStrata(req, res, {
-      cfg, root: ROOT, ui: UI, token: TOKEN,
-      metrics: () => buildMetrics(),
-    });
+    if (p === '/api/strata/state' && req.method === 'GET') {
+      return json(res, 200, await strataState(cfg));
+    }
+    if (p === '/api/strata/service' && req.method === 'POST') {
+      const body = await readBody(req);
+      const action = String(body.action || '').trim();
+      if (!['engine', 'webui', 'workbench', 'stop'].includes(action)) {
+        return json(res, 400, { error: '未知操作' });
+      }
+      try {
+        const result = await runStrataAction(cfg, action);
+        return json(res, result.ok ? 200 : 409, result);
+      } catch (e) {
+        return json(res, 400, { error: String(e.message || e) });
+      }
+    }
+    // 这两件事在 Strata 部署下会写坏东西，直接挡住并说清楚原因
+    if (p === '/api/config' && req.method === 'POST') {
+      return json(res, 409, { error: '当前是 Strata 部署，工作台配置由 Strata 自己管理，不能在这里改。' });
+    }
+    if (p === '/api/service' && req.method === 'POST') {
+      return json(res, 409, { error: '当前是 Strata 部署，服务启停请用「服务」页。' });
+    }
   }
 
   /* ---------------------------------------------------------- 空间分析 */
   if (p === '/api/space') {
-    const dir = cfg.modelDir || '';
+    const dir = resolveModelDir(cfg.modelDir);
     const primary = analyzeModelDir(dir);
     // 全盘扫一遍：模型可能装在别的盘上（比如换过机器、或 Ollama 装在 C 盘）
     const others = scanAllModelDirs(detectDisks(), [dir]).filter((d) => d.dir !== primary.dir);
@@ -863,7 +944,7 @@ const server = createSafeServer(async (req, res) => {
 
   /* ---------------------------------------------------------- 清理残留 */
   if (p === '/api/cleanup' && req.method === 'GET') {
-    const dir = cfg.modelDir || '';
+    const dir = resolveModelDir(cfg.modelDir);
     const found = findOrphanBlobs(dir);
     return json(res, 200, {
       dir,
@@ -876,7 +957,7 @@ const server = createSafeServer(async (req, res) => {
   if (p === '/api/cleanup' && req.method === 'POST') {
     const body = await readBody(req);
     const dryRun = body.dryRun !== false;
-    const dir = cfg.modelDir || '';
+    const dir = resolveModelDir(cfg.modelDir);
     if (!dir) return json(res, 400, { error: '还没配置模型目录' });
     const out = cleanupOrphanBlobs(dir, { dryRun });
     return json(res, 200, { ok: true, dryRun, ...out });
@@ -887,6 +968,38 @@ const server = createSafeServer(async (req, res) => {
     const q = String(url.searchParams.get('q') || '');
     const out = await searchLibrary(q);
     return json(res, 200, { query: q, ...out });
+  }
+
+  /* ------------------------------------------------------ 配置检查点 */
+  if (p === '/api/config/checkpoints' && req.method === 'GET') {
+    const list = listBackups(ROOT).map((b) => ({
+      file: path.basename(b.file),
+      at: b.mtime,
+      size: (() => { try { return fs.statSync(b.file).size; } catch { return 0; } })(),
+    }));
+    return json(res, 200, { items: list, current: path.basename(path.join(ROOT, '配置.json')) });
+  }
+
+  if (p === '/api/config/restore' && req.method === 'POST') {
+    const body = await readBody(req);
+    const name = path.basename(String(body.file || ''));
+    if (!name || !name.startsWith('配置.json.') || !name.endsWith('.bak')) {
+      return json(res, 400, { error: '备份文件名不合法' });
+    }
+    const file = path.join(ROOT, name);
+    if (!fs.existsSync(file)) return json(res, 404, { error: '找不到这个备份' });
+    try {
+      // 回滚前先给当前状态也留一份，错了还能再退回来
+      backupConfig(ROOT);
+      const raw = fs.readFileSync(file, 'utf8');
+      const parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+      saveConfig(ROOT, parsed);
+      for (const key of Object.keys(cfg)) delete cfg[key];
+      Object.assign(cfg, sanitizeConfig(parsed));
+      return json(res, 200, { ok: true, restored: name, config: cfg });
+    } catch (e) {
+      return json(res, 400, { error: `回滚失败：${e.message}` });
+    }
   }
 
   /* ------------------------------------------------------------ 历史记录 */
@@ -1010,7 +1123,7 @@ const server = createSafeServer(async (req, res) => {
     if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
     busy = 'bench';
     json(res, 202, { started: true });
-    const gpu = (await collectMetrics({ modelDir: cfg.modelDir || '', sampleMs: 0 })).gpu[0];
+    const gpu = (await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir), sampleMs: 0 })).gpu[0];
     runBenchmark({
       model,
       runs: Math.max(1, Math.min(5, Number(body.runs) || 3)),
@@ -1117,7 +1230,17 @@ const server = createSafeServer(async (req, res) => {
     const out = {};
     if (typeof body.autostart === 'boolean') out.autostart = setAutostart(body.autostart);
     if (typeof body.lanShare === 'boolean') out.lanShare = setLanShare(body.lanShare);
-    return json(res, 200, { ok: true, ...out, settings: readSettings() });
+    if (body.ensureOllama) {
+      // 「服务」页里点一下就把 Ollama 拉起来
+      const ok = await ensureOllama();
+      out.ollama = { ok, error: ok ? '' : '找不到 Ollama，或它没能启动' };
+    }
+    if (typeof body.selfHeal === 'boolean') {
+      saveHealSetting(body.selfHeal);
+      startHealWatchdog();
+      out.selfHeal = { enabled: healStore.enabled };
+    }
+    return json(res, 200, { ok: true, ...out, settings: readSettings(), selfHeal: healStore.enabled });
   }
 
   if (p === '/api/service' && req.method === 'POST') {
@@ -1131,7 +1254,7 @@ const server = createSafeServer(async (req, res) => {
   if (p === '/api/open-folder' && req.method === 'POST') {
     const body = await readBody(req);
     if (body.which === 'models') {
-      const dir = cfg.modelDir || '';
+      const dir = resolveModelDir(cfg.modelDir);
       if (!dir || !fs.existsSync(dir)) return json(res, 400, { error: `模型目录不存在：${dir || '（未配置）'}` });
       return json(res, 200, openFolder(dir));
     }
@@ -1188,6 +1311,8 @@ function listen(port) {
 
 (async () => {
   initLog();
+  loadHealSetting();
+  startHealWatchdog();
   let port = 7790;
   for (; port < 7800; port++) {
     try { await listen(port); break; } catch { /* 换一个 */ }
@@ -1206,7 +1331,7 @@ function listen(port) {
   console.log('==================================================');
   console.log('');
   console.log(cfg.backend === 'strata'
-    ? '  已接入 Strata：查看引擎 / WebUI / dsh 状态，启动或停止服务。'
+    ? '  已接入 Strata：引擎 / WebUI / dsh 状态与启停，加上 Ollama 模型管理。'
     : '  管理模型、上下文、开机自启和局域网共享，启动或停止服务。');
   console.log('');
   console.log('  浏览器没自动打开？把下面这个地址复制到浏览器：');
