@@ -36,6 +36,7 @@ const LIMITS = {
   chat: 20,
   templates: 50,
   notes: 100,
+  usage: 120,
 };
 
 function ensureDir() {

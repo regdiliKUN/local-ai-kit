@@ -29,6 +29,7 @@
       <li data-tab="fix"><span class="dot"></span><span class="label">修复中心</span></li>
       <li data-tab="tools"><span class="dot"></span><span class="label">诊断与维护</span></li>
       <li data-tab="services"><span class="dot"></span><span class="label">服务</span></li>
+      <li data-tab="help"><span class="dot"></span><span class="label">帮助</span></li>
       <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
 
@@ -93,6 +94,11 @@
         <div class="panel-b" id="dashVram"><div class="chart-empty">读取中…</div></div>
       </div>
 
+      <h2 class="sec-h">最近用了多少</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashUsage"><div class="chart-empty">在「试用」页聊过之后这里会有记录</div></div>
+      </div>
+
       <h2 class="sec-h">机器信息</h2>
       <div class="summary" id="dashSystem"></div>
     </section>
@@ -114,6 +120,7 @@
           <option value="name">按名称</option>
           <option value="date">按安装时间（新在前）</option>
         </select>
+        <button class="btn ghost small" id="btnBatchDel" disabled>批量删除</button>
         <span class="list-count" id="modelFilterCount"></span>
       </div>
 
@@ -309,6 +316,7 @@
         <textarea id="playInput" rows="2" placeholder="输入消息，Ctrl+Enter 发送"></textarea>
         <button class="btn primary" id="btnPlay">发送</button>
         <button class="btn ghost" id="btnPlayStop" hidden>停止</button>
+        <button class="btn ghost" id="btnPlayRegen" hidden>重新生成</button>
       </div>
       <div class="chat-stats" id="chatStats"></div>
       <div class="chat-stats" id="ctxUsage"></div>
@@ -376,6 +384,7 @@
       <div class="row-actions">
         <button class="btn ghost small" id="btnClearBench">清空测速历史</button>
         <button class="btn ghost small" id="btnCsvBench">导出 CSV</button>
+        <button class="btn ghost small" id="btnMdBench">导出 Markdown</button>
         <span class="row-hint" id="benchHistoryPath"></span>
       </div>
 
@@ -473,6 +482,7 @@
       <div class="row-actions">
         <button class="btn ghost small" id="btnClearHealth">清空体检历史</button>
         <button class="btn ghost small" id="btnCsvHealth">导出 CSV</button>
+        <button class="btn ghost small" id="btnMdHealth">导出 Markdown</button>
         <span class="row-hint" id="healthHistoryPath"></span>
       </div>
 
@@ -534,6 +544,32 @@
 
       <div class="row-actions" id="svcActions"></div>
       <p class="row-hint" id="svcHint"></p>
+    </section>
+
+    <!-- ============ 帮助 ============ -->
+    <section class="view" id="view-help" hidden>
+      <h1>帮助</h1>
+      <div class="guide">
+        <span class="guide-n">五分钟</span>
+        <span>第一次用的话，读完这一页就够了。别的都能自己摸索。</span>
+      </div>
+
+      <div class="help-grid" id="helpGrid"></div>
+
+      <h2 class="sec-h">遇到问题按这个顺序查</h2>
+      <ol class="help-steps">
+        <li><b>「修复中心」→ 重新检查</b> —— 它会直接告诉你哪一环断了，很多问题一键就好。</li>
+        <li><b>「诊断与维护」→ 检查网络</b> —— 模型下不来，八成是网络或代理。</li>
+        <li><b>「诊断与维护」→ 下载诊断报告</b> —— 把那个文件发给别人，对方就能直接看到问题在哪。</li>
+        <li><b>看日志</b> —— 服务设置页里点「查看日志」，或在 <code>%TEMP%\localai-console.log</code>。</li>
+      </ol>
+
+      <h2 class="sec-h">完整文档</h2>
+      <p class="lead">
+        项目根目录里有 <code>使用说明.html</code>（双击用浏览器打开）、
+        <code>README.md</code> 和 <code>CHANGELOG.md</code>。
+        在线版：<a class="hint-link" href="https://github.com/regdiliKUN/local-ai-kit" target="_blank" rel="noreferrer">GitHub 仓库</a>
+      </p>
     </section>
 
     <!-- ============ 修复中心 ============ -->
@@ -641,6 +677,20 @@
       <p class="lead">点一下键位再按新键，就能改。改完立刻生效。</p>
       <div id="shortcutList" class="stack"></div>
 
+      <h2 class="sec-h">界面大小</h2>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">字号缩放</div>
+            <div class="s">字太小看不清就调大一点。浏览器缩放（Ctrl +）也可以，但只影响这个页面。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="range" id="zoomRange" min="90" max="130" step="5" value="100" style="width:150px">
+            <span class="ctx-unit" id="zoomValue">100%</span>
+          </div>
+        </div>
+      </div>
+
       <h2 class="sec-h">卸载</h2>
       <div class="row-actions">
         <button class="btn ghost small danger" id="btnUninstall">卸载本地 AI</button>
@@ -666,6 +716,14 @@
         导出会把「模型、模型目录、上下文、压缩参数」和 dsh 的两个 profile 一起存成一个 JSON。
         换电脑时把那个文件带过去，导入就能还原。
       </p>
+
+      <h2 class="sec-h">离线安装包</h2>
+      <p class="lead">给没网的机器装：把整套打成一个 zip，拷过去解压双击就行。</p>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnPackage">生成离线安装包</button>
+        <label class="check"><input type="checkbox" id="pkgWithNode"><span>带上便携 Node（目标机器没 Node 时需要）</span></label>
+      </div>
+      <p class="row-hint" id="pkgHint">会放到 %TEMP%\local-ai-offline 目录。</p>
     </section>
 
   </main>

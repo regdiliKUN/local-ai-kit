@@ -57,6 +57,14 @@
         <button class="btn ghost small" id="btnRedetect">重新检测</button>
         <span class="row-hint">刚装了显卡驱动 / Ollama？点这里重新检测一次。</span>
       </div>
+
+      <div class="quickinstall">
+        <div class="qi-text">
+          <b>不想选？直接按推荐装</b>
+          <span id="qiHint">用检测到的推荐值一步到位。选错了还能退回来改。</span>
+        </div>
+        <button class="btn primary" id="btnQuickInstall">按推荐装</button>
+      </div>
     </section>
 
     <!-- 2. 选择模型 -->
@@ -218,8 +226,10 @@
       <div class="row-actions">
         <button class="btn primary" id="btnLaunch">立即启动工作台</button>
         <button class="btn ghost" id="btnOpenFolder">打开安装目录</button>
+        <button class="btn ghost" id="btnSelfCheck">装完跑一次体检</button>
       </div>
       <p class="row-hint" id="launchHint"></p>
+      <div id="selfCheckResult"></div>
     </section>
 
   </main>

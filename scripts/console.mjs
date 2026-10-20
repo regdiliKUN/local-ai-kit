@@ -584,11 +584,20 @@ function runHealth(quick) {
  * 控制台自己的日志文件。
  *
  * 用户报问题时最需要的就是这个：把 %TEMP%\localai-console.log 发过来就行。
+ * 超过 2MB 就轮转一份（只留最新 + 上一份），免得日志无限涨。
  */
 const LOG_FILE = path.join(os.tmpdir(), 'localai-console.log');
+const LOG_MAX_BYTES = 2 * 1024 * 1024;
 let logStream = null;
 function initLog() {
   try {
+    // 轮转：太大就把旧的挪成 .1
+    try {
+      if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > LOG_MAX_BYTES) {
+        fs.rmSync(`${LOG_FILE}.1`, { force: true });
+        fs.renameSync(LOG_FILE, `${LOG_FILE}.1`);
+      }
+    } catch { /* ignore */ }
     logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
     logStream.write(`\n===== 本地 AI 控制台 ${new Date().toLocaleString()} =====\n`);
   } catch { logStream = null; }
@@ -1007,6 +1016,105 @@ const server = createSafeServer(async (req, res) => {
     } catch (e) {
       return json(res, 400, { error: `回滚失败：${e.message}` });
     }
+  }
+
+  /* ---------------------------------------------------- 离线安装包 */
+  if (p === '/api/package' && req.method === 'POST') {
+    const body = await readBody(req);
+    const withNode = !!body.withNode;
+    const outDir = path.join(os.tmpdir(), 'local-ai-offline');
+    try {
+      const { execFileSync } = await import('node:child_process');
+      const script = path.join(ROOT, 'scripts', 'package-offline.mjs');
+      if (!fs.existsSync(script)) return json(res, 400, { error: '当前部署里没有打包脚本' });
+      const args = [script, outDir];
+      if (withNode) args.push('--with-node');
+      const out = execFileSync(process.execPath, args, { encoding: 'utf8', timeout: 300000 });
+      const zipMatch = out.match(/压缩包：(.+?)（/);
+      return json(res, 200, {
+        ok: true,
+        zip: zipMatch ? zipMatch[1].trim() : null,
+        dir: outDir,
+        output: out.trim(),
+      });
+    } catch (e) {
+      return json(res, 500, { error: `打包失败：${e.message}` });
+    }
+  }
+
+  /* ------------------------------------------------------------ 模型别名 */
+  // Ollama 的 /api/copy 会新建一份清单指向同样的 blob —— 不占额外磁盘
+  if (p === '/api/alias' && req.method === 'POST') {
+    const body = await readBody(req);
+    const from = String(body.from || '').trim();
+    const to = String(body.to || '').trim();
+    if (!isValidModelName(from) || !isValidModelName(to)) {
+      return json(res, 400, { error: '模型名不合法，例如 qwen3:8b' });
+    }
+    if (from === to) return json(res, 400, { error: '新名字不能和原名一样' });
+    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行' });
+    try {
+      const r = await fetch(`${OLLAMA_BASE}/api/copy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: from, destination: to }),
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => '');
+        throw new Error(`HTTP ${r.status} ${t}`.trim());
+      }
+      modelsCache = { at: 0, items: null };      // 让列表重新取一次
+      return json(res, 200, { ok: true, from, to, message: `已把 ${from} 复制为 ${to}（不占额外空间）` });
+    } catch (e) {
+      return json(res, 400, { error: String(e.message || e) });
+    }
+  }
+
+  /* ------------------------------------------------------------ 用量统计 */
+  if (p === '/api/usage' && req.method === 'POST') {
+    const body = await readBody(req);
+    const tokens = Number(body.tokens) || 0;
+    if (tokens <= 0) return json(res, 400, { error: 'tokens 不对' });
+    const day = new Date().toISOString().slice(0, 10);
+    const list = readList('usage');
+    const row = list.find((u) => u.day === day)
+      || { day, tokens: 0, calls: 0, models: {} };
+    row.tokens += tokens;
+    row.calls += 1;
+    const model = String(body.model || '未知');
+    row.models[model] = (row.models[model] || 0) + tokens;
+    writeList('usage', [...list.filter((u) => u.day !== day), row].sort((a, b) => a.day.localeCompare(b.day)));
+    return json(res, 200, { ok: true, day: row });
+  }
+
+  if (p === '/api/history.md' && req.method === 'GET') {
+    const kind = String(url.searchParams.get('kind') || 'health');
+    const items = readList(kind);
+    const lines = [`# 模型${kind === 'bench' ? '测速' : '体检'}历史`, '', `导出于 ${new Date().toLocaleString()}`, ''];
+    if (kind === 'bench') {
+      lines.push('| 时间 | 模型 | 生成速度(t/s) | 读提示词(t/s) |', '|---|---|---|---|');
+      for (const it of items) {
+        lines.push(`| ${new Date(it.at).toLocaleString()} | ${it.model} | ${it.gen} | ${it.prompt} |`);
+      }
+    } else {
+      lines.push('| 时间 | 模型 | 通过 | 总数 | 通过率 | 耗时(秒) |', '|---|---|---|---|---|---|');
+      for (const it of items) {
+        lines.push(`| ${new Date(it.at).toLocaleString()} | ${it.model} | ${it.passed} | ${it.total} | `
+          + `${it.rate == null ? '' : `${Math.round(it.rate * 100)}%`} | ${it.elapsed || ''} |`);
+      }
+    }
+    const name = `localai-${kind}-${new Date().toISOString().slice(0, 10)}.md`;
+    applySecurityHeaders(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/markdown; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${name}"`,
+      'Cache-Control': 'no-store',
+    });
+    return res.end(lines.join('\n'));
+  }
+
+  if (p === '/api/usage' && req.method === 'GET') {
+    return json(res, 200, { items: readList('usage') });
   }
 
   /* ------------------------------------------------------------ 历史记录 */

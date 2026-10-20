@@ -288,6 +288,10 @@ padding:14px 28px;font-size:13.5px;color:var(--dim);position:sticky;top:0;backdr
 <p>  下载的 Node.js 和 Ollama 安装包会先校验 SHA256 / 数字签名，对不上就不安装</p>
 <hr>
 <h2>更新日志</h2>
+<h3>v1.7.0</h3>
+<p><strong>这一版把「装」这一端也补上了，再加一堆日常省事的小功能。</strong></p>
+<ul><li><strong>按推荐装</strong>：检测页一个按钮，用推荐值直接开始装，跳过选模型、选盘两步</li><li><strong>装完跑一次体检</strong>：完成页一个按钮，20 秒知道模型能不能用</li><li>试用页<strong>重新生成</strong>；模型管理<strong>批量删除</strong>与<strong>起别名</strong>（不占额外磁盘）</li><li>系统概览新增<strong>用量统计</strong>（每天消耗多少 token）</li><li>服务设置新增<strong>离线安装包</strong>：一键打成 zip，拷到没网的机器上解压就能装</li><li>体检历史可导出 <strong>Markdown</strong>（能直接贴进报告）</li><li>概览页新增 <strong>GPU 温度告警</strong>（过热会降速，容易被误读成「模型变笨了」）</li><li>诊断新增<strong>开机自启体检</strong>：自启项指向的程序被删了，能查出来并一键清掉</li><li>新增<strong>帮助页</strong>：12 张卡片，点一下就跳到对应页面</li></ul>
+<p>单元测试从 48 个增加到 50 个。</p>
 <h3>v1.6.0</h3>
 <p><strong>这一版让两种部署合一，界面也会「说话」了。</strong></p>
 <ul><li><strong>统一控制台</strong>：Strata 与 Ollama 两种部署共用同一个界面，十一个页面全部可用（以前 Strata 模式会把控制台「接管」掉，模型管理这些全被挡掉）</li><li>新增「服务」页：引擎 / WebUI / dsh / Ollama 的状态与启停</li><li>新增<strong>场景化引导</strong>（第一次用 / 出问题时 / 想换模型）与<strong>空状态引导</strong></li><li>新增<strong>通知中心</strong>（侧栏铃铛）与<strong>错误码表</strong>（9 类常见问题翻译成人话 + 一键跳转）</li><li>新增四个图表：显存分账瀑布图、上下文环形图、体检日历热力图、模型体积对比条</li><li>模型库搜索支持按能力筛选与排序；对话可导出 Markdown</li><li>测速结果与历史最佳对比；配置检查点可一键回滚</li><li>新增服务自愈开关、首页快速操作条、快捷键自定义、按时段主题、打印样式</li><li>修掉 Strata 模式下模型目录认错的问题；首屏打开从 400ms 降到 210ms</li></ul>

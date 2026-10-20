@@ -136,6 +136,59 @@ function updateNext() {
 
 function footerMsg(s) { $('footerMsg').textContent = s || ''; }
 
+/* ---------------------------------------------------------- 一键按推荐装 */
+
+/**
+ * 「按推荐装」：用检测到的推荐值直接开始装，跳过选模型、选盘两步。
+ *
+ * 很多用户其实不知道该选哪个 —— 与其让他们在一堆卡片里犹豫，
+ * 不如给一个「就这样」的按钮。选错了还能退回来改。
+ */
+function quickInstall() {
+  const d = state.detect;
+  if (!d) { toast('还没检测完，等一下'); return; }
+  const errs = d.issues.filter((i) => i.level === 'error');
+  if (errs.length) {
+    toast('有必须先解决的问题：' + errs[0].text);
+    return;
+  }
+  state.model = d.suggested.model;
+  state.modelDir = d.suggested.modelDir;
+  state.contextWindow = d.suggested.contextWindow;
+  state.quick = true;
+  selectModelCard(state.model);
+  selectDisk(state.modelDir);
+  go('location');
+  footerMsg(`按推荐配置：${state.model} · 窗口 ${Math.round(state.contextWindow / 1024)}K`);
+  updateNext();
+  toast('已按推荐填好，点「开始安装」即可');
+}
+
+/** 装完自动跑一次体检，告诉我现在是什么状态 */
+function selfCheckAfterInstall() {
+  const btn = $('btnSelfCheck');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = '体检中…';
+    try {
+      const r = await (await fetch('/api/selfcheck', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-LocalAI-Token': window.__TOKEN__ || '' },
+        body: JSON.stringify({ model: state.model || '' }),
+      })).json();
+      $('selfCheckResult').innerHTML = r.started
+        ? '<div class="issue info"><div class="issue-main">体检已启动</div>'
+          + '<div class="issue-hint">大约 20 秒。装完想立刻知道状态，就点一下这里。</div></div>'
+        : `<div class="issue error">体检没能启动：${esc(r.error || '未知原因')}</div>`;
+    } catch (e) {
+      $('selfCheckResult').innerHTML = `<div class="issue error">体检没能启动：${esc(e.message)}</div>`;
+    }
+    btn.disabled = false;
+    btn.textContent = '装完跑一次体检';
+  });
+}
+
 /* -------------------------------------------------------------- 环境检测 */
 
 async function loadDetect(force = false) {
@@ -209,6 +262,14 @@ function renderDetect(d) {
         <div class="issue-main">${esc(i.text)}</div>
         ${i.hint ? `<div class="issue-hint">→ ${esc(i.hint)}</div>` : ''}
       </div>`).join('')}</div>` : '');
+
+  // 「按推荐装」把推荐值写清楚，用户点之前就知道会装什么
+  const hint = $('qiHint');
+  if (hint && d.suggested) {
+    hint.innerHTML = `会装 <b>${esc(d.suggested.model)}</b>，窗口 <b>${Math.round((d.suggested.contextWindow || 8192) / 1024)}K</b>`
+      + (d.suggested.modelDir ? `，放在 <code>${esc(d.suggested.modelDir)}</code>` : '')
+      + '。选错了还能退回来改。';
+  }
 
   const errs = d.issues.filter((i) => i.level === 'error').length;
   footerMsg(errs ? '有必须先解决的问题，请看上面的红框' : '检测完成 —— 点右下角「继续」');
@@ -773,6 +834,33 @@ async function copyDiagnostics() {
 /* ---------------------------------------------------------------- 事件 */
 
 function onEvent(ev) {
+  // 装完自检：单独一条线，不影响安装进度
+  if (ev.type === 'selfcheck-item') {
+    const box = $('selfCheckResult');
+    if (box) {
+      const done = box.querySelectorAll('.sc-item').length;
+      box.innerHTML = `<div class="issue info"><div class="issue-main">体检进行中…（${done + 1} 题）</div>
+        <div class="issue-hint">21 道质量题，跑完就知道模型能不能用了。</div></div>`;
+    }
+    return;
+  }
+  if (ev.type === 'selfcheck-done') {
+    const box = $('selfCheckResult');
+    const s = ev.summary || {};
+    const rows = ((s.verdicts) || []).map((v) =>
+      `<div class="row"><span class="k">${v.ok ? '✅' : '❌'} ${esc(v.name)}</span><span class="v">${esc(v.detail)}</span></div>`).join('');
+    if (box) {
+      box.innerHTML = `<div class="summary">${rows || '<div class="row"><span class="k">—</span><span class="v">没有结果</span></div>'}</div>`;
+    }
+    toast(ev.ok ? '体检通过，装好了就能用' : '体检有不达标项，去控制台看看');
+    return;
+  }
+  if (ev.type === 'selfcheck-error') {
+    const box = $('selfCheckResult');
+    if (box) box.innerHTML = `<div class="issue error"><div class="issue-main">体检失败</div><div class="issue-hint">${esc(ev.text || '')}</div></div>`;
+    return;
+  }
+
   if (ev.type === 'begin') {
     resetInstallUI();
     if (!state.autoJumped && ['detect', 'model', 'location'].includes(state.step)) {
@@ -936,6 +1024,11 @@ function setupButtons() {
     footerMsg('正在重新检测…');
     await loadDetect(true);
   });
+
+  if ($('btnQuickInstall')) {
+    $('btnQuickInstall').addEventListener('click', quickInstall);
+  }
+  selfCheckAfterInstall();
 
   $('errRetry').addEventListener('click', async () => {
     footerMsg('正在重试安装…');

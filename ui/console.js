@@ -65,6 +65,7 @@ for (const li of document.querySelectorAll('#tabs li')) {
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
     if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
     if (li.dataset.tab === 'settings') { loadCheckpoints().catch(() => {}); renderShortcuts(); }
+    if (li.dataset.tab === 'help') renderHelp();
   });
 }
 
@@ -399,6 +400,12 @@ function renderMetrics(data) {
     : '没有检测到独立显卡';
   $('gVramSpark').innerHTML = Chart.sparkline(h.vram || [], { width: 150, height: 34, min: 0, max: 100 });
 
+  // 温度 / 功耗告警：过热会掉速甚至崩，值得单独提醒
+  const warn = gpuAlert(gpu0);
+  if (warn) {
+    $('dashStamp').innerHTML = `更新于 ${new Date(m.at || Date.now()).toLocaleTimeString()} <span class="alert-chip">${esc(warn)}</span>`;
+  }
+
   const cpuPct = m.cpu ? m.cpu.usage : null;
   $('gCpu').innerHTML = cpuPct == null ? '—' : `${cpuPct}<span class="unit">%</span>`;
   $('gCpuSub').textContent = m.cpu ? `${m.cpu.model} · ${m.cpu.cores} 核` : '未知';
@@ -432,6 +439,7 @@ function renderMetrics(data) {
   }
 
   renderVramBreakdown(m);
+  loadUsage().catch(() => {});
 
   /* ---- 正在跑的模型 ---- */
   const running = (m.ollama && m.ollama.models) || [];
@@ -511,6 +519,22 @@ function renderStatus() {
     : '<b>Ollama 未运行</b><br>管理模型时会自动启动';
 }
 
+/** 给模型起个别名（不占额外磁盘） */
+function askAlias(model) {
+  const name = prompt(`给「${model}」起一个别名（例如 ${model.split(':')[0]}-fast）：`);
+  if (!name) return;
+  const to = name.trim();
+  if (!to) return;
+  if (!/^[a-z0-9][a-z0-9._\-/]*(:[a-z0-9._\-]+)?$/i.test(to)) {
+    toast('名字只能用小写字母、数字和 . - _ / :');
+    return;
+  }
+  post('/api/alias', { from: model, to }).then((out) => {
+    toast(out.message || '已创建别名');
+    loadState();
+  }).catch((e) => toast(e.message));
+}
+
 function renderModels() {
   const all = state.models || [];
   const q = ($('modelSearch') && $('modelSearch').value || '').trim().toLowerCase();
@@ -548,20 +572,38 @@ function renderModels() {
     // 体积对比条：一眼看出哪个模型最占地方
     const maxSize = Math.max(1, ...all.map((x) => x.sizeGB || 0));
     const w = Math.max(3, Math.round(((m.sizeGB || 0) / maxSize) * 100));
+    const isCurrent = state.model && state.model === m.name;
     return `
-    <div class="mrow" data-model="${esc(m.name)}">
+    <div class="mrow${isCurrent ? ' current' : ''}" data-model="${esc(m.name)}">
+      <label class="mcheck"><input type="checkbox" data-pick="${esc(m.name)}"></label>
       <div class="mi">
-        <div class="mn">${esc(m.name)}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}</div>
+        <div class="mn">${esc(m.name)}${isCurrent ? '<span class="tag current">使用中</span>' : ''}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}</div>
         <div class="ms">${esc(m.params || '')} ${esc(m.quant || '')}${m.modified ? ' · ' + esc(String(m.modified).slice(0, 10)) : ''}</div>
         <div class="msize"><i style="width:${w}%"></i></div>
       </div>
       <div class="mz">${m.sizeGB} GB</div>
-      <div class="ma"><button class="btn ghost small danger" data-del="${esc(m.name)}">删除</button></div>
+      <div class="ma">
+        <button class="btn ghost small" data-alias="${esc(m.name)}">起别名</button>
+        <button class="btn ghost small danger" data-del="${esc(m.name)}">删除</button>
+      </div>
     </div>`;
   }).join('');
 
   for (const b of document.querySelectorAll('[data-del]')) {
     b.addEventListener('click', () => askDelete(b.dataset.del, b));
+  }
+  for (const b of document.querySelectorAll('[data-alias]')) {
+    b.addEventListener('click', () => askAlias(b.dataset.alias));
+  }
+  for (const c of document.querySelectorAll('[data-pick]')) {
+    c.addEventListener('change', () => {
+      const picked = document.querySelectorAll('[data-pick]:checked');
+      const btn = $('btnBatchDel');
+      if (btn) {
+        btn.disabled = picked.length === 0;
+        btn.textContent = picked.length ? `批量删除（${picked.length}）` : '批量删除';
+      }
+    });
   }
 }
 
@@ -1095,6 +1137,12 @@ async function playSend() {
             ['提示词', `${s.promptTokens} tokens`],
             ['总耗时', `${(s.totalMs / 1000).toFixed(1)} 秒`],
           ].map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('');
+          // 记一笔用量，概览页能看到每天消耗了多少
+          fetch('/api/usage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-LocalAI-Token': window.__TOKEN__ || '' },
+            body: JSON.stringify({ tokens: (s.tokens || 0) + (s.promptTokens || 0), model: $('playModel').value }),
+          }).catch(() => { /* 统计失败不影响聊天 */ });
         }
       }
     }
@@ -1115,6 +1163,19 @@ async function playSend() {
 if ($('btnPlay')) $('btnPlay').addEventListener('click', () => playSend());
 if ($('btnPlayStop')) {
   $('btnPlayStop').addEventListener('click', () => { if (playController) playController.abort(); });
+}
+if ($('btnPlayRegen')) {
+  $('btnPlayRegen').addEventListener('click', async () => {
+    // 重新生成上一条回答：把最后一条助手消息删掉，用同样的问题再问一遍
+    const lastUser = [...playHistory].reverse().find((m) => m.role === 'user');
+    if (!lastUser) { toast('没有可以重试的问题'); return; }
+    // 去掉最后那轮（用户 + 助手）
+    while (playHistory.length && playHistory[playHistory.length - 1].role !== 'user') playHistory.pop();
+    playHistory.pop();
+    playRender();
+    $('playInput').value = lastUser.content;
+    playSend();
+  });
 }
 if ($('playSession')) {
   $('playSession').addEventListener('change', (e) => {
@@ -1287,6 +1348,12 @@ if ($('btnCsvHealth')) {
 }
 if ($('btnCsvBench')) {
   $('btnCsvBench').addEventListener('click', () => { window.open('/api/history.csv?kind=bench', '_blank'); });
+}
+if ($('btnMdHealth')) {
+  $('btnMdHealth').addEventListener('click', () => { window.open('/api/history.md?kind=health', '_blank'); });
+}
+if ($('btnMdBench')) {
+  $('btnMdBench').addEventListener('click', () => { window.open('/api/history.md?kind=bench', '_blank'); });
 }
 if ($('btnClearBench')) {
   $('btnClearBench').addEventListener('click', async () => {
@@ -1875,6 +1942,25 @@ function renderServices() {
   }
 }
 
+/* --------------------------------------------------------- 显卡告警 */
+
+/**
+ * 温度 / 功耗告警。
+ *
+ * 显卡过热会自己降频 —— 用户会以为「模型变慢了」，其实是温度上去了。
+ * 温度超过 85°C 一般就该看看散热了。
+ */
+function gpuAlert(gpu) {
+  if (!gpu) return null;
+  if (gpu.temperature != null && gpu.temperature >= 85) {
+    return `⚠️ 显卡 ${gpu.temperature}°C，偏热了 —— 过热会降速，模型可能「莫名其妙变慢」`;
+  }
+  if (gpu.temperature != null && gpu.temperature >= 78) {
+    return `显卡 ${gpu.temperature}°C，温度偏高`;
+  }
+  return null;
+}
+
 /* --------------------------------------------------------- 显存分账 */
 
 /**
@@ -2031,6 +2117,93 @@ async function loadCheckpoints() {
   } catch (e) {
     box.innerHTML = `<div class="issue error">读取失败：${esc(e.message)}</div>`;
   }
+}
+
+/* ------------------------------------------------------------ 用量统计 */
+
+/** 用量统计：每天消耗了多少 token */
+async function loadUsage() {
+  const box = $('dashUsage');
+  if (!box) return;
+  try {
+    const r = await (await fetch('/api/usage')).json();
+    const items = r.items || [];
+    if (!items.length) {
+      box.innerHTML = '<div class="chart-empty">在「试用」页聊过之后这里会有记录</div>';
+      return;
+    }
+    const points = items.map((u) => ({
+      label: u.day.slice(5),
+      value: u.tokens,
+      text: `${u.tokens} tokens`,
+    }));
+    const total = items.reduce((n, u) => n + u.tokens, 0);
+    const calls = items.reduce((n, u) => n + u.calls, 0);
+    const top = Object.entries(items.reduce((acc, u) => {
+      for (const [m, t] of Object.entries(u.models || {})) acc[m] = (acc[m] || 0) + t;
+      return acc;
+    }, {}))
+      .sort((a, b) => b[1] - a[1]).slice(0, 3);
+    box.innerHTML = Chart.line(points, { width: 460, height: 150, min: 0 })
+      + `<p class="row-hint" style="margin-top:8px">共 ${total.toLocaleString()} tokens / ${calls} 次对话`
+      + (top.length ? `，用得最多的是 ${top.map(([m, t]) => `${esc(m)}（${t.toLocaleString()}）`).join('、')}` : '')
+      + '。这里只统计「试用」页的对话，工作台里的用量统计不到（那是另一套 API）。</p>';
+  } catch (e) {
+    box.innerHTML = `<div class="chart-empty">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+/* ------------------------------------------------------------ 界面缩放 */
+
+const ZOOM_KEY = 'localai-zoom';
+
+function applyZoom(percent) {
+  const p = Math.max(85, Math.min(140, Number(percent) || 100));
+  document.documentElement.style.fontSize = `${(p / 100) * 14}px`;
+  try { localStorage.setItem(ZOOM_KEY, String(p)); } catch { /* ignore */ }
+  const label = $('zoomValue');
+  if (label) label.textContent = `${p}%`;
+  const range = $('zoomRange');
+  if (range && Number(range.value) !== p) range.value = String(p);
+}
+
+(function initZoom() {
+  let saved = 100;
+  try { saved = Number(localStorage.getItem(ZOOM_KEY)) || 100; } catch { saved = 100; }
+  applyZoom(saved);
+})();
+
+if ($('zoomRange')) {
+  $('zoomRange').addEventListener('input', (e) => applyZoom(e.target.value));
+}
+
+/* ------------------------------------------------------------------ 帮助 */
+
+/** 帮助页：把「这个页面能干什么」写成一张卡片表 */
+const HELP_CARDS = [
+  { tab: 'dashboard', icon: '📊', title: '系统概览', text: '显存 / CPU / 内存 / 磁盘实时占用。停服务前先看一眼，确认显存还回去了。' },
+  { tab: 'models', icon: '📦', title: '模型管理', text: '装模型、删模型、看空间。还能搜官方模型库，几百个模型里挑。' },
+  { tab: 'play', icon: '💬', title: '试用', text: '直接跟模型对话。换个模型试效果、调提示词、看每秒多少 token。' },
+  { tab: 'compare', icon: '⚖️', title: '模型对比', text: '同一个问题问几个模型，并排比答案和速度。' },
+  { tab: 'bench', icon: '⏱️', title: '性能基准', text: '分开测「生成慢」和「读上下文慢」—— 这两种解法不一样。' },
+  { tab: 'context', icon: '🧮', title: '上下文与模型', text: '改窗口大小和压缩参数。压力预算变负数就是「聊久了变短」的根因。' },
+  { tab: 'health', icon: '🩺', title: '模型体检', text: '觉得模型变笨了先测一次，分清是能力问题还是配置问题。' },
+  { tab: 'fix', icon: '🔧', title: '修复中心', text: '十项体检 + 一键修复。不用重装。' },
+  { tab: 'tools', icon: '🧰', title: '诊断与维护', text: '查网络、清下载残留、导出诊断报告。' },
+  { tab: 'services', icon: '🔌', title: '服务', text: '哪些东西在跑、怎么启停。一页看全。' },
+  { tab: 'settings', icon: '⚙️', title: '服务设置', text: '开机自启、局域网共享、备份配置、快捷键、主题。' },
+];
+
+function renderHelp() {
+  const box = $('helpGrid');
+  if (!box) return;
+  box.innerHTML = HELP_CARDS.map((c) => `
+    <button class="helpcard" data-goto="${esc(c.tab)}">
+      <div class="hc-ico">${c.icon}</div>
+      <div class="hc-t">${esc(c.title)}</div>
+      <div class="hc-d">${esc(c.text)}</div>
+    </button>`).join('');
+  bindGoto(box);
 }
 
 /* ---------------------------------------------------------------- 修复中心 */
@@ -2497,6 +2670,32 @@ function setupButtons() {
     toast('已刷新');
   });
 
+  if ($('btnBatchDel')) {
+    $('btnBatchDel').addEventListener('click', async () => {
+      const picked = Array.from(document.querySelectorAll('[data-pick]:checked')).map((i) => i.dataset.pick);
+      if (!picked.length) return;
+      // 使用中的模型不能删 —— 删了工作台就起不来了
+      if (state.model && picked.includes(state.model)) {
+        toast(`「${state.model}」是正在用的模型，不能一起删`);
+        return;
+      }
+      const total = picked.reduce((n, m) => {
+        const hit = (state.models || []).find((x) => x.name === m);
+        return n + (hit ? hit.sizeGB : 0);
+      }, 0);
+      if (!confirm(`确定要删除这 ${picked.length} 个模型吗？\n会释放约 ${total.toFixed(1)} GB 空间。`)) return;
+      let done = 0;
+      for (const m of picked) {
+        try {
+          await post('/api/delete', { model: m });
+          done += 1;
+        } catch (e) { toast(`${m}：${e.message}`); }
+      }
+      toast(`已删除 ${done} 个模型`);
+      await loadState();
+    });
+  }
+
   $('btnUninstall').addEventListener('click', async () => {
     try {
       const r = await post('/api/service', { action: 'uninstall' });
@@ -2546,6 +2745,27 @@ function setupButtons() {
       const next = THEMES[(idx + 1) % THEMES.length];
       applyTheme(next.id);
       toast(`主题：${next.label}`);
+    });
+  }
+
+  /* ---- 离线安装包 ---- */
+  if ($('btnPackage')) {
+    $('btnPackage').addEventListener('click', async () => {
+      const btn = $('btnPackage');
+      btn.disabled = true;
+      btn.textContent = '打包中…';
+      $('pkgHint').textContent = '正在打包，请稍候（文件多的时候要十几秒）…';
+      try {
+        const out = await post('/api/package', { withNode: $('pkgWithNode').checked });
+        $('pkgHint').innerHTML = `已生成：<code>${esc(out.zip || out.dir)}</code><br>`
+          + '拷到目标机器上解压，双击「① 双击这里开始安装.cmd」即可。';
+        toast('离线安装包已生成');
+      } catch (e) {
+        $('pkgHint').textContent = `打包失败：${e.message}`;
+        toast(e.message);
+      }
+      btn.disabled = false;
+      btn.textContent = '生成离线安装包';
     });
   }
 

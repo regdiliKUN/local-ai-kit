@@ -154,6 +154,49 @@ function broadcast(event) {
   }
 }
 
+/**
+ * 装完跑一次体检。
+ *
+ * 「装好了但不知道状态怎么样」是最常见的困惑 —— 与其让用户自己去开命令行，
+ * 不如在完成页放个按钮，点一下就知道模型能不能用。
+ */
+function runSelfCheck(model) {
+  const script = path.join(KIT, 'healthcheck', 'quick.mjs');
+  if (!fs.existsSync(script)) {
+    broadcast({ type: 'selfcheck-error', text: '找不到体检脚本' });
+    return;
+  }
+  const child = spawn(process.execPath, [script, '--json', '--quick'], {
+    cwd: KIT,
+    env: {
+      ...process.env,
+      LOCAL_AI_MODEL: model || '',
+      LOCAL_AI_BASE_URL: 'http://127.0.0.1:11434/v1',
+    },
+    windowsHide: true,
+  });
+
+  let buf = '';
+  child.stdout.on('data', (d) => {
+    buf += d.toString('utf8');
+    const parts = buf.split(/\r?\n/);
+    buf = parts.pop() || '';
+    for (const line of parts) {
+      const t = line.trim();
+      if (!t) continue;
+      let ev;
+      try { ev = JSON.parse(t); } catch { continue; }
+      if (ev.type === 'done') broadcast({ type: 'selfcheck-done', ok: ev.ok, summary: ev.summary });
+      else if (ev.type === 'item') broadcast({ type: 'selfcheck-item', id: ev.id, ok: ev.ok, cat: ev.cat });
+      else if (ev.type === 'error') broadcast({ type: 'selfcheck-error', text: ev.text });
+    }
+  });
+  child.on('error', (e) => broadcast({ type: 'selfcheck-error', text: String(e.message || e) }));
+  child.on('exit', (code) => {
+    if (code !== 0 && code !== 2) broadcast({ type: 'selfcheck-error', text: `体检进程退出（code=${code}）` });
+  });
+}
+
 function json(res, code, body) {
   jsonResponse(res, code, body);
 }
@@ -336,6 +379,13 @@ const server = createSafeServer(async (req, res) => {
     clients.add(stream);
     req.on('close', () => clients.delete(stream));
     return;
+  }
+
+  /* ------------------------------------------------------ 装完自检 */
+  if (p === '/api/selfcheck' && req.method === 'POST') {
+    const body = await readBody(req).catch(() => ({}));
+    runSelfCheck(String(body.model || ''));
+    return json(res, 202, { started: true });
   }
 
   if (p === '/api/install' && req.method === 'POST') {
