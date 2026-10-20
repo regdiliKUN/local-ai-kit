@@ -39,7 +39,10 @@ export function ollamaVars({ modelDir, contextWindow } = {}) {
 
 /** 启动 ollama serve / ollama pull 用的完整环境 */
 export function ollamaEnv(cfg) {
-  return { ...process.env, ...ollamaVars(cfg), OLLAMA_HOST: '127.0.0.1:11434' };
+  // 不能硬编码 127.0.0.1：用户在「服务设置」里开了局域网共享时，
+  // OLLAMA_HOST 已经是 0.0.0.0:11434，写死会让每次自愈拉起都把共享关回去。
+  const host = process.env.OLLAMA_HOST || '127.0.0.1:11434';
+  return { ...process.env, ...ollamaVars(cfg), OLLAMA_HOST: host };
 }
 
 /**

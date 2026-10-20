@@ -36,6 +36,26 @@ async function fetchJson(url, timeout = 4000) {
 
 /* ---------------------------------------------------------------- 各项检测 */
 
+/**
+ * 查某个端口被哪个进程占着。
+ *
+ * 不能只认 127.0.0.1：Ollama 开了局域网共享会监听 0.0.0.0，
+ * dsh 这类可能监听 [::]，只匹配 127.0.0.1 会误判成「没在运行」，
+ * 然后用户点「停止」得到一句「本来就没在运行」，进程却继续占着显存。
+ */
+export function pidOnPort(port, netstatText) {
+  let out = netstatText;
+  if (out === undefined) {
+    try { out = execSync('netstat -ano -p TCP', { encoding: 'utf8' }); } catch { return null; }
+  }
+  for (const line of String(out).split(/\r?\n/)) {
+    // 地址可能是 127.0.0.1 / 0.0.0.0 / [::] / [::1]，统一只关心端口号
+    const m = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)/i);
+    if (m && Number(m[1]) === Number(port)) return Number(m[2]);
+  }
+  return null;
+}
+
 export function detectNode() {
   const v = process.versions.node;
   return { version: v, ok: Number(v.split('.')[0]) >= 20, path: process.execPath };

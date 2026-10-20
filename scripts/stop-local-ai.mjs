@@ -5,19 +5,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deploymentRoot, loadConfig } from './config.mjs';
 import { runStrataAction } from './strata.mjs';
+// 端口查询统一走 detect：以前这里只认 127.0.0.1，
+// 局域网共享（0.0.0.0）或 IPv6（[::]）监听的进程会被当成「没在运行」
+import { pidOnPort } from './detect.mjs';
 
 const log = (s = '') => console.log(s);
-
-function pidOnPort(port) {
-  try {
-    const out = execSync('netstat -ano -p TCP', { encoding: 'utf8' });
-    for (const line of out.split(/\r?\n/)) {
-      const m = line.match(/^\s*TCP\s+127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+(\d+)/);
-      if (m && Number(m[1]) === port) return Number(m[2]);
-    }
-  } catch { /* ignore */ }
-  return null;
-}
 
 function killPid(pid) {
   try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' }); return true; }

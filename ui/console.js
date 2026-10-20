@@ -2894,16 +2894,12 @@ startDashTimer();
 setInterval(() => { loadState().catch(() => {}); }, 5000);
 
 
-/* 帮助按钮：快捷键说明本来就在设置页里，跳过去比再做一套浮层更省事 */
+/* 帮助按钮：跳「帮助」页（那里是按场景分好的卡片），不是设置页 */
 document.addEventListener('DOMContentLoaded', () => {
   const btn = document.getElementById('btnHelp');
   if (btn) {
     btn.addEventListener('click', () => {
-      if (typeof gotoTab === 'function') gotoTab('settings');
-      setTimeout(() => {
-        const el = document.getElementById('shortcutList');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 120);
+      if (typeof gotoTab === 'function') gotoTab('help');
     });
   }
   const markChat = () => {

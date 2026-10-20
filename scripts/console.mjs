@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
 import { strataState, runStrataAction, handleStrata } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
-import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem } from './detect.mjs';
+import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem, pidOnPort } from './detect.mjs';
 import { makeLnk } from './make-lnk.mjs';
 import { KIT_VERSION, patchProfileText, readPresetStandard, resolveBudgets } from './install.mjs';
 import { makeZip } from './zip.mjs';
@@ -242,23 +242,16 @@ function setLanShare(on) {
     r = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', 'OLLAMA_HOST', '/f'], { stdio: 'ignore', windowsHide: true });
     // 删一个不存在的值会返回非 0，属于正常
   }
+  // setx 只对新进程生效，当前进程的 process.env 不会变。
+  // 不同步的话，界面上的开关会一直显示「关闭」，自愈拉起也会用旧值。
+  if (on) process.env.OLLAMA_HOST = val;
+  else delete process.env.OLLAMA_HOST;
   // 让改动生效：重启 Ollama
   killOllama();
   return { ok: true, lanShare: on };
 }
 
 /* ------------------------------------------------------------- 服务控制 */
-
-function pidOnPort(port) {
-  try {
-    const out = execSync('netstat -ano -p TCP', { encoding: 'utf8' });
-    for (const line of out.split(/\r?\n/)) {
-      const m = line.match(/^\s*TCP\s+127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+(\d+)/);
-      if (m && Number(m[1]) === port) return Number(m[2]);
-    }
-  } catch { /* ignore */ }
-  return null;
-}
 
 function stopService() {
   const dshPid = pidOnPort(3080);
