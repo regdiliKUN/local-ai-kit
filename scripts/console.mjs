@@ -37,6 +37,7 @@ import { runBenchmark } from './bench.mjs';
 import { exportBundle, importBundle } from './backup.mjs';
 import { diagnose, repair } from './repair.mjs';
 import { compareVersions } from './version.mjs';
+import { appendItem, readList, writeList, clearList, storePath } from './store.mjs';
 
 /**
  * 安装目录里脚本是**平铺**的（<root>\console.mjs + <root>\ui\），
@@ -533,6 +534,19 @@ function runHealth(quick) {
           cat: r.cat, total: r.total, passed: r.passed, rate: r.total ? r.passed / r.total : 0,
         })),
       };
+      // 存一份历史，用来画「这段时间体检成绩的变化」
+      try {
+        appendItem('health', {
+          at: lastHealth.at,
+          model: lastHealth.model || cfg.model || '',
+          ok: (lastHealth.verdicts || []).every((v) => v.ok),
+          rate: lastHealth.eval ? lastHealth.eval.rate : null,
+          passed: lastHealth.eval ? lastHealth.eval.passed : null,
+          total: lastHealth.eval ? lastHealth.eval.total : null,
+          share: lastHealth.stability ? lastHealth.stability.share : null,
+          elapsed: lastHealth.elapsed_s || null,
+        });
+      } catch { /* 存历史失败不影响体检结果 */ }
       broadcast({ type: 'health-done', ok: ev.ok, summary: lastHealth });
     } else if (ev.type === 'error') broadcast({ type: 'health-error', text: ev.text });
   };
@@ -799,6 +813,52 @@ const server = createSafeServer(async (req, res) => {
     return json(res, 200, { current: KIT_VERSION, latest, note, update: !!newer });
   }
 
+  /* ------------------------------------------------------------ 历史记录 */
+  if (p === '/api/history' && req.method === 'GET') {
+    const kind = String(url.searchParams.get('kind') || 'health');
+    if (kind !== 'health' && kind !== 'bench') {
+      return json(res, 400, { error: '未知的记录类型' });
+    }
+    return json(res, 200, { kind, items: readList(kind), path: storePath() });
+  }
+
+  if (p === '/api/history' && req.method === 'DELETE') {
+    const kind = String(url.searchParams.get('kind') || 'health');
+    if (kind !== 'health' && kind !== 'bench') {
+      return json(res, 400, { error: '未知的记录类型' });
+    }
+    clearList(kind);
+    return json(res, 200, { ok: true, items: [] });
+  }
+
+  /* ---------------------------------------------------------- 对话历史 */
+  if (p === '/api/sessions' && req.method === 'GET') {
+    return json(res, 200, { items: readList('chat') });
+  }
+
+  if (p === '/api/sessions' && req.method === 'POST') {
+    const body = await readBody(req, 1024 * 1024);
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    if (!messages.length) return json(res, 400, { error: '没有可保存的对话' });
+    const session = {
+      id: String(body.id || `s${Date.now()}`),
+      at: Date.now(),
+      title: String(body.title || messages[0].content || '').slice(0, 60),
+      model: String(body.model || ''),
+      messages: messages.slice(-60),
+    };
+    const list = readList('chat').filter((s) => s.id !== session.id);
+    list.push(session);
+    writeList('chat', list);
+    return json(res, 200, { ok: true, session, items: list });
+  }
+
+  if (p === '/api/sessions' && req.method === 'DELETE') {
+    const id = String(url.searchParams.get('id') || '');
+    writeList('chat', readList('chat').filter((s) => s.id !== id));
+    return json(res, 200, { ok: true, items: readList('chat') });
+  }
+
   /* ---------------------------------------------------------- 诊断与修复 */
   if (p === '/api/diagnose' && req.method === 'GET') {
     return json(res, 200, await diagnose({ root: ROOT, cfg, kitDir: ROOT }));
@@ -860,6 +920,16 @@ const server = createSafeServer(async (req, res) => {
       .then((out) => {
         // 结果同时存一份：万一 SSE 断了，页面轮询 /api/state 也能拿到
         lastBench = { ...out, at: Date.now() };
+        // 存一份历史，用来对比「换了配置之后是不是真的变快了」
+        try {
+          appendItem('bench', {
+            at: lastBench.at,
+            model: out.model,
+            gen: out.verdict ? out.verdict.genTokensPerSec : null,
+            prompt: out.verdict ? out.verdict.promptTokensPerSec : null,
+            level: out.verdict ? out.verdict.genLevel : null,
+          });
+        } catch { /* ignore */ }
         broadcast({ type: 'bench-done', result: out });
       })
       .catch((e) => broadcast({ type: 'error', text: String(e.message || e) }))

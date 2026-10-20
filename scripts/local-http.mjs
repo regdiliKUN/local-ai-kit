@@ -18,6 +18,13 @@ export function tokenMatches(value, expected) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+/**
+ * 读请求体并解析成 JSON。
+ *
+ * 按 JSON 规范，application/json 应该是 UTF-8。但中文 Windows 生态里有些客户端
+ * 会带 `charset=gbk` 发过来 —— 如果一律按 UTF-8 解，中文会变成一堆问号。
+ * 所以这里认一下 Content-Type 上声明的编码。
+ */
 export function readBody(req, limit = 64 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -36,7 +43,9 @@ export function readBody(req, limit = 64 * 1024) {
     req.on('end', () => {
       if (failed) return;
       try {
-        const value = size ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+        const raw = Buffer.concat(chunks);
+        const text = decodeBody(raw, req.headers['content-type']);
+        const value = size ? JSON.parse(text) : {};
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
         resolve(value);
       } catch { fail('请求必须是有效的 JSON 对象', 400); }
@@ -44,6 +53,18 @@ export function readBody(req, limit = 64 * 1024) {
     req.on('aborted', () => fail('请求已中断', 400));
     req.on('error', reject);
   });
+}
+
+/** 按 Content-Type 声明的编码解码请求体（默认 UTF-8） */
+export function decodeBody(raw, contentType) {
+  const match = /charset=([\w-]+)/i.exec(String(contentType || ''));
+  const charset = (match ? match[1] : 'utf-8').toLowerCase();
+  const encoding = ['utf-8', 'utf8', 'ascii', 'latin1', 'binary'].includes(charset) ? 'utf8' : charset;
+  try {
+    return new TextDecoder(encoding).decode(raw);
+  } catch {
+    return raw.toString('utf8');
+  }
 }
 
 /**

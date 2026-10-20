@@ -61,6 +61,8 @@ for (const li of document.querySelectorAll('#tabs li')) {
     window.scrollTo(0, 0);
     // 概览页的数据是「按需拉」的，切过去才拉，省得后台一直跑 nvidia-smi
     if (li.dataset.tab === 'dashboard') loadDashboard().catch(() => {});
+    if (li.dataset.tab === 'health') loadTrend('health').catch(() => {});
+    if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
   });
 }
 
@@ -159,6 +161,13 @@ async function loadState() {
   renderQueue(state.queue);
   playModels();
   benchModels();
+  loadSessions().then(() => {
+    // 打开页面就接着上次的对话
+    if (playSessions.length) {
+      const last = playSessions[playSessions.length - 1];
+      if (!playHistory.length) { loadSession(last.id); const sel = $('playSession'); if (sel) sel.value = last.id; }
+    }
+  }).catch(() => {});
   // 测速结果也放在 /api/state 里 —— SSE 断了也能拿到结果，界面不会卡在「测速中」
   if (state.bench && state.bench.verdict && (!benchShownAt || state.bench.at !== benchShownAt)) {
     benchShownAt = state.bench.at;
@@ -741,6 +750,53 @@ if ($('btnQueueClear')) {
 
 const playHistory = [];        // 完整对话（发给模型）
 let playController = null;     // 用来「停止」
+let playSessions = [];         // 存下来的历史对话
+let playSessionId = '';
+
+/** 拉历史对话列表并把最近一次载入 */
+async function loadSessions() {
+  try {
+    const r = await (await fetch('/api/sessions')).json();
+    playSessions = r.items || [];
+  } catch { playSessions = []; }
+  const sel = $('playSession');
+  if (!sel) return;
+  if (!playSessions.length) {
+    sel.innerHTML = '<option value="">（还没有历史对话）</option>';
+    return;
+  }
+  sel.innerHTML = playSessions.slice().reverse().map((s) =>
+    `<option value="${esc(s.id)}">${esc(s.title || '（空对话）')} · ${new Date(s.at).toLocaleString()}</option>`).join('');
+  if (playSessionId) sel.value = playSessionId;
+}
+
+/** 把当前对话存到磁盘 */
+async function saveSession() {
+  const messages = playHistory.filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({ role: m.role, content: m.content }));
+  if (!messages.length) return;
+  try {
+    const out = await post('/api/sessions', {
+      id: playSessionId || `s${Date.now()}`,
+      title: messages[0].content.slice(0, 60),
+      model: $('playModel').value,
+      messages,
+    });
+    playSessionId = out.session ? out.session.id : playSessionId;
+    playSessions = out.items || playSessions;
+    await loadSessions();
+  } catch { /* 存不上也不影响聊天 */ }
+}
+
+/** 载入某次历史对话 */
+function loadSession(id) {
+  const s = playSessions.find((x) => x.id === id);
+  if (!s) return;
+  playSessionId = s.id;
+  playHistory.length = 0;
+  for (const m of s.messages || []) playHistory.push({ role: m.role, content: m.content });
+  playRender();
+}
 
 function playRender() {
   const box = $('chatBox');
@@ -856,12 +912,39 @@ async function playSend() {
     $('btnPlay').disabled = false;
     $('btnPlayStop').hidden = true;
     playRender();
+    saveSession();
   }
 }
 
 if ($('btnPlay')) $('btnPlay').addEventListener('click', () => playSend());
 if ($('btnPlayStop')) {
   $('btnPlayStop').addEventListener('click', () => { if (playController) playController.abort(); });
+}
+if ($('playSession')) {
+  $('playSession').addEventListener('change', (e) => {
+    if (e.target.value) loadSession(e.target.value);
+  });
+}
+if ($('btnPlayNew')) {
+  $('btnPlayNew').addEventListener('click', () => {
+    playHistory.length = 0;
+    playSessionId = '';
+    playRender();
+    $('playSession').value = '';
+    toast('已开新对话');
+  });
+}
+if ($('btnPlayDel')) {
+  $('btnPlayDel').addEventListener('click', async () => {
+    const id = $('playSession').value;
+    if (!id) { toast('先选一段对话'); return; }
+    try {
+      await fetch(`/api/sessions?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (playSessionId === id) { playHistory.length = 0; playSessionId = ''; playRender(); }
+      await loadSessions();
+      toast('已删除');
+    } catch (e) { toast(e.message); }
+  });
 }
 if ($('playInput')) {
   $('playInput').addEventListener('keydown', (e) => {
@@ -925,6 +1008,56 @@ async function startBench() {
 }
 
 if ($('btnBench')) $('btnBench').addEventListener('click', startBench);
+
+/* ------------------------------------------------------------ 历史趋势 */
+
+/** 加载历史并画趋势图 */
+async function loadTrend(kind) {
+  const box = $(kind === 'health' ? 'healthTrend' : 'benchTrend');
+  if (!box) return;
+  try {
+    const r = await (await fetch(`/api/history?kind=${kind}`)).json();
+    const items = r.items || [];
+    const pathHint = $(kind === 'health' ? 'healthHistoryPath' : 'benchHistoryPath');
+    if (pathHint) pathHint.textContent = `记录文件：${r.path || ''}`;
+    if (!items.length) {
+      box.innerHTML = '<div class="chart-empty">还没有历史记录</div>';
+      return;
+    }
+    if (kind === 'health') {
+      const points = items.map((it) => ({
+        label: new Date(it.at).toLocaleDateString(),
+        value: it.rate == null ? null : Math.round(it.rate * 100),
+        text: it.passed != null ? `${it.passed}/${it.total}` : '',
+      }));
+      box.innerHTML = Chart.line(points, { width: 460, height: 160, min: 0, max: 100, unit: '%' })
+        + '<p class="row-hint" style="margin-top:8px">每次体检的成绩。曲线掉下来 = 换配置或换模型之后变差了。</p>';
+    } else {
+      const points = items.map((it) => ({
+        label: new Date(it.at).toLocaleDateString(),
+        value: it.gen,
+        text: `${it.gen} t/s`,
+      }));
+      box.innerHTML = Chart.line(points, { width: 460, height: 160, min: 0, unit: '' })
+        + '<p class="row-hint" style="margin-top:8px">每次测速的生成速度。改了上下文或量化档之后跑一次，就能看出是变快还是变慢。</p>';
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="chart-empty">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+if ($('btnClearHealth')) {
+  $('btnClearHealth').addEventListener('click', async () => {
+    try { await fetch('/api/history?kind=health', { method: 'DELETE' }); loadTrend('health'); toast('体检历史已清空'); }
+    catch (e) { toast(e.message); }
+  });
+}
+if ($('btnClearBench')) {
+  $('btnClearBench').addEventListener('click', async () => {
+    try { await fetch('/api/history?kind=bench', { method: 'DELETE' }); loadTrend('bench'); toast('测速历史已清空'); }
+    catch (e) { toast(e.message); }
+  });
+}
 
 /* ---------------------------------------------------------------- 修复中心 */
 
@@ -1120,6 +1253,7 @@ function connectSSE() {
       $('benchWrap').hidden = true;
       $('benchHint').textContent = '测完了。';
       renderBench(ev.result || {});
+      loadTrend('bench').catch(() => {});
     } else if (ev.type === 'queue') {
       renderQueue(ev.state);
     } else if (ev.type === 'health-item') {
@@ -1133,6 +1267,7 @@ function connectSSE() {
     } else if (ev.type === 'health-done') {
       renderHealthResult(ev.summary, ev.ok);
       $('healthWrap').hidden = true;
+      loadTrend('health').catch(() => {});
     } else if (ev.type === 'health-error') {
       appendHealthLog('错误：' + ev.text);
       $('healthResult').innerHTML =

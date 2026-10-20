@@ -243,6 +243,12 @@
       </div>
 
       <h2 class="sec-h">对话</h2>
+      <div class="row-actions chat-tools">
+        <select id="playSession" class="ctx-select" style="min-width:220px"></select>
+        <button class="btn ghost small" id="btnPlayNew">新对话</button>
+        <button class="btn ghost small danger" id="btnPlayDel">删除</button>
+        <span class="row-hint" id="playSessionHint">对话会自动保存，关掉浏览器也在。</span>
+      </div>
       <div class="chat" id="chatBox">
         <div class="chat-empty" id="chatEmpty">还没开始。问点什么试试 —— 比如「用一句话解释什么是显存」。</div>
       </div>
@@ -306,6 +312,15 @@
         <div class="panel-b" id="benchChart"><div class="chart-empty">跑一次就能看到对比</div></div>
       </div>
 
+      <h2 class="sec-h">速度变化</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchTrend"><div class="chart-empty">还没有历史记录</div></div>
+      </div>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnClearBench">清空测速历史</button>
+        <span class="row-hint" id="benchHistoryPath"></span>
+      </div>
+
       <h2 class="sec-h">这说明什么</h2>
       <div class="summary" id="benchAdvice">
         <div class="row"><span class="k">—</span><span class="v">还没有测过</span></div>
@@ -343,6 +358,15 @@
       <h2 class="sec-h">各分类通过率</h2>
       <div class="panel">
         <div class="panel-b" id="healthChart"><div class="chart-empty">跑一次就能看到每类题的通过情况</div></div>
+      </div>
+
+      <h2 class="sec-h">成绩变化</h2>
+      <div class="panel">
+        <div class="panel-b" id="healthTrend"><div class="chart-empty">还没有历史记录</div></div>
+      </div>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnClearHealth">清空体检历史</button>
+        <span class="row-hint" id="healthHistoryPath"></span>
       </div>
 
       <h2 class="sec-h">怎么读这个结果</h2>

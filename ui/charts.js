@@ -278,7 +278,90 @@ const Chart = (() => {
     return `<svg class="chart-wf" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${rows}</svg>`;
   }
 
-  return { sparkline, donut, gauge, bars, radar, waterfall, esc };
+  /**
+   * 折线图（带坐标轴与刻度）—— 用来画「随时间变化」的趋势。
+   *
+   * @param {{label:string, value:number|null, text?:string}[]} points
+   * @param {object} opts { width, height, min, max, unit, color }
+   */
+  function line(points, opts = {}) {
+    const list = points || [];
+    const width = opts.width || 420;
+    const height = opts.height || 150;
+    const padL = 44;      // 左边留给数值刻度
+    const padR = 10;
+    const padT = 10;
+    const padB = 24;      // 底下留给时间标签
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
+    const color = opts.color || 'var(--accent)';
+
+    const values = list.map((p) => num(p.value)).filter((v) => v != null);
+    if (!values.length) return '<div class="chart-empty">还没有数据</div>';
+
+    const rawMin = opts.min != null ? opts.min : minOf(values);
+    const rawMax = opts.max != null ? opts.max : maxOf(values);
+    // 上下各留一点余量，线不要贴着边框
+    const min = rawMin - (rawMax - rawMin) * 0.1;
+    const max = rawMax + (rawMax - rawMin) * 0.1;
+    const span = (max - min) || 1;
+
+    const x = (i) => padL + (list.length > 1 ? (i / (list.length - 1)) * plotW : plotW / 2);
+    const y = (v) => padT + plotH - ((v - min) / span) * plotH;
+
+    // 刻度线
+    const ticks = [0, 0.5, 1].map((t) => {
+      const v = min + span * t;
+      const yy = y(v);
+      return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${width - padR}" y2="${yy.toFixed(1)}" class="line-grid" />
+        <text x="${padL - 6}" y="${(yy + 4).toFixed(1)}" class="line-tick" text-anchor="end">${formatTick(v, opts.unit)}</text>`;
+    }).join('');
+
+    // 折线（跳过 null 断点）
+    const segs = [];
+    let cur = [];
+    list.forEach((p, i) => {
+      const v = num(p.value);
+      if (v == null) { if (cur.length) segs.push(cur); cur = []; return; }
+      cur.push([x(i), y(v)]);
+    });
+    if (cur.length) segs.push(cur);
+
+    const path = segs.filter((s) => s.length > 1)
+      .map((s) => `M${s.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join('L')}`).join(' ');
+    const area = segs.filter((s) => s.length > 1).map((s) => (
+      `M${s[0][0].toFixed(1)},${(padT + plotH).toFixed(1)}`
+      + s.map(([px, py]) => `L${px.toFixed(1)},${py.toFixed(1)}`).join('')
+      + `L${s[s.length - 1][0].toFixed(1)},${(padT + plotH).toFixed(1)}Z`
+    )).join(' ');
+
+    const dots = list.map((p, i) => {
+      const v = num(p.value);
+      if (v == null) return '';
+      return `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" class="line-dot" style="--seg:${esc(color)}">
+        <title>${esc(p.label)}：${esc(p.text != null ? p.text : v)}</title></circle>`;
+    }).join('');
+
+    // 时间标签：最多显示 4 个，避免挤在一起
+    const step = Math.max(1, Math.ceil(list.length / 4));
+    const labels = list.map((p, i) => (i % step === 0 || i === list.length - 1)
+      ? `<text x="${x(i).toFixed(1)}" y="${height - 6}" class="line-tick" text-anchor="middle">${esc(p.label)}</text>` : '').join('');
+
+    return `<svg class="chart-line" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">
+      ${ticks}
+      ${area ? `<path d="${area}" class="line-area" style="--seg:${esc(color)}" />` : ''}
+      ${path ? `<path d="${path}" class="line-path" style="--seg:${esc(color)}" fill="none" />` : ''}
+      ${dots}${labels}
+    </svg>`;
+  }
+
+  /** 刻度数值：太大了就用 k / M 缩写 */
+  function formatTick(v, unit) {
+    const n = Math.abs(v) >= 1000 ? Math.round(v) : Math.round(v * 10) / 10;
+    return `${n}${unit || ''}`;
+  }
+
+  return { sparkline, donut, gauge, bars, radar, waterfall, line, esc };
 })();
 
 window.Chart = Chart;

@@ -841,6 +841,14 @@ html[data-theme="dark"] {
 .radar-dot { fill: var(--accent); }
 .radar-label { fill: var(--text-dim); font-size: 11.5px; }
 
+/* ---- 折线趋势图 ---- */
+
+.line-grid { stroke: var(--chart-grid); stroke-width: 1; }
+.line-tick { fill: var(--text-dim); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.line-path { stroke: var(--seg, var(--accent)); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.line-area { fill: var(--seg, var(--accent)); opacity: .12; }
+.line-dot { fill: var(--seg, var(--accent)); }
+
 /* ---- 概览页：仪表盘卡片 ---- */
 
 .gauge-row {
