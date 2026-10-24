@@ -1,6 +1,5 @@
 0e9c42c6de6d366b74221b4dddb6b06cd81e5eb43b29ae0b35bb2536f464c06b  release/1.10.0/local-ai-kit-1.10.0-win-x64/dist/local-ai-kit-offline-2026-10-20-13-30-03.zip
-880627cad9bee61ac6f0ae1e1924cb8fd635d598ea2c65af4d1f57e1c46cd17d  release/1.10.0/local-ai-kit-1.10.0-win-x64/launcher/open-local-ai.ps1
-823de9d30fcf37ff72974dac23d63312c294e55da0b4aefa03ad2ee67c0599bb  release/1.10.0/local-ai-kit-1.10.0-win-x64/local-ai-kit/.gitattributes
+81a65f69eb43d2a12a37ca70eafb64bd370fa7ef9322726a36320091a01002db  release/1.10.0/local-ai-kit-1.10.0-win-x64/launcher/open-local-ai.ps1
 ae8a3075dc4c003d9ce99ebff62f403975f43a61cd35865ee2ca53e09cc37791  release/1.10.0/local-ai-kit-1.10.0-win-x64/local-ai-kit/.github/workflows/ci.yml
 61933220471b3ea7ed180b7c62d54a61a150c2585b5286972abc7ef21ff35e91  release/1.10.0/local-ai-kit-1.10.0-win-x64/local-ai-kit/.gitignore
 193580a70099927ddc6951ea83d0c8371cbe57788b7f37ce9d25ffe0aa0aaa5b  release/1.10.0/local-ai-kit-1.10.0-win-x64/local-ai-kit/CHANGELOG.md
@@ -141,7 +140,6 @@ cc75b5b1965762f16705942be18df96a99a1a14209989d266c55cb3234cbd764  release/1.10.0
 dc0496f28f9036f1ea9f6ed3c723ec11fb3866fbbe3dd1b8f160ee3717708002  release/1.10.0/local-ai-kit-1.10.0-win-x64/shortcuts/Hermes.lnk
 8d3ebd3c982843f1242ac23b7b91aab5f6fb7d4bc6c8de720178be38b71a2740  release/1.10.0/local-ai-kit-1.10.0-win-x64/shortcuts/OpenCode.lnk
 b5211031d66925f46163d282acc5b42b27508c82b2245c877c67bb30f07967ce  release/1.10.0/local-ai-kit-1.10.0-win-x64/shortcuts/WorkDaddy AI.lnk
-2a845376beebf9909cea06a61175be5e7cae65a93f835011bfee18b5001f0ac2  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/.gitattributes
 71b8930dbb0104db9de228ffa19403cc2641ae6fb0175d6d2e5a6210b1f45b50  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/.gitignore
 a96f5a866b5053c2ca6cf121589d82465dfb08139b50887f42ed364dad9fcca1  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/LICENSE
 decb3fcf3a86de0fb90f887fa93aefabcf3ae84184cce08ee7eb6f480be0ef98  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/NOTICE.md
@@ -171,7 +169,7 @@ e5af33749bf09a1367118812f7315462e310423cd045c5b3fbace4b6cd3b9949  release/1.10.0
 2cdde37eb1e5268ec541c1563db1876dc024bbb6c92a2548c564c7300a4b007a  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/launchers/menu.ps1
 5726a5e47e5424acd8c743e7e05355a3112567335c406ee9321e80a59f3e2d1e  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/setup.bat
 9ff385e6ee6114c0d0544dcf6482b5716e49892319f82e2d7b94be86dd08c01c  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/tools/check-progress.bat
-837e316680e4a9375870ffb74df11bd1bd763178380c874dee5bbe24acd2753b  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/tools/create-shortcuts.ps1
+0c0377f1ff3c3735024f369b8433ba69e66faa021c5f1e0b87a2de3e7466714b  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/tools/create-shortcuts.ps1
 6088faa5174c21c587dd16d982e3e82b1862a6aadce6ff88bd5a4312406a6a73  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/tools/fix-vram-reserve.py
 2c970fe4bc79708acf3939c13849e35cdf19c4cd0ffab83580ab0ab273e8b715  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/tools/install-strata.bat
 74fd07bd91b71e9bc7badd3b3dd0339e917897844b26a978362e9391ac605682  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/tools/run-strata.bat
@@ -184,4 +182,4 @@ c99cca65a8d6cbfc914fb564387e4cc81da0d5ec54a0629a6bda22cd40d254e5  release/1.10.0
 ab3fd8719e2243d04804744b946ddac58ac9c757aff1d81f39b1f40cc1c4e238  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/webui/server.py
 e9f5ad31c7fff3f5823b72e29711ee355c9ba26e1501b63eef22c34382091b7c  release/1.10.0/local-ai-kit-1.10.0-win-x64/workbench/webui/server.py.bak-20261018-1920
 09486cc0f07f7d142a07cc13decff31d561b9b0a8a1fb8c7f0e39febab53c8e6  release/1.10.0/local-ai-kit-1.10.0-win-x64/使用入口说明.txt
-58f5e0273c533ba01a11b935e1556dc9faccef1adb8a351a0251c81ec7b6a4b4  release/1.10.0/local-ai-kit-1.10.0-win-x64/本地AI.cmd
+b6b061f6734fed9eb8b13ce1c7e4fd8d7952ea7078df71b66dc19b116c0f934a  release/1.10.0/local-ai-kit-1.10.0-win-x64/本地AI.cmd

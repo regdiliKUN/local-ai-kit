@@ -9,3 +9,7 @@
 
 *.ico binary
 *.png binary
+
+# 发行包已带 SHA256 清单，检出和下载 ZIP 时必须保留原始字节。
+# 放在通用规则之后，覆盖上面的 Windows 脚本换行符规则。
+release/** -text
