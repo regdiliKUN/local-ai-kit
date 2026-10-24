@@ -7,7 +7,7 @@
 | 版本 | `1.10.0` |
 | 平台 | Windows x64 |
 | 包体路径 | `release/1.10.0/local-ai-kit-1.10.0-win-x64/` |
-| 文件数 | 187 |
+| 文件数 | 185 |
 | 体积 | 约 7.9 MB |
 
 ## 运行方式
@@ -17,8 +17,8 @@
 ## 校验完整性
 
 ```bash
-cd release
-sha256sum -c SHA256SUMS.txt
+# 在仓库根目录运行（清单里的路径以 release/ 开头）
+sha256sum -c release/SHA256SUMS.txt
 ```
 
 Windows PowerShell：

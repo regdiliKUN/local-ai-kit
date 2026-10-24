@@ -13,6 +13,78 @@
  */
 
 const DICT = {
+  // ---- v1.9 / v1.10 新增界面文案 ----
+  '| 模型 | 状态 | 首字(ms) | 总耗时(ms) | 字数 |': '| Model | Status | First token (ms) | Total time (ms) | Characters |',
+  '★ 收藏': '★ Favorites',
+  '☆ 收藏': '☆ Favorites',
+  '上次 vs 本次': 'Previous vs current',
+  '下载聚合报告（JSON）': 'Download combined report (JSON)',
+  '仅一个模型用': 'Used by one model',
+  '体积': 'Size',
+  '体积分布': 'Size distribution',
+  '偏热，会降速': 'Running hot; performance may throttle',
+  '先测一遍，才有最快模型可选': 'Run a test first to find the fastest model',
+  '先选一个模型': 'Select a model first',
+  '全部模型测完': 'All models tested',
+  '其中能自动修': 'Automatically fixable',
+  '出字快测 · 横向对比': 'Quick response test · Model comparison',
+  '切到这一页会自动加载': 'Loads automatically when you open this page',
+  '切模型要重启工作台才生效，重启完才发现跑不动最坑。这里把每次「试一下」的结果留下来， 多个模型并列比：谁出字快、谁根本跑不动，一眼选。点「测全部」一次性把已装模型都跑一遍。': 'Switching models requires restarting the workbench. Test them first to avoid choosing one that cannot run. Compare saved results to see which models respond quickly and which fail. Click "Test all" to test every installed model.',
+  '参数(B)': 'Parameters (B)',
+  '只统计「试用」页的对话': 'Only conversations on the Try page are counted',
+  '右下角的大气泡最划算': 'Large bubbles in the bottom right offer the best value',
+  '各类「通过 / 未通过」数量': 'Pass / fail counts by category',
+  '复制失败，浏览器不允许访问剪贴板': 'Copy failed: the browser does not allow clipboard access',
+  '复制对比': 'Copy comparison',
+  '复制模型名': 'Copy model name',
+  '多模型共用': 'Shared by multiple models',
+  '对话次数': 'Conversation count',
+  '导出网页': 'Export as HTML',
+  '已复制对比表格': 'Comparison table copied',
+  '已导出为网页文件': 'Exported as an HTML file',
+  '已清空快测记录': 'Quick test history cleared',
+  '已选中这一行，按 Ctrl+C 复制': 'Row selected; press Ctrl+C to copy',
+  '收藏 / 取消收藏': 'Add / remove favorite',
+  '无人引用（残留）': 'Unreferenced (leftover)',
+  '日期': 'Date',
+  '显卡温度': 'GPU temperature',
+  '有点吃紧，留意显存': 'Resources are tight; watch VRAM usage',
+  '未测': 'Not tested',
+  '本次': 'Current',
+  '本次 vs 历史最佳 / 平均': 'Current vs personal best / average',
+  '检查之后这里会有延迟对比': 'Latency comparisons appear here after a check',
+  '检查之后这里会有汇总': 'A summary appears here after a check',
+  '检查项': 'Check',
+  '模型没有返回任何内容': 'The model returned no content',
+  '测全部中…': 'Testing all models…',
+  '测全部已装模型': 'Test all installed models',
+  '测试中…': 'Testing…',
+  '清空失败': 'Failed to clear',
+  '清空记录': 'Clear history',
+  '用量已导出为 CSV': 'Usage exported as CSV',
+  '磁盘剩余': 'Free disk space',
+  '磁盘占用（按占比）': 'Disk usage (by share)',
+  '空间构成': 'Space breakdown',
+  '系统负载走势': 'System load over time',
+  '续写': 'Continue writing',
+  '聚合报告已开始下载': 'Combined report download started',
+  '能力矩阵': 'Capability matrix',
+  '至少测两次才能对比': 'Run at least two tests to compare',
+  '装了模型才能画': 'Install a model to see the chart',
+  '设为最快模型': 'Use the fastest model',
+  '试一下': 'Try it',
+  '说「好」就行': 'Just say "OK"',
+  '读取失败': 'Failed to load',
+  '负载轻松，跑得动': 'Light load; ready to run',
+  '质量通过率': 'Quality pass rate',
+  '资源吃紧，建议先关掉别的程序': 'Resources are tight; close other programs first',
+  '跑一次就能看到': 'Run once to see results',
+  '跳到主内容': 'Skip to main content',
+  '还没有对话可导出': 'No conversations to export yet',
+  '还没有用量记录': 'No usage records yet',
+  '适配度气泡图': 'Model fit bubble chart',
+  '速度(t/s)': 'Speed (tokens/s)',
+
   // ---- 通用 ----
   '本地 AI 控制台': 'Local AI Console',
   '安装向导': 'Setup Wizard',
@@ -1055,7 +1127,8 @@ function translateText(text) {
   if (!text || lang === 'zh') return text;
   if (!/[一-鿿]/.test(text)) return text;
   const trimmed = text.trim();
-  const whole = DICT[trimmed];
+  // HTML 抽取器会合并换行和缩进；运行时也按相同规则查整句，避免长段落只翻译零散短语。
+  const whole = DICT[trimmed] ?? DICT[trimmed.replace(/\s+/g, ' ')];
   if (whole !== undefined) return text.replace(trimmed, whole);
   const segmented = text.replace(/[一-鿿][一-鿿0-9A-Za-z：:，。、（）()「」·%/\-—…\s]{0,80}/g, (seg) => {
     const key = seg.trim();
