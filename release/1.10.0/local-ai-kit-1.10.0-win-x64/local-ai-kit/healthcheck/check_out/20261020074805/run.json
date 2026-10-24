@@ -1,0 +1,44 @@
+{
+  "stamp": "20261020074805",
+  "model": "qwen3:8b",
+  "base": "http://127.0.0.1:11434/v1",
+  "eval": {
+    "passed": 20,
+    "total": 21,
+    "rate": 0.9523809523809523,
+    "fails": [
+      "reason-03"
+    ]
+  },
+  "probe": [
+    {
+      "ctx": 21202,
+      "firstDiv": -2,
+      "len": 244,
+      "flip": 0,
+      "sec": 6.714
+    }
+  ],
+  "stability": {
+    "distinct": 1,
+    "share": 1
+  },
+  "verdicts": [
+    {
+      "name": "质量基线",
+      "ok": true,
+      "detail": "20/21 = 95%"
+    },
+    {
+      "name": "长上下文漂移",
+      "ok": true,
+      "detail": "全程 <5%"
+    },
+    {
+      "name": "采样稳定性",
+      "ok": true,
+      "detail": "同一答案占比 100%"
+    }
+  ],
+  "elapsed_s": 123
+}

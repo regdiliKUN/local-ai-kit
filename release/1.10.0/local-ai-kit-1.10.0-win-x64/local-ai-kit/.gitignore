@@ -1,0 +1,36 @@
+# 运行期生成的文件（不应提交）
+配置.json
+配置.json.*.bak
+配置.json.*.tmp
+配置.json.broken
+配置.json.stratabak
+使用记录.json
+出字快测.json
+dsh-runtime/
+ui/index.html.bak
+healthcheck/check_out/
+healthcheck/probe_out/
+__pycache__/
+
+# 打包产物 / 本地部署残留
+*.zip
+*.tar.gz
+node_modules/
+.cache/
+
+# 安装目录里才会生成的 .cmd 入口
+# （在源码目录里是「重建桌面图标」时补出来的，属于运行期产物，不提交。
+#   仓库自带的「① 双击这里开始安装.cmd」和「备用-命令行安装.cmd」是原始入口，必须留着）
+start-ai.cmd
+stop-ai.cmd
+控制台.cmd
+重建桌面图标.cmd
+卸载.cmd
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# 打包的 Node.js 运行时（避免 90MB 进 git 历史）
+node/

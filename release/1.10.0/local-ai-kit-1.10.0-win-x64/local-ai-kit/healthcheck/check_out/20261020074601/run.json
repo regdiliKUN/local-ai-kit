@@ -1,0 +1,50 @@
+{
+  "stamp": "20261020074601",
+  "model": "qwen2.5:0.5b",
+  "base": "http://127.0.0.1:11434/v1",
+  "eval": {
+    "passed": 14,
+    "total": 21,
+    "rate": 0.6666666666666666,
+    "fails": [
+      "fmt-01",
+      "fmt-03",
+      "fmt-04",
+      "reason-02",
+      "reason-03",
+      "fact-02",
+      "safe-01"
+    ]
+  },
+  "probe": [
+    {
+      "ctx": 9293,
+      "firstDiv": 0,
+      "len": 512,
+      "flip": 0.921875,
+      "sec": 1.081
+    }
+  ],
+  "stability": {
+    "distinct": 1,
+    "share": 1
+  },
+  "verdicts": [
+    {
+      "name": "质量基线",
+      "ok": false,
+      "detail": "14/21 = 67%"
+    },
+    {
+      "name": "长上下文漂移",
+      "ok": false,
+      "detail": "ctx 9293 翻转 92.2%"
+    },
+    {
+      "name": "采样稳定性",
+      "ok": true,
+      "detail": "同一答案占比 100%"
+    }
+  ],
+  "elapsed_s": 6
+}

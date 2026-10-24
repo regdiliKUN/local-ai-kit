@@ -1,0 +1,50 @@
+# ============================================================
+#  integrations/dsh/provider-snippet.yml
+#
+#  Manual fallback. `python apply.py --apply` does this for you.
+#
+#  WHERE IT GOES
+#    ~/.dsh/profiles/web/cordis.patch.yml
+#    ~/.dsh/profiles/headless/cordis.patch.yml
+#    ~/.dsh/profiles/desktop/cordis.patch.yml
+#
+#  Inside the plugin entry:
+#
+#      - id: llm-pi-ai
+#        name: '@deepseek-ai/dsh-llm-pi-ai'
+#        config:
+#          providers:
+#            <-- paste the block below here, matching the
+#                indentation of the sibling providers (6 spaces)
+#
+#  The block is a plain sibling of the existing providers. It does
+#  NOT replace ollama-local or any discovery-* entry.
+# ============================================================
+
+      strata-local:
+        displayName: Strata Local (Qwen3.8-Flash-Next 125B MoE)
+        apiKeyEnv: STRATA_API_KEY
+        api: openai-completions
+        baseURL: http://127.0.0.1:8080/v1
+        models:
+          - id: qwen3.8-flash-next-iq2_xs
+            name: Qwen3.8-Flash-Next IQ2_XS (125B MoE, 128K)
+            contextWindow: 131072
+            maxTokens: 32768
+            input: [ text, image ]
+
+# ============================================================
+#  OPTIONAL: make Strata the model dsh boots with.
+#
+#  Find the plugin entry `agent-default-model` near the bottom of
+#  the same file and change its config to:
+#
+#      - id: agent-default-model
+#        name: "@deepseek-ai/dsh-agent-default-model"
+#        config:
+#          provider: strata-local
+#          model: qwen3.8-flash-next-iq2_xs
+#
+#  If you skip this, just pick the Strata entry by hand in
+#  Settings -> Models inside the dsh UI.
+# ============================================================

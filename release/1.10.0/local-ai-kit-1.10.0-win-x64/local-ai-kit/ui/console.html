@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本地 AI 控制台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="console-body">
+
+<a href="#view-dashboard" class="skip-link" id="skipLink">跳到主内容</a>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-title">本地 AI</div>
+        <div class="brand-sub">控制台</div>
+      </div>
+      <button class="help-btn" id="btnHelp" title="快捷键（?）">?</button>
+    </div>
+
+    <ol class="steps" id="tabs">
+      <li data-tab="dashboard" class="active"><span class="dot"></span><span class="label">系统概览</span></li>
+      <li data-tab="models"><span class="dot"></span><span class="label">模型管理</span></li>
+      <li data-tab="play"><span class="dot"></span><span class="label">试用</span></li>
+      <li data-tab="compare"><span class="dot"></span><span class="label">模型对比</span></li>
+      <li data-tab="bench"><span class="dot"></span><span class="label">性能基准</span></li>
+      <li data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
+      <li data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
+      <li data-tab="fix"><span class="dot"></span><span class="label">修复中心</span></li>
+      <li data-tab="tools"><span class="dot"></span><span class="label">诊断与维护</span></li>
+      <li data-tab="services"><span class="dot"></span><span class="label">服务</span></li>
+      <li data-tab="help"><span class="dot"></span><span class="label">帮助</span></li>
+      <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
+    </ol>
+
+    <div class="checklist" id="checklist" hidden>
+      <div class="checklist-head"><span>上手清单</span><b id="checklistCount">0/5</b></div>
+      <div class="checklist-bar"><i id="checklistBar"></i></div>
+      <div id="checklistItems"></div>
+    </div>
+
+    <div class="sidebar-foot" id="sideInfo"></div>
+
+    <div class="notif-wrap">
+      <button class="bell" id="btnBell" title="通知">🔔<span class="badge-count" id="bellCount" hidden>0</span></button>
+      <div class="notif-panel" id="notifPanel" hidden>
+        <div class="notif-head">通知<button class="btn ghost small" id="btnNotifClear">清空</button></div>
+        <ul class="notif-list" id="notifList"></ul>
+      </div>
+    </div>
+  </aside>
+
+  <main class="content">
+
+    <!-- ============ 系统概览 ============ -->
+    <section class="view" id="view-dashboard">
+      <h1>系统概览</h1>
+      <div class="guide">
+        <span class="guide-n">看一眼</span>
+        <span>显卡、内存、磁盘现在什么状态，<b>模型占了多少显存</b>。停服务前先来这里看一眼，能把显存还回去。</span>
+      </div>
+
+      <div class="row-actions dash-tools">
+        <label class="check"><input type="checkbox" id="dashAuto" checked><span>自动刷新（2 秒）</span></label>
+        <button class="btn ghost small" id="btnDashRefresh">立即刷新</button>
+        <span class="row-hint" id="dashStamp">—</span>
+      </div>
+
+      <div class="quickbar">
+        <span class="qb-title">快速操作</span>
+        <button class="btn ghost small" data-quick="models">装模型</button>
+        <button class="btn ghost small" data-quick="health">跑体检</button>
+        <button class="btn ghost small" data-quick="bench">测速度</button>
+        <button class="btn ghost small" data-quick="play">聊两句</button>
+        <button class="btn ghost small" data-quick="backup">备份配置</button>
+        <button class="btn ghost small" data-quick="report">导出报告</button>
+        <button class="btn ghost small" data-quick="fix">修问题</button>
+      </div>
+
+      <div id="dashScore"></div>
+
+      <div id="dashKpi"></div>
+
+      <div class="gauge-row" id="dashGauges">
+        <div class="gauge-card"><div class="gk">显卡显存</div><div class="gv" id="gVram">—</div><div class="gs" id="gVramSub">等待数据</div><div class="gsp" id="gVramSpark"></div></div>
+        <div class="gauge-card"><div class="gk">CPU 占用</div><div class="gv" id="gCpu">—</div><div class="gs" id="gCpuSub">等待数据</div><div class="gsp" id="gCpuSpark"></div></div>
+        <div class="gauge-card"><div class="gk">内存占用</div><div class="gv" id="gMem">—</div><div class="gs" id="gMemSub">等待数据</div><div class="gsp" id="gMemSpark"></div></div>
+        <div class="gauge-card"><div class="gk">磁盘占用</div><div class="gv" id="gDisk">—</div><div class="gs" id="gDiskSub">等待数据</div><div class="gsp" id="gDiskSpark"></div></div>
+      </div>
+
+      <h2 class="sec-h">系统负载走势</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashLoad"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="panel">
+          <div class="panel-h">显卡</div>
+          <div id="dashGpu" class="panel-b"><div class="loading"><span class="spinner"></span> 读取中…</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-h">正在运行的模型</div>
+          <div id="dashModels" class="panel-b"><div class="loading"><span class="spinner"></span> 读取中…</div></div>
+        </div>
+      </div>
+
+      <h2 class="sec-h">显存去哪了</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashVram"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">最近用了多少</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashUsage"><div class="chart-empty">在「试用」页聊过之后这里会有记录</div></div>
+        <div class="row-actions" style="padding:0 14px 14px">
+          <button class="btn ghost small" id="btnCsvUsage">导出 CSV</button>
+          <span class="row-hint">只统计「试用」页的对话</span>
+        </div>
+      </div>
+
+      <h2 class="sec-h">磁盘健康</h2>
+      <div class="panel">
+        <div class="panel-b" id="dashDisks"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">机器信息</h2>
+      <div class="summary" id="dashSystem"></div>
+    </section>
+
+    <!-- ============ 模型管理 ============ -->
+    <section class="view" id="view-models">
+      <h1>模型管理</h1>
+      <div class="guide">
+        <span class="guide-n">能做什么</span>
+        <span>在这里<b>加装</b>或<b>删除</b>模型。删除会立刻释放磁盘空间，不影响其它模型。</span>
+      </div>
+
+      <div class="status-strip" id="statusStrip"></div>
+
+      <div class="list-tools">
+        <input type="search" id="modelSearch" placeholder="搜索模型名，例如 qwen" spellcheck="false">
+        <select id="modelSort">
+          <option value="size">按体积（大的在前）</option>
+          <option value="name">按名称</option>
+          <option value="date">按安装时间（新在前）</option>
+        </select>
+        <button class="btn ghost small" id="btnPickIdle" title="勾选所有装完没用过、或超过 30 天没动的模型">勾选闲置</button>
+        <button class="btn ghost small" id="btnBatchDel" disabled>批量删除</button>
+        <button class="btn ghost small star-filter" id="btnStarFilter" title="只看收藏的模型">☆ 收藏</button>
+        <span class="list-count" id="modelFilterCount"></span>
+      </div>
+
+      <div id="idleSummary" hidden></div>
+
+      <h2 class="sec-h">已安装的模型 <span class="sec-n" id="modelCount"></span></h2>
+      <div id="modelList" class="stack"><div class="loading"><span class="spinner"></span> 正在读取…</div></div>
+
+      <h2 class="sec-h">空间占用</h2>
+      <p class="lead">看看硬盘到底被什么占了 —— 删掉不用的模型，空间会立刻回来。</p>
+      <div class="space-panel" id="spacePanel">
+        <div class="loading"><span class="spinner"></span> 正在统计…</div>
+      </div>
+
+      <h2 class="sec-h">体积分布</h2>
+      <div class="panel">
+        <div class="panel-b" id="sizeHist"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">能力矩阵</h2>
+      <div class="panel">
+        <div class="panel-b" id="capsMatrix"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">磁盘占用（按占比）</h2>
+      <div class="panel">
+        <div class="panel-b" id="spaceTreemap"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">空间构成</h2>
+      <div class="panel">
+        <div class="panel-b" id="spaceBreakdown"><div class="chart-empty">读取中…</div></div>
+      </div>
+
+      <h2 class="sec-h">加装新模型</h2>
+      <p class="lead">从 Ollama 官方模型库下载。名字形如 <code>qwen3:8b</code>，可以在
+        <a class="hint-link" href="https://ollama.com/library" target="_blank" rel="noreferrer">模型库</a>里挑。</p>
+
+      <details class="adv" id="libBox">
+        <summary>搜官方模型库（联网时可用）</summary>
+        <div class="adv-body">
+          <div class="custom-row" style="border:0;margin:0;padding:0">
+            <input type="search" id="libQuery" placeholder="例如 qwen、llama、coder" spellcheck="false">
+            <button class="btn primary small" id="btnLibSearch">搜索</button>
+          </div>
+          <div class="lib-filters">
+            <span class="lff">能力</span>
+            <label class="check"><input type="checkbox" data-libcap="tools"><span>工具调用</span></label>
+            <label class="check"><input type="checkbox" data-libcap="vision"><span>看图</span></label>
+            <label class="check"><input type="checkbox" data-libcap="thinking"><span>深度思考</span></label>
+            <label class="check"><input type="checkbox" data-libcap="embedding"><span>向量化</span></label>
+            <span class="lff">排序</span>
+            <select id="libSort" class="ctx-select" style="min-width:120px;padding:6px 9px;font-size:12.5px">
+              <option value="pulls">下载最多</option>
+              <option value="name">名称</option>
+              <option value="sizes">尺寸多</option>
+            </select>
+          </div>
+          <div id="libResults" class="lib-results"><p class="row-hint">搜一下官方库，几百个模型里挑一个合适的。</p></div>
+        </div>
+      </details>
+
+      <div class="quick-row" id="quickModels"></div>
+      <div class="custom-row">
+        <span class="check">模型名</span>
+        <input type="text" id="newModel" placeholder="例如 qwen3:8b" spellcheck="false">
+        <button class="btn primary small" id="btnPull">加入下载队列</button>
+      </div>
+      <p class="custom-err" id="newModelErr" hidden>模型名不合法，只能用小写字母、数字和 <code>.-_/:</code></p>
+      <p class="row-hint">可以连续加几个，它们会排队依次下载 —— 不用等一个下完再输下一个。</p>
+
+      <div class="queue-panel" id="queuePanel" hidden>
+        <div class="queue-head">
+          <span class="queue-title">下载队列</span>
+          <span class="queue-count" id="queueCount"></span>
+          <button class="btn ghost small" id="btnQueueClear">清掉已完成的</button>
+        </div>
+        <div id="queueList"></div>
+        <div class="panel-b" id="queueTimeline" style="margin-top:10px"></div>
+      </div>
+
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="progressTitle">下载中</span>
+          <span class="progress-pct" id="progressPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="progressBar"></div></div>
+        <div class="progress-stats" id="progressStats"></div>
+      </div>
+
+      <details class="logbox" id="logBox" hidden>
+        <summary>查看详细日志</summary>
+        <pre id="log" data-no-i18n></pre>
+      </details>
+    </section>
+
+    <!-- ============ 上下文与模型 ============ -->
+    <section class="view" id="view-context" hidden>
+      <h1>上下文与模型</h1>
+      <div class="guide">
+        <span class="guide-n">说明</span>
+        <span>这里改的是<b>工作台真正使用的配置</b>，和重跑安装向导效果一致。改完点「应用」，<b>再重启工作台</b>才生效。</span>
+      </div>
+
+      <div id="vramPlan" hidden></div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">使用的模型</div>
+            <div class="s">从已安装的模型里选。切换后工作台会用新模型，不用重装。</div>
+          </div>
+          <select id="ctxModel" class="ctx-select"></select>
+        </div>
+
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">上下文长度（窗口）</div>
+            <div class="s">一次对话最多能装多少 token。越大越能记住前文，但也越吃显存、越慢。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="number" id="ctxWindow" class="ctx-input" min="2048" max="262144" step="1024">
+            <span class="ctx-unit">tokens</span>
+          </div>
+        </div>
+
+        <div class="quick-row" id="ctxPresets"></div>
+
+        <details class="ctx-adv" id="ctxAdv">
+          <summary>高级：自己定输出上限与压缩参数</summary>
+          <div class="ctx-grid">
+            <label>输出上限 maxTokens
+              <input type="number" id="ctxMaxTokens" class="ctx-input" step="256" min="256">
+            </label>
+            <label>压缩余量 headroomTokens
+              <input type="number" id="ctxHeadroom" class="ctx-input" step="256" min="128">
+            </label>
+            <label>压缩阈值 thresholdRatio
+              <input type="number" id="ctxThreshold" class="ctx-input" step="0.05" min="0.3" max="0.9">
+            </label>
+            <label>保留比例 retainRatio
+              <input type="number" id="ctxRetain" class="ctx-input" step="0.05" min="0.05" max="0.5">
+            </label>
+          </div>
+          <p class="row-hint">
+            留空 = 按窗口自动推导。压缩余量太小会让压缩过于频繁，太大会让压力预算变成负数——那样压缩会被静默禁用，
+            表现就是「聊久了回答越来越短」。下面的实时检查会替你算。
+          </p>
+        </details>
+      </div>
+
+      <h2 class="sec-h">实时检查</h2>
+      <div class="summary" id="ctxBudget"></div>
+
+      <h2 class="sec-h">窗口是怎么被分掉的</h2>
+      <div class="panel">
+        <div class="panel-b" id="ctxWaterfall"><div class="chart-empty">改一下上面的数字就能看到</div></div>
+      </div>
+
+      <h2 class="sec-h">变更预览</h2>
+      <div class="summary" id="ctxDiff"></div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnApplyCtx">应用配置</button>
+        <button class="btn ghost" id="btnTestCtx" title="用选中的模型发一句话，确认它真的能出字">试一下</button>
+        <button class="btn ghost small" id="btnResetCtx">全部改回自动</button>
+        <button class="btn ghost small" id="btnReloadCtx">重新读取</button>
+      </div>
+      <p class="row-hint" id="ctxApplyHint">应用前会自动备份原来的 配置.json 与两个 profile 文件。</p>
+
+      <h2 class="sec-h">出字快测 · 横向对比</h2>
+      <p class="row-hint">切模型要重启工作台才生效，重启完才发现跑不动最坑。这里把每次「试一下」的结果留下来，
+        多个模型并列比：谁出字快、谁根本跑不动，一眼选。点「测全部」一次性把已装模型都跑一遍。</p>
+      <div class="row-actions">
+        <button class="btn ghost" id="btnProbeAll">测全部已装模型</button>
+        <button class="btn ghost small" id="btnProbeUse" title="把出字最快的模型选中到上面的「模型」">设为最快模型</button>
+        <button class="btn ghost small" id="btnProbeCopy" title="把对比结果复制成 Markdown 表格">复制对比</button>
+        <button class="btn ghost small" id="btnProbeClear" title="清空全部快测记录">清空记录</button>
+      </div>
+      <div class="panel">
+        <div class="panel-b" id="probeTable"><div class="chart-empty">切到这一页会自动加载</div></div>
+      </div>
+    </section>
+
+    <!-- ============ 试用 ============ -->
+    <section class="view" id="view-play" hidden>
+      <h1>试用</h1>
+      <div class="guide">
+        <span class="guide-n">干嘛用</span>
+        <span>不用切到工作台，直接在这里跟模型说两句话 —— <b>换个模型试试效果</b>、<b>调提示词</b>、<b>看看它有多快</b>。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">用哪个模型</div>
+            <div class="s">只能选已安装的模型。切换后下一条消息就用新的模型。</div>
+          </div>
+          <select id="playModel" class="ctx-select"></select>
+        </div>
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">随机性 temperature</div>
+            <div class="s">0 最稳（适合代码、事实类问题），1 以上更发散（适合创意）。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="number" id="playTemp" class="ctx-input" min="0" max="2" step="0.1" value="0.7">
+            <span class="ctx-unit">输出上限 <input type="number" id="playMax" class="ctx-input" style="width:96px" min="64" max="4096" step="64" value="1024"> tokens</span>
+          </div>
+        </div>
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">系统提示（可选）</div>
+            <div class="s">给它一个角色或规则，比如「你是一个只会说人话的助手」。</div>
+          </div>
+          <input type="text" id="playSystem" class="ctx-input" style="width:280px" placeholder="留空 = 模型的默认设定">
+        </div>
+      </div>
+
+      <h2 class="sec-h">对话</h2>
+      <div class="row-actions chat-tools">
+        <select id="playSession" class="ctx-select" style="min-width:220px"></select>
+        <button class="btn ghost small" id="btnPlayNew">新对话</button>
+        <button class="btn ghost small danger" id="btnPlayDel">删除</button>
+        <span class="row-hint" id="playSessionHint">对话会自动保存，关掉浏览器也在。</span>
+      </div>
+      <div class="branch-bar" id="playBranches" hidden></div>
+      <div class="chat" id="chatBox" data-no-i18n>
+        <div class="chat-empty" id="chatEmpty">还没开始。问点什么试试 —— 比如「用一句话解释什么是显存」。</div>
+      </div>
+
+      <div class="chat-input">
+        <textarea id="playInput" rows="2" placeholder="输入消息，Ctrl+Enter 发送"></textarea>
+        <button class="btn primary" id="btnPlay">发送</button>
+        <button class="btn ghost" id="btnPlayStop" hidden>停止</button>
+        <button class="btn ghost" id="btnPlayRegen" hidden>重新生成</button>
+      </div>
+      <div class="chat-stats" id="chatStats"></div>
+      <div class="chat-stats" id="ctxUsage"></div>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnExportChat">导出对话（Markdown）</button>
+        <button class="btn ghost small" id="btnExportHtml">导出网页</button>
+        <button class="btn ghost small" id="btnCopyChat">复制对话</button>
+      </div>
+    </section>
+
+    <!-- ============ 性能基准 ============ -->
+    <section class="view" id="view-bench" hidden>
+      <h1>性能基准</h1>
+      <div class="guide">
+        <span class="guide-n">量一量</span>
+        <span>「感觉有点慢」到底是<b>生成慢</b>还是<b>读上下文慢</b>？这两种慢的解法完全不一样，这里分开测。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">测哪个模型</div>
+            <div class="s">第一次测会把模型读进显存，可能要等十几秒，属正常。</div>
+          </div>
+          <select id="benchModel" class="ctx-select"></select>
+        </div>
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">重复次数</div>
+            <div class="s">取中位数。次数越多越准，也越慢。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="number" id="benchRuns" class="ctx-input" min="1" max="5" step="1" value="3">
+            <span class="ctx-unit">次</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnBench">开始测速</button>
+        <span class="row-hint" id="benchHint">大约 30 秒。</span>
+      </div>
+
+      <div class="progress-wrap" id="benchWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="benchTitle">测速中…</span>
+          <span class="progress-pct" id="benchPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="benchBar"></div></div>
+      </div>
+
+      <h2 class="sec-h">结果</h2>
+      <div class="summary" id="benchResult">
+        <div class="row"><span class="k">—</span><span class="v">还没有测过</span></div>
+      </div>
+
+      <h2 class="sec-h">和同档显卡比</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchChart"><div class="chart-empty">跑一次就能看到对比</div></div>
+      </div>
+
+      <h2 class="sec-h">本次 vs 历史最佳 / 平均</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchGroup"><div class="chart-empty">跑一次就能看到</div></div>
+      </div>
+
+      <h2 class="sec-h">速度变化</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchTrend"><div class="chart-empty">还没有历史记录</div></div>
+      </div>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnClearBench">清空测速历史</button>
+        <button class="btn ghost small" id="btnCsvBench">导出 CSV</button>
+        <button class="btn ghost small" id="btnMdBench">导出 Markdown</button>
+        <span class="row-hint" id="benchHistoryPath"></span>
+      </div>
+
+      <h2 class="sec-h">和历史最佳比</h2>
+      <div class="summary" id="benchCompare">
+        <div class="row"><span class="k">—</span><span class="v">还没有历史数据</span></div>
+      </div>
+
+      <h2 class="sec-h">上次 vs 本次</h2>
+      <div class="panel">
+        <div class="panel-b" id="benchSlope"><div class="chart-empty">至少测两次才能对比</div></div>
+      </div>
+
+      <h2 class="sec-h">这说明什么</h2>
+      <div class="summary" id="benchAdvice">
+        <div class="row"><span class="k">—</span><span class="v">还没有测过</span></div>
+      </div>
+    </section>
+
+    <!-- ============ 模型对比 ============ -->
+    <section class="view" id="view-compare" hidden>
+      <h1>模型对比</h1>
+      <div class="guide">
+        <span class="guide-n">用在哪</span>
+        <span>「换个模型会不会更好」是最难自己判断的问题。同一个问题<b>同时问几个模型</b>，并排一看就清楚了。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">要比哪些模型</div>
+            <div class="s">最多 4 个。只能选已安装的模型。</div>
+          </div>
+          <div class="ctx-inline" id="compareModels"></div>
+        </div>
+      </div>
+
+      <div class="set-card" style="margin-top:12px">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">问什么</div>
+            <div class="s">同一个问题会原样发给每个模型。</div>
+          </div>
+          <input type="text" id="comparePrompt" class="ctx-input" style="width:320px" placeholder="例如：解释一下什么是 KV cache" value="用三句话解释什么是显存。">
+        </div>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnCompare">开始对比</button>
+        <span class="row-hint" id="compareHint">最多 4 个模型，依次跑（并发会互相抢显存）。</span>
+      </div>
+
+      <h2 class="sec-h">结果</h2>
+      <div class="compare-grid" id="compareResults">
+        <div class="empty">选好模型，点「开始对比」。</div>
+      </div>
+
+      <h2 class="sec-h">哪个模型更适合这台机器</h2>
+      <p class="lead">按你现在的显卡、内存和已装模型估的适配度。<b>只是估算</b>，但比凭感觉选靠谱。</p>
+      <div class="fit-grid" id="fitGrid"><div class="loading"><span class="spinner"></span> 计算中…</div></div>
+
+      <h2 class="sec-h">适配度气泡图</h2>
+      <p class="lead">横轴＝体积(GB)，纵轴＝估算速度，气泡大小＝参数量。<b>右下角的大气泡最划算</b>——小体积、高速度、大参数。</p>
+      <div class="panel">
+        <div class="panel-b" id="fitBubble"><div class="chart-empty">装了模型才能画</div></div>
+      </div>
+    </section>
+
+    <!-- ============ 模型体检 ============ -->
+    <section class="view" id="view-health" hidden>
+      <h1>模型体检</h1>
+      <div class="guide">
+        <span class="guide-n">什么时候用</span>
+        <span>回答变短、长对话跑偏、同一问题有时对有时错 —— 先跑一次，<b>别急着换显卡</b>。多数情况是配置问题，不是模型不行。</span>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnHealth">开始体检</button>
+        <button class="btn ghost small" id="btnHealthQuick">快速体检（跳过 32K）</button>
+      </div>
+      <p class="row-hint">完整版约 40 秒。只读模型接口、只写报告文件，<b>不改任何配置</b>。</p>
+
+      <div class="progress-wrap" id="healthWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="healthTitle">体检中…</span>
+          <span class="progress-pct" id="healthPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="healthBar"></div></div>
+        <div class="progress-stats" id="healthStats"></div>
+      </div>
+
+      <h2 class="sec-h">结果</h2>
+      <div class="summary" id="healthResult">
+        <div class="row"><span class="k">—</span><span class="v">还没有跑过</span></div>
+      </div>
+
+      <h2 class="sec-h">各分类通过率</h2>
+      <div class="panel">
+        <div class="panel-b" id="healthChart"><div class="chart-empty">跑一次就能看到每类题的通过情况</div></div>
+      </div>
+
+      <h2 class="sec-h">各类「通过 / 未通过」数量</h2>
+      <div class="panel">
+        <div class="panel-b" id="healthGroup"><div class="chart-empty">跑一次就能看到</div></div>
+      </div>
+
+      <h2 class="sec-h">成绩变化</h2>
+      <div class="panel">
+        <div class="panel-b" id="healthTrend"><div class="chart-empty">还没有历史记录</div></div>
+      </div>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnClearHealth">清空体检历史</button>
+        <button class="btn ghost small" id="btnCsvHealth">导出 CSV</button>
+        <button class="btn ghost small" id="btnMdHealth">导出 Markdown</button>
+        <span class="row-hint" id="healthHistoryPath"></span>
+      </div>
+
+      <h2 class="sec-h">怎么读这个结果</h2>
+      <div class="summary" id="healthGuide">
+        <div class="row"><span class="k">质量基线</span><span class="v">21 道机器可判分的题，低于 90% 说明能力真的掉了 —— 该换更高的量化档</span></div>
+        <div class="row"><span class="k">长上下文漂移</span><span class="v">上下文越长答案越容易变。把窗口控制在漂移起点以内就行</span></div>
+        <div class="row"><span class="k">采样稳定性</span><span class="v">同一个问题连问几次，答案是否一致。不一致说明不是「笨」，是采样参数不稳</span></div>
+      </div>
+
+      <h2 class="sec-h">模型实测排行</h2>
+      <p class="lead">在<strong>你自己的机器上</strong>用同一套题挨个测一遍 —— 官网跑分是别人的机器、别人的问题。</p>
+      <div class="row-actions">
+        <button class="btn primary" id="btnRanking">开始实测排行</button>
+        <span class="row-hint" id="rankingHint">每个模型都要先加载进显存，5 个模型大概 3~5 分钟。</span>
+      </div>
+      <div class="progress-wrap" id="rankWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="rankTitle">实测中…</span>
+          <span class="progress-pct" id="rankPct">0%</span>
+        </div>
+        <div class="progress"><div class="bar" id="rankBar"></div></div>
+      </div>
+      <div id="rankingResult" class="stack"></div>
+
+      <details class="logbox" id="healthLogBox" hidden>
+        <summary>查看详细日志</summary>
+        <pre id="healthLog" data-no-i18n></pre>
+      </details>
+    </section>
+
+    <!-- ============ 诊断与维护 ============ -->
+    <section class="view" id="view-tools" hidden>
+      <h1>诊断与维护</h1>
+      <div class="guide">
+        <span class="guide-n">出问题时</span>
+        <span>下载不动、更新查不到、硬盘越来越满 —— 先在这里查一遍，<b>不用重装</b>。</span>
+      </div>
+
+      <h2 class="sec-h">诊断包</h2>
+      <div class="row-actions">
+        <button class="btn primary" id="btnBundle">导出诊断包</button>
+        <span class="row-hint">报告 + 脱敏配置 + 日志 + 系统信息，打成一个 zip</span>
+      </div>
+      <div class="guide" style="margin-top:8px">
+        <span class="guide-n">为什么</span>
+        <span>找人帮忙时不用再一条条截图。包里<b>不含任何密钥</b>，配置是脱敏后的。</span>
+      </div>
+
+      <h2 class="sec-h">网络连通性</h2>
+      <div class="row-actions">
+        <button class="btn primary" id="btnNetCheck">检查网络</button>
+        <span class="row-hint" id="netStamp">—</span>
+      </div>
+      <div class="summary" id="netResult"><div class="row"><span class="k">—</span><span class="v">还没检查</span></div></div>
+      <div class="panel-b" id="netChart" style="margin-top:10px"><div class="chart-empty">检查之后这里会有延迟对比</div></div>
+
+      <h2 class="sec-h">清理下载残留</h2>
+      <p class="lead">下载中断会在模型目录里留下没人引用的分片。删掉不影响已装的模型。</p>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnCheckOrphan">检查残留</button>
+        <button class="btn ghost small danger" id="btnCleanup" disabled>清理</button>
+        <span class="row-hint" id="orphanHint">先检查，再决定要不要清。</span>
+      </div>
+      <div class="summary" id="orphanResult"><div class="row"><span class="k">—</span><span class="v">还没检查</span></div></div>
+
+      <h2 class="sec-h">诊断报告</h2>
+      <p class="lead">把环境、配置、日志打包成一个文件，发给别人就能直接看到问题在哪（已自动去掉用户名和令牌）。</p>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnReport">下载诊断报告</button>
+        <button class="btn ghost small" id="btnReportAgg">下载聚合报告（JSON）</button>
+      </div>
+    </section>
+
+    <!-- ============ 服务 ============ -->
+    <section class="view" id="view-services" hidden>
+      <h1>服务</h1>
+      <div class="guide">
+        <span class="guide-n">一句话</span>
+        <span>这一页是「现在有哪些东西在跑」。<b>停服务前先看一眼</b>，别把不该关的关了。</span>
+      </div>
+
+      <div id="svcCards" class="svc-grid">
+        <div class="loading"><span class="spinner"></span> 读取中…</div>
+      </div>
+
+      <div class="row-actions" id="svcActions"></div>
+      <p class="row-hint" id="svcHint2"></p>
+    </section>
+
+    <!-- ============ 帮助 ============ -->
+    <section class="view" id="view-help" hidden>
+      <h1>帮助</h1>
+      <div class="guide">
+        <span class="guide-n">五分钟</span>
+        <span>第一次用的话，读完这一页就够了。别的都能自己摸索。</span>
+      </div>
+
+      <div class="help-grid" id="helpGrid"></div>
+
+      <h2 class="sec-h">遇到问题按这个顺序查</h2>
+      <ol class="help-steps">
+        <li><b>「修复中心」→ 重新检查</b> —— 它会直接告诉你哪一环断了，很多问题一键就好。</li>
+        <li><b>「诊断与维护」→ 检查网络</b> —— 模型下不来，八成是网络或代理。</li>
+        <li><b>「诊断与维护」→ 下载诊断报告</b> —— 把那个文件发给别人，对方就能直接看到问题在哪。</li>
+        <li><b>看日志</b> —— 服务设置页里点「查看日志」，或在 <code>%TEMP%\localai-console.log</code>。</li>
+      </ol>
+
+      <h2 class="sec-h">完整文档</h2>
+      <p class="lead">
+        项目根目录里有 <code>使用说明.html</code>（双击用浏览器打开）、
+        <code>README.md</code> 和 <code>CHANGELOG.md</code>。
+        在线版：<a class="hint-link" href="https://github.com/regdiliKUN/local-ai-kit" target="_blank" rel="noreferrer">GitHub 仓库</a>
+      </p>
+    </section>
+
+    <!-- ============ 修复中心 ============ -->
+    <section class="view" id="view-fix" hidden>
+      <h1>修复中心</h1>
+      <div class="guide">
+        <span class="guide-n">用不上的时候</span>
+        <span>先点「重新检查」，看看是哪一环断了；能自动修的直接一键修，<b>不用重装</b>。</span>
+      </div>
+
+      <div class="row-actions">
+        <button class="btn primary" id="btnDiagnose">重新检查</button>
+        <span class="row-hint" id="fixStamp">—</span>
+      </div>
+
+      <div class="fix-summary" id="fixSummary"><div class="loading"><span class="spinner"></span> 检查中…</div></div>
+
+      <div class="panel-b" id="fixFunnel" style="margin-bottom:14px"><div class="chart-empty">检查之后这里会有汇总</div></div>
+
+      <h2 class="sec-h">逐项结果</h2>
+      <div class="stack" id="fixList"><div class="loading"><span class="spinner"></span> 检查中…</div></div>
+    </section>
+
+    <!-- ============ 服务设置 ============ -->
+    <section class="view" id="view-settings" hidden>
+      <h1>服务设置</h1>
+      <div class="guide">
+        <span class="guide-n">提示</span>
+        <span>这些开关都是<b>立刻生效</b>的，改完不用重启电脑。</span>
+      </div>
+
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">开机自动启动工作台</div>
+            <div class="s">打开后，每次开机都会自动启动服务并加载模型（会占着显存）。平时想自己控制的话就别开。</div>
+          </div>
+          <label class="switch" id="swAutostartWrap"><input type="checkbox" id="swAutostart"><span class="track"><span class="knob"></span></span></label>
+        </div>
+
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">局域网共享（把模型开放给同网络的其它设备）</div>
+            <div class="s">打开后，同一个 WiFi 下的手机、平板、其它电脑都能调用你机器上的模型。</div>
+          </div>
+          <label class="switch" id="swLanWrap"><input type="checkbox" id="swLan"><span class="track"><span class="knob"></span></span></label>
+        </div>
+
+        <div class="warn-block" id="lanWarn" hidden>
+          <b>⚠️ 打开局域网共享前请想清楚：</b><br>
+          这会把 Ollama 的接口暴露到整个局域网（<code>0.0.0.0:11434</code>）。
+          在公共 WiFi、宿舍网、公司网里，<b>同网段的任何人都能用你的显卡跑模型</b>，也能看到你正在用的模型。
+          只在<b>你信任的家庭网络</b>里打开；用完建议关掉。
+          <div class="lan-confirm">
+            <label class="check"><input type="checkbox" id="lanAgree"> 我知道了，仍然要打开</label>
+            <button class="btn primary small" id="lanOk" disabled>确认打开</button>
+            <button class="btn ghost small" id="lanCancel">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sec-h">服务控制</h2>
+      <div class="row-actions">
+        <button class="btn primary" id="btnStartSvc">启动工作台</button>
+        <button class="btn ghost" id="btnStopSvc">停止服务并释放显存</button>
+      </div>
+      <p class="row-hint" id="svcHint">「启动工作台」等于双击桌面上的「启动本地AI」。</p>
+
+      <h2 class="sec-h">快捷入口</h2>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnOpenInstall">打开安装目录</button>
+        <button class="btn ghost small" id="btnOpenModels">打开模型目录</button>
+        <button class="btn ghost small" id="btnReload">刷新状态</button>
+      </div>
+
+      <h2 class="sec-h">日志与版本</h2>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnShowLog">查看日志</button>
+        <button class="btn ghost small" id="btnDownloadLog">下载日志</button>
+        <button class="btn ghost small" id="btnCheckVersion">检查更新</button>
+        <button class="btn ghost small" id="btnTheme">切换深色 / 浅色</button>
+      </div>
+      <p class="row-hint" id="logPathHint">日志位置：%TEMP%\localai-console.log</p>
+      <details class="logbox" id="consoleLogBox" hidden>
+        <summary>日志内容（最后 200 行）</summary>
+        <pre id="consoleLog" data-no-i18n></pre>
+      </details>
+
+      <h2 class="sec-h">服务自愈</h2>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">Ollama 掉了自动重启</div>
+            <div class="s">显卡驱动更新、误关托盘程序、休眠没恢复时，Ollama 会意外退出。
+              打开这个开关，控制台会每 15 秒检查一次，发现掉了就自动拉起来。
+              <b>默认关闭</b> —— 擅自拉起服务会占显存。</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="swSelfHeal"><span class="track"><span class="knob"></span></span></label>
+        </div>
+      </div>
+
+      <h2 class="sec-h">配置检查点</h2>
+      <p class="lead">每次改配置前都会自动留一份。改坏了可以一键退回来。</p>
+      <div id="checkpointList" class="stack"><div class="loading"><span class="spinner"></span> 读取中…</div></div>
+
+      <h2 class="sec-h">快捷键</h2>
+      <p class="lead">点一下键位再按新键，就能改。改完立刻生效。</p>
+      <div id="shortcutList" class="stack"></div>
+
+      <h2 class="sec-h">界面语言</h2>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">Language</div>
+            <div class="s">界面语言。切换后立刻生效，下次打开还是这个。</div>
+          </div>
+          <select id="langSelect" class="ctx-select" style="min-width:160px"></select>
+        </div>
+      </div>
+
+      <h2 class="sec-h">界面大小</h2>
+      <div class="set-card">
+        <div class="set-row">
+          <div class="set-text">
+            <div class="t">字号缩放</div>
+            <div class="s">字太小看不清就调大一点。浏览器缩放（Ctrl +）也可以，但只影响这个页面。</div>
+          </div>
+          <div class="ctx-inline">
+            <input type="range" id="zoomRange" min="90" max="130" step="5" value="100" style="width:150px">
+            <span class="ctx-unit" id="zoomValue">100%</span>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sec-h">卸载</h2>
+      <div class="row-actions">
+        <button class="btn ghost small danger" id="btnUninstall">卸载本地 AI</button>
+      </div>
+      <p class="row-hint">
+        会在新窗口里打开卸载程序。它会先把「要删什么、不删什么」列清楚，
+        再逐条问你确认 —— 不会直接删东西。
+      </p>
+
+      <h2 class="sec-h">当前配置</h2>
+      <div class="summary" id="cfgSummary"></div>
+      <p class="row-hint">
+        要改模型、上下文长度或压缩参数，去左侧「<b>上下文与模型</b>」页直接改，不用重跑安装向导。
+      </p>
+
+      <h2 class="sec-h">备份与搬家</h2>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnExportCfg">导出配置</button>
+        <button class="btn ghost small" id="btnImportCfg">导入配置</button>
+        <input type="file" id="fileImportCfg" accept="application/json,.json" hidden>
+      </div>
+      <p class="row-hint" id="importHint">
+        导出会把「模型、模型目录、上下文、压缩参数」和 dsh 的两个 profile 一起存成一个 JSON。
+        换电脑时把那个文件带过去，导入就能还原。
+      </p>
+
+      <h2 class="sec-h">离线安装包</h2>
+      <p class="lead">给没网的机器装：把整套打成一个 zip，拷过去解压双击就行。</p>
+      <div class="row-actions">
+        <button class="btn ghost small" id="btnPackage">生成离线安装包</button>
+        <label class="check"><input type="checkbox" id="pkgWithNode"><span>带上便携 Node（目标机器没 Node 时需要）</span></label>
+      </div>
+      <p class="row-hint" id="pkgHint">会放到 %TEMP%\local-ai-offline 目录。</p>
+    </section>
+
+  </main>
+</div>
+
+<!-- 首次使用引导 -->
+<div class="tour-mask" id="tourMask" hidden>
+  <div class="tour" role="dialog" aria-modal="true" aria-label="使用引导">
+    <div class="tour-step" id="tourStep">1 / 4</div>
+    <h2 id="tourTitle">欢迎来到本地 AI 控制台</h2>
+    <p id="tourText">这里能管模型、聊模型、测模型、修问题。花一分钟看完这四点，以后就不用再问了。</p>
+    <div class="tour-dots" id="tourDots"></div>
+    <div class="tour-actions">
+      <button class="btn ghost small" id="tourSkip">跳过</button>
+      <button class="btn ghost small" id="tourPrev">上一步</button>
+      <button class="btn primary small" id="tourNext">下一步</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- 命令面板：Ctrl+K 打开，输入关键字直接跳到对应操作 -->
+<div class="palette-mask" id="paletteMask" hidden>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="命令面板">
+    <input type="text" id="paletteInput" placeholder="输入命令或页面名…（Esc 关闭）" spellcheck="false" autocomplete="off">
+    <ul class="palette-list" id="paletteList"></ul>
+    <div class="palette-foot">↑↓ 选择 · Enter 执行 · Esc 关闭</div>
+  </div>
+</div>
+
+<script src="charts.js"></script>
+<script src="guidance.js"></script>
+<script src="i18n.js"></script>
+<script src="conversation-tree.js"></script>
+<script src="console.js"></script>
+</body>
+</html>

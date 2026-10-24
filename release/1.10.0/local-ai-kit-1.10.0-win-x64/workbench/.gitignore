@@ -1,0 +1,40 @@
+# ---- 本地配置：绝不提交 ----
+config/paths.bat
+config/paths.local.bat
+
+# ---- 运行时产物 ----
+logs/
+*.log
+launcher.log
+webui.log
+uploads/
+webui/uploads/
+__pycache__/
+*.pyc
+*.pyo
+
+# ---- 备份文件 ----
+*.bak
+*.bak-*
+*.backup
+
+# ---- 凭据 ----
+.credentials.yaml
+*.credentials.yaml
+.env
+.env.*
+
+# ---- 模型与权重（体积过大）----
+*.gguf
+*.safetensors
+*.bin
+packs/
+models/
+mtp/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

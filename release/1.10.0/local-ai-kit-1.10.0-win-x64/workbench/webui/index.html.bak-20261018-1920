@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strata Chat · 实时对话 + 文件夹上传</title>
+<style>
+  :root{
+    --bg:#0f1115;
+    --bg-2:#151922;
+    --bg-3:#1b2029;
+    --panel:#12161d;
+    --border:#262c38;
+    --border-2:#323a49;
+    --text:#e6e9ef;
+    --text-dim:#9aa4b5;
+    --text-faint:#6b7484;
+    --accent:#4f8cff;
+    --accent-2:#3a6fd8;
+    --green:#3ecf8e;
+    --red:#ff5c5c;
+    --amber:#f0b429;
+    --user-bg:#1e2836;
+    --ai-bg:#161b24;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--bg);color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    font-size:14px;overflow:hidden;
+  }
+  .app{display:flex;flex-direction:column;height:100vh}
+
+  /* ---------- 顶栏 ---------- */
+  header{
+    display:flex;align-items:center;gap:14px;
+    padding:10px 16px;background:var(--panel);
+    border-bottom:1px solid var(--border);flex:0 0 auto;
+  }
+  .logo{font-weight:600;font-size:15px;letter-spacing:.3px}
+  .logo span{color:var(--accent)}
+  .status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--text-faint);transition:.3s}
+  .dot.on{background:var(--green);box-shadow:0 0 8px var(--green)}
+  .dot.off{background:var(--red)}
+  .spacer{flex:1}
+  .hbtn{
+    background:var(--bg-3);border:1px solid var(--border-2);color:var(--text);
+    padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12.5px;transition:.15s;
+  }
+  .hbtn:hover{background:var(--border);border-color:var(--accent)}
+  .hbtn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ---------- 主体 ---------- */
+  .main{display:flex;flex:1;min-height:0}
+
+  /* ---------- 侧栏 ---------- */
+  aside{
+    width:330px;flex:0 0 330px;background:var(--panel);
+    border-right:1px solid var(--border);
+    display:flex;flex-direction:column;min-height:0;
+  }
+  .side-head{
+    padding:12px 14px;border-bottom:1px solid var(--border);
+    font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .side-body{flex:1;overflow-y:auto;padding:12px 14px;min-height:0}
+
+  .drop{
+    border:1.5px dashed var(--border-2);border-radius:10px;
+    padding:20px 14px;text-align:center;cursor:pointer;transition:.18s;
+    background:var(--bg-2);
+  }
+  .drop:hover{border-color:var(--accent);background:#171d27}
+  .drop.drag{border-color:var(--accent);background:#1a2333;transform:scale(1.01)}
+  .drop .big{font-size:26px;margin-bottom:6px;opacity:.8}
+  .drop .t1{font-size:13px;margin-bottom:4px}
+  .drop .t2{font-size:11.5px;color:var(--text-faint);line-height:1.6}
+
+  .row{display:flex;gap:8px;margin-top:10px}
+  .row .hbtn{flex:1;text-align:center}
+
+  .meta{
+    margin-top:12px;padding:10px 12px;background:var(--bg-2);
+    border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text-dim);
+  }
+  .meta b{color:var(--text)}
+
+  .meter{height:5px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-top:8px}
+  .meter i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+
+  .tree{margin-top:12px;font-size:12.5px}
+  .tree-empty{color:var(--text-faint);font-size:12px;text-align:center;padding:16px 0}
+  .node{user-select:none}
+  .node-row{
+    display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:5px;
+    cursor:pointer;white-space:nowrap;overflow:hidden;
+  }
+  .node-row:hover{background:var(--bg-3)}
+  .node-row .caret{width:12px;color:var(--text-faint);flex:0 0 12px;font-size:10px}
+  .node-row input[type=checkbox]{accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
+  .node-row .nm{flex:1;overflow:hidden;text-overflow:ellipsis}
+  .node-row .sz{color:var(--text-faint);font-size:11px;flex:0 0 auto}
+  .node-children{margin-left:14px;border-left:1px solid var(--border);padding-left:2px}
+  .node-children.hidden{display:none}
+  .file-row .nm{color:var(--text-dim)}
+  .file-row.picked .nm{color:var(--text)}
+  .file-row.skip{opacity:.4}
+
+  /* ---------- 聊天区 ---------- */
+  section.chat{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .msgs{flex:1;overflow-y:auto;padding:20px 24px;min-height:0;scroll-behavior:auto}
+  .msg{display:flex;gap:12px;margin-bottom:18px;max-width:900px}
+  .avatar{
+    width:30px;height:30px;border-radius:7px;flex:0 0 30px;
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;
+  }
+  .avatar.u{background:var(--accent);color:#fff}
+  .avatar.a{background:var(--bg-3);color:var(--green);border:1px solid var(--border-2)}
+  .bubble{
+    flex:1;min-width:0;padding:11px 14px;border-radius:10px;
+    line-height:1.72;word-wrap:break-word;overflow-wrap:anywhere;
+  }
+  .msg.user .bubble{background:var(--user-bg);border:1px solid #2a3547}
+  .msg.ai .bubble{background:var(--ai-bg);border:1px solid var(--border)}
+  .bubble p{margin:0 0 9px}
+  .bubble p:last-child{margin-bottom:0}
+  .bubble pre{
+    background:#0b0e13;border:1px solid var(--border);border-radius:7px;
+    padding:11px 13px;overflow-x:auto;margin:9px 0;font-size:12.5px;line-height:1.6;
+  }
+  .bubble code{
+    font-family:Consolas,"Cascadia Mono",Menlo,monospace;
+    background:#0b0e13;padding:1.5px 5px;border-radius:4px;font-size:12.5px;
+  }
+  .bubble pre code{background:none;padding:0}
+  .bubble .sysnote{
+    color:var(--text-faint);font-size:12px;font-style:italic;
+  }
+  .cursor{
+    display:inline-block;width:7px;height:14px;background:var(--accent);
+    vertical-align:-2px;margin-left:2px;animation:blink 1s steps(2) infinite;
+  }
+  @keyframes blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+  .think{
+    border-left:2px solid var(--border-2);padding-left:10px;margin:6px 0 10px;
+    color:var(--text-faint);font-size:12.5px;white-space:pre-wrap;
+  }
+  .think summary{cursor:pointer;color:var(--text-dim);font-size:12px;outline:none}
+
+  .welcome{
+    max-width:760px;margin:6vh auto 0;text-align:center;color:var(--text-dim);
+  }
+  .welcome h2{color:var(--text);font-weight:600;font-size:20px;margin:0 0 8px}
+  .welcome p{font-size:13px;line-height:1.8;margin:0 0 18px}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;text-align:left}
+  .card{
+    background:var(--bg-2);border:1px solid var(--border);border-radius:9px;padding:12px 14px;
+    cursor:pointer;transition:.15s;
+  }
+  .card:hover{border-color:var(--accent);background:#171d27}
+  .card .ct{font-size:13px;color:var(--text);margin-bottom:4px}
+  .card .cd{font-size:11.5px;color:var(--text-faint);line-height:1.6}
+
+  /* ---------- 输入区 ---------- */
+  .composer{flex:0 0 auto;padding:12px 24px 18px;border-top:1px solid var(--border);background:var(--panel)}
+  .composer-inner{max-width:900px;margin:0 auto}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+  .chip{
+    display:inline-flex;align-items:center;gap:6px;background:var(--bg-3);
+    border:1px solid var(--border-2);border-radius:14px;padding:3px 10px;font-size:11.5px;color:var(--text-dim);
+  }
+  .chip b{color:var(--text)}
+  .chip .x{cursor:pointer;color:var(--text-faint)}
+  .chip .x:hover{color:var(--red)}
+  .inputwrap{
+    display:flex;gap:10px;align-items:flex-end;background:var(--bg-2);
+    border:1px solid var(--border-2);border-radius:10px;padding:8px 10px;transition:.15s;
+  }
+  .inputwrap:focus-within{border-color:var(--accent)}
+  textarea{
+    flex:1;background:none;border:none;outline:none;color:var(--text);
+    font-family:inherit;font-size:14px;line-height:1.6;resize:none;
+    max-height:200px;min-height:24px;padding:4px 2px;
+  }
+  textarea::placeholder{color:var(--text-faint)}
+  .send{
+    background:var(--accent);color:#fff;border:none;border-radius:8px;
+    padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;transition:.15s;white-space:nowrap;
+  }
+  .send:hover{background:var(--accent-2)}
+  .send.stop{background:var(--red)}
+  .send:disabled{opacity:.4;cursor:not-allowed}
+  .hintline{
+    display:flex;justify-content:space-between;font-size:11px;color:var(--text-faint);
+    margin-top:7px;padding:0 2px;
+  }
+
+  /* ---------- 设置面板 ---------- */
+  .settings{
+    position:fixed;top:52px;right:16px;width:320px;background:var(--bg-2);
+    border:1px solid var(--border-2);border-radius:10px;padding:16px;
+    box-shadow:0 12px 40px rgba(0,0,0,.55);z-index:50;display:none;
+  }
+  .settings.show{display:block}
+  .settings h3{margin:0 0 14px;font-size:13px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px}
+  .field{margin-bottom:13px}
+  .field label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:5px}
+  .field input{
+    width:100%;background:var(--bg-3);border:1px solid var(--border-2);color:var(--text);
+    border-radius:6px;padding:7px 10px;font-size:13px;outline:none;font-family:inherit;
+  }
+  .field input:focus{border-color:var(--accent)}
+  .field .tip{font-size:11px;color:var(--text-faint);margin-top:4px;line-height:1.5}
+
+  /* ---------- 输入区工具按钮 ---------- */
+  .tool{
+    background:var(--bg-3);border:1px solid var(--border-2);color:var(--text);
+    border-radius:8px;padding:8px 10px;cursor:pointer;font-size:14px;line-height:1;
+    transition:.15s;white-space:nowrap;flex:0 0 auto;
+  }
+  .tool:hover{background:var(--border);border-color:var(--accent)}
+  .tool:disabled{opacity:.4;cursor:not-allowed}
+  .tool.spin{animation:spin .9s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .enh-badge{font-size:11px;color:var(--amber)}
+  .enh-badge a{color:var(--accent);cursor:pointer;text-decoration:underline}
+
+  /* ---------- 增强 / 模板 浮层面板 ---------- */
+  .panel{
+    position:fixed;left:50%;transform:translateX(-50%);bottom:162px;
+    width:min(920px,calc(100vw - 48px));max-height:60vh;
+    background:var(--bg-2);border:1px solid var(--border-2);border-radius:12px;
+    box-shadow:0 18px 60px rgba(0,0,0,.6);z-index:60;
+    display:none;flex-direction:column;overflow:hidden;
+  }
+  .panel.show{display:flex}
+  .panel-head{
+    display:flex;align-items:center;gap:10px;padding:11px 16px;
+    border-bottom:1px solid var(--border);flex:0 0 auto;flex-wrap:wrap;
+  }
+  .panel-head .tt{font-size:13px;font-weight:600;margin-right:2px}
+  .panel-head .lab{font-size:11.5px;color:var(--text-faint)}
+  .panel-body{padding:14px 16px;overflow:auto;flex:1 1 auto;min-height:110px}
+  .panel-foot{
+    display:flex;gap:8px;align-items:center;padding:10px 16px;
+    border-top:1px solid var(--border);flex:0 0 auto;flex-wrap:wrap;
+  }
+  .seg{display:flex;border:1px solid var(--border-2);border-radius:7px;overflow:hidden}
+  .seg button{
+    background:transparent;border:none;color:var(--text-dim);padding:5px 11px;
+    font-size:12px;cursor:pointer;font-family:inherit;transition:.15s;white-space:nowrap;
+  }
+  .seg button:hover{background:var(--bg-3);color:var(--text)}
+  .seg button.on{background:var(--accent);color:#fff}
+
+  .enh-empty{color:var(--text-dim);font-size:13px;line-height:2;padding:16px 4px}
+
+  .vtabs{display:flex;gap:6px;margin-bottom:11px;flex-wrap:wrap}
+  .vtabs button{
+    background:var(--bg-3);border:1px solid var(--border-2);color:var(--text-dim);
+    padding:4px 12px;border-radius:14px;font-size:12px;cursor:pointer;font-family:inherit;
+    transition:.15s;
+  }
+  .vtabs button:hover{color:var(--text);border-color:var(--accent)}
+  .vtabs button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+
+  .diff{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .diff .col{
+    background:var(--bg-3);border:1px solid var(--border);border-radius:8px;
+    padding:10px 12px;font-size:12.5px;line-height:1.85;
+    white-space:pre-wrap;word-break:break-word;max-height:34vh;overflow:auto;
+  }
+  .diff .col h4{
+    margin:0 0 9px;font-size:11px;color:var(--text-faint);
+    text-transform:uppercase;letter-spacing:.6px;font-weight:600;
+  }
+  .diff .add{background:rgba(62,207,142,.18);color:#9df3c8;border-radius:3px;padding:0 2px}
+  .diff .del{background:rgba(255,92,92,.15);color:#ffb0b0;border-radius:3px;padding:0 2px;text-decoration:line-through}
+
+  /* ---------- 模板库 ---------- */
+  .tplcat{margin-bottom:16px}
+  .tplcat h4{
+    margin:0 0 8px;font-size:11px;color:var(--text-faint);
+    text-transform:uppercase;letter-spacing:.6px;
+  }
+  .tplgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+  .tplcard{
+    background:var(--bg-3);border:1px solid var(--border);border-radius:8px;
+    padding:9px 11px;cursor:pointer;transition:.15s;
+  }
+  .tplcard:hover{border-color:var(--accent);background:#171d27}
+  .tplcard .n{font-size:12.5px;color:var(--text);margin-bottom:3px}
+  .tplcard .d{
+    font-size:11px;color:var(--text-faint);line-height:1.5;
+    overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  }
+
+  /* ---------- 消息动作条 ---------- */
+  .msgacts{display:flex;gap:6px;margin-top:8px;padding-left:42px}
+  .tbtn{
+    background:transparent;border:1px solid var(--border-2);color:var(--text-dim);
+    padding:3px 9px;border-radius:6px;font-size:11.5px;cursor:pointer;
+    font-family:inherit;transition:.15s;
+  }
+  .tbtn:hover{border-color:var(--accent);color:var(--text);background:var(--bg-3)}
+  .tbtn:disabled{opacity:.4;cursor:not-allowed}
+
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#2b323f;border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:#3a4353}
+
+  @media(max-width:900px){
+    aside{width:260px;flex-basis:260px}
+    .cards{grid-template-columns:1fr}
+    .msgs{padding:16px}
+    .composer{padding:10px 16px 14px}
+    .diff{grid-template-columns:1fr}
+    .panel{bottom:136px;max-height:56vh}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="logo">Strata <span>Chat</span></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="statusText">检查服务中…</span></div>
+    <div class="spacer"></div>
+    <button class="hbtn" id="btnClear">清空对话</button>
+    <button class="hbtn" id="btnSettings">参数设置</button>
+  </header>
+
+  <div class="main">
+    <!-- ============ 侧栏 ============ -->
+    <aside>
+      <div class="side-head">
+        <span>文件夹 / 上下文</span>
+        <span id="selCount" style="color:var(--text-faint);text-transform:none;letter-spacing:0">0 已选</span>
+      </div>
+      <div class="side-body">
+
+        <div class="drop" id="drop">
+          <div class="big">📁</div>
+          <div class="t1">点击选择文件夹</div>
+          <div class="t2">或把文件夹拖到这里<br>支持整个目录及子目录</div>
+        </div>
+        <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none">
+
+        <div class="row">
+          <button class="hbtn" id="btnAddCtx" disabled>加入上下文</button>
+          <button class="hbtn" id="btnUpload" disabled>上传到服务器</button>
+        </div>
+        <div class="row">
+          <button class="hbtn" id="btnCheckAll">全选</button>
+          <button class="hbtn" id="btnUncheckAll">全不选</button>
+        </div>
+
+        <div class="meta" id="meta" style="display:none">
+          文件夹：<b id="mFolder">-</b><br>
+          文件数：<b id="mCount">0</b> 个 · 合计 <b id="mSize">0</b><br>
+          已选文本：<b id="mPick">0</b> 个 / 约 <b id="mChars">0</b> 字符
+          <div class="meter"><i id="meterBar"></i></div>
+          <div style="margin-top:5px;font-size:11px;color:var(--text-faint)" id="mToken">估算 ≈ 0 tokens / 上限 131072</div>
+        </div>
+
+        <div class="tree" id="tree">
+          <div class="tree-empty">尚未选择文件夹</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ============ 聊天区 ============ -->
+    <section class="chat">
+      <div class="msgs" id="msgs">
+        <div class="welcome">
+          <h2>本地实时对话</h2>
+          <p>连接本机 Strata 服务，逐字流式输出；可上传整个文件夹作为上下文。</p>
+          <div class="cards">
+            <div class="card" data-p="请概括这个文件夹里项目的主要功能，并说明如何运行。">
+              <div class="ct">📦 理解整个项目</div>
+              <div class="cd">选择文件夹后，一键让模型梳理结构与运行方式</div>
+            </div>
+            <div class="card" data-p="请审查这个文件夹里的代码，找出潜在的 bug 和改进点。">
+              <div class="ct">🔍 代码审查</div>
+              <div class="cd">把文件加入上下文，让模型逐项检查</div>
+            </div>
+            <div class="card" data-p="请把这些文件的注释和文档改成中文。">
+              <div class="ct">🌐 文档中文化</div>
+              <div class="cd">批量改写注释、README 等文本内容</div>
+            </div>
+            <div class="card" data-p="你好，请用一句话介绍你自己。">
+              <div class="ct">💬 先测一下连通性</div>
+              <div class="cd">确认流式输出是否正常，无需选择文件夹</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="composer-inner">
+          <div class="chips" id="chips"></div>
+          <div class="inputwrap">
+            <textarea id="input" rows="1" placeholder="输入消息，Enter 发送，Shift+Enter 换行"></textarea>
+            <button class="tool" id="btnEnhance" title="提示词增强（用本地模型改写草稿）">✨</button>
+            <button class="tool" id="btnTpl" title="提示词模板库">📚</button>
+            <button class="send" id="btnSend">发送</button>
+          </div>
+          <div class="hintline">
+            <span id="streamInfo"></span>
+            <span style="display:flex;gap:12px;align-items:center">
+              <span id="enhBadge" class="enh-badge" style="display:none">✨ 已增强 <a id="enhUndoLink">撤销</a></span>
+              <span id="hintRight">Enter 发送 · Shift+Enter 换行</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ============ 提示词增强面板 ============ -->
+<div class="panel" id="enhPanel">
+  <div class="panel-head">
+    <span class="tt">✨ 提示词增强</span>
+    <span class="lab">风格</span>
+    <div class="seg" id="enhStyle">
+      <button data-s="conservative" class="on">保守 · 只做清晰化</button>
+      <button data-s="aggressive">激进 · 自动扩写</button>
+    </div>
+    <span class="lab">候选</span>
+    <div class="seg" id="enhCount">
+      <button data-c="1">1 版</button>
+      <button data-c="2" class="on">2 版</button>
+      <button data-c="3">3 版</button>
+    </div>
+    <span class="spacer"></span>
+    <button class="hbtn" id="enhClose">关闭</button>
+  </div>
+  <div class="panel-body" id="enhBody"></div>
+  <div class="panel-foot">
+    <button class="hbtn" id="enhGen">生成</button>
+    <button class="hbtn" id="enhApply" disabled>应用到输入框</button>
+    <button class="hbtn" id="enhUndo" disabled>撤销增强</button>
+    <span class="spacer"></span>
+    <span id="enhInfo" style="font-size:11px;color:var(--text-faint)"></span>
+  </div>
+</div>
+
+<!-- ============ 提示词模板库 ============ -->
+<div class="panel" id="tplPanel">
+  <div class="panel-head">
+    <span class="tt">📚 提示词模板库</span>
+    <span class="spacer"></span>
+    <button class="hbtn" id="tplClose">关闭</button>
+  </div>
+  <div class="panel-body"><div id="tplGrid"></div></div>
+  <div class="panel-foot">
+    <span style="font-size:11.5px;color:var(--text-faint)">
+      点模板会插到草稿前面。若输入框已选中文字，则替换选中部分。
+    </span>
+  </div>
+</div>
+
+<!-- ============ 设置面板 ============ -->
+<div class="settings" id="settings">
+  <h3>推理参数</h3>
+  <div class="field">
+    <label>模型名</label>
+    <input id="sModel" value="qwen3.8-flash-next-iq2_xs">
+  </div>
+  <div class="field">
+    <label>Temperature（随机性）</label>
+    <input id="sTemp" value="0.6">
+    <div class="tip">0.2–0.4 稳定（代码）；0.5–0.7 平衡；0.8–1.0 发散（创意）</div>
+  </div>
+  <div class="field">
+    <label>Top-p</label>
+    <input id="sTopP" value="0.95">
+    <div class="tip">通常 0.9–0.95，保持默认即可</div>
+  </div>
+  <div class="field">
+    <label>Max tokens（留空 = 不限）</label>
+    <input id="sMaxTok" placeholder="留空">
+    <div class="tip">限制单次回答长度，防止输出过长</div>
+  </div>
+  <div class="field">
+    <label>上下文上限（tokens）</label>
+    <input id="sCtx" value="131072">
+    <div class="tip">与 Strata 的 --max-context 保持一致，用于用量提示</div>
+  </div>
+  <button class="hbtn" id="btnSaveSet" style="width:100%">保存</button>
+</div>
+
+<script>
+/* =========================================================
+   Strata Chat WebUI
+   1) 流式实时对话   2) 文件夹上传
+   ========================================================= */
+
+const $ = id => document.getElementById(id);
+
+/* ---------------- 全局状态 ---------------- */
+const state = {
+  files: [],            // {file, path, size, text|null, skipped, checked}
+  picked: [],           // 已加入上下文的文件
+  context: '',          // 上下文文本
+  streaming: false,
+  controller: null,
+  history: [],          // [{role, content}]
+  rootName: '',
+};
+
+const cfg = {
+  model: 'qwen3.8-flash-next-iq2_xs',
+  temperature: 0.6,
+  top_p: 0.95,
+  max_tokens: null,
+  ctxLimit: 131072,
+};
+
+/* ---------------- 文件类型判断 ---------------- */
+const TEXT_EXT = new Set(['txt','md','markdown','py','js','mjs','cjs','ts','tsx','jsx','json','yaml','yml','toml','ini','cfg','conf','html','htm','css','scss','less','vue','svelte','java','kt','c','h','cpp','hpp','cc','cs','go','rs','rb','php','swift','sh','bash','bat','cmd','ps1','sql','xml','csv','tsv','log','env','gitignore','dockerfile','makefile','gradle','properties','r','lua','pl','dart','scala','clj','ex','exs','erl','hs','ml','nim','zig','v','asm','tex','rst','adoc','srt','vtt','ipynb']);
+const MAX_FILE = 512 * 1024;        // 单文件读取上限 512KB
+const MAX_TOTAL = 420 * 1024;       // 上下文总字符上限
+
+function extOf(name){
+  const i = name.lastIndexOf('.');
+  return i < 0 ? '' : name.slice(i + 1).toLowerCase();
+}
+function isTextFile(f){
+  const e = extOf(f.name);
+  if (TEXT_EXT.has(e)) return true;
+  const base = f.name.toLowerCase();
+  return ['dockerfile','makefile','readme','license','.gitignore','.env'].some(k => base.includes(k));
+}
+function fmtSize(n){
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+  return (n/1048576).toFixed(2) + ' MB';
+}
+function esc(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* =========================================================
+   一、健康检查
+   ========================================================= */
+async function checkHealth(){
+  try{
+    const r = await fetch('/api/health');
+    const j = await r.json();
+    const dot = $('dot');
+    if (j.strata){
+      dot.className = 'dot on';
+      $('statusText').textContent = '已连接 · ' + j.endpoint;
+    }else{
+      dot.className = 'dot off';
+      $('statusText').textContent = '未连接（请先启动 Strata）';
+    }
+  }catch(e){
+    $('dot').className = 'dot off';
+    $('statusText').textContent = 'Web 服务异常';
+  }
+}
+checkHealth();
+setInterval(checkHealth, 15000);
+
+/* =========================================================
+   二、文件夹选择与读取
+   ========================================================= */
+
+/* ---- 点击选择 ---- */
+$('drop').onclick = () => $('folderInput').click();
+
+$('folderInput').onchange = e => {
+  const list = Array.from(e.target.files || []);
+  if (!list.length) return;
+  addFiles(list, list[0].webkitRelativePath || list[0].name);
+  e.target.value = '';
+};
+
+/* ---- 拖放选择（递归遍历目录） ---- */
+const drop = $('drop');
+['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');
+}));
+['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');
+}));
+
+drop.addEventListener('drop', async e => {
+  const items = e.dataTransfer.items;
+  const out = [];
+  let rootName = '';
+  if (items && items.length && items[0].webkitGetAsEntry){
+    const entries = [];
+    for (const it of items){
+      const en = it.webkitGetAsEntry();
+      if (en) entries.push(en);
+    }
+    rootName = entries[0] ? entries[0].name : 'dropped';
+    for (const en of entries) await walkEntry(en, '', out);
+  }else{
+    const list = Array.from(e.dataTransfer.files || []);
+    rootName = list[0] ? list[0].name : 'dropped';
+    list.forEach(f => { f._rel = f.name; out.push(f); });
+  }
+  if (out.length) addFiles(out, rootName);
+});
+
+/* 递归遍历拖入的目录（readEntries 每次最多 100 条，需循环） */
+async function walkEntry(entry, prefix, out){
+  if (entry.isFile){
+    const f = await new Promise((res, rej) => entry.file(res, rej));
+    f._rel = prefix + entry.name;
+    out.push(f);
+  }else if (entry.isDirectory){
+    const reader = entry.createReader();
+    while (true){
+      const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+      if (!batch.length) break;
+      for (const e of batch) await walkEntry(e, prefix + entry.name + '/', out);
+    }
+  }
+}
+
+/* ---- 汇总文件 ---- */
+function addFiles(list, rootName){
+  state.rootName = rootName;
+  state.files = list.map(f => {
+    const path = f._rel || f.webkitRelativePath || f.name;
+    const text = isTextFile(f);
+    const tooBig = f.size > MAX_FILE;
+    return {
+      file: f,
+      path,
+      size: f.size,
+      checked: text && !tooBig,
+      skipped: !text || tooBig,
+      reason: !text ? '非文本' : (tooBig ? '过大' : ''),
+      content: null,
+      loaded: false,
+    };
+  }).sort((a,b) => a.path.localeCompare(b.path));
+
+  renderTree();
+  updateMeta();
+  $('btnAddCtx').disabled = false;
+  $('btnUpload').disabled = false;
+}
+
+/* ---- 渲染文件树 ---- */
+function renderTree(){
+  const box = $('tree');
+  if (!state.files.length){
+    box.innerHTML = '<div class="tree-empty">尚未选择文件夹</div>';
+    return;
+  }
+  const root = { name: state.rootName, dirs: {}, files: [] };
+  for (const f of state.files){
+    const parts = f.path.split('/');
+    const fname = parts.pop();
+    let cur = root;
+    for (const d of parts){
+      if (!cur.dirs[d]) cur.dirs[d] = { name: d, dirs: {}, files: [] };
+      cur = cur.dirs[d];
+    }
+    cur.files.push({ f, name: fname });
+  }
+
+  function nodeHtml(n, depth){
+    let h = '';
+    for (const dname of Object.keys(n.dirs).sort()){
+      const d = n.dirs[dname];
+      h += '<div class="node"><div class="node-row" data-dir="1">'
+        + '<span class="caret">▾</span>'
+        + '<span>📁</span>'
+        + '<span class="nm">' + esc(dname) + '</span>'
+        + '</div><div class="node-children">' + nodeHtml(d, depth + 1) + '</div></div>';
+    }
+    for (const item of n.files){
+      const f = item.f;
+      const cls = 'node-row file-row' + (f.checked ? ' picked' : '') + (f.skipped ? ' skip' : '');
+      h += '<div class="node"><div class="' + cls + '" data-i="' + state.files.indexOf(f) + '">'
+        + '<span class="caret"></span>'
+        + (f.skipped ? '<span style="width:13px;text-align:center">·</span>'
+                     : '<input type="checkbox" ' + (f.checked ? 'checked' : '') + '>')
+        + '<span class="nm" title="' + esc(f.path) + '">' + esc(item.name) + '</span>'
+        + '<span class="sz">' + fmtSize(f.size) + '</span>'
+        + '</div></div>';
+    }
+    return h;
+  }
+
+  box.innerHTML = nodeHtml(root, 0);
+
+  // 目录折叠
+  box.querySelectorAll('.node-row[data-dir]').forEach(row => {
+    row.onclick = () => {
+      const kids = row.nextElementSibling;
+      const caret = row.querySelector('.caret');
+      kids.classList.toggle('hidden');
+      caret.textContent = kids.classList.contains('hidden') ? '▸' : '▾';
+    };
+  });
+
+  // 文件勾选
+  box.querySelectorAll('.file-row').forEach(row => {
+    row.onclick = ev => {
+      const i = +row.dataset.i;
+      const f = state.files[i];
+      if (f.skipped) return;
+      if (ev.target.tagName !== 'INPUT'){
+        f.checked = !f.checked;
+      }else{
+        f.checked = ev.target.checked;
+      }
+      row.classList.toggle('picked', f.checked);
+      const cb = row.querySelector('input');
+      if (cb) cb.checked = f.checked;
+      updateMeta();
+    };
+  });
+}
+
+/* ---- 更新统计 ---- */
+function updateMeta(){
+  if (!state.files.length){
+    $('meta').style.display = 'none';
+    $('selCount').textContent = '0 已选';
+    return;
+  }
+  $('meta').style.display = 'block';
+  const totalSize = state.files.reduce((a,f) => a + f.size, 0);
+  const picked = state.files.filter(f => f.checked && !f.skipped);
+  $('mFolder').textContent = state.rootName;
+  $('mCount').textContent = state.files.length;
+  $('mSize').textContent = fmtSize(totalSize);
+  $('mPick').textContent = picked.length;
+  $('selCount').textContent = picked.length + ' 已选';
+
+  // 估算字符数（按平均文件大小粗估）
+  const est = Math.min(picked.reduce((a,f) => a + f.size, 0), MAX_TOTAL);
+  $('mChars').textContent = est.toLocaleString();
+  const tok = Math.round(est / 2.6);
+  $('mToken').textContent = '估算 ≈ ' + tok.toLocaleString() + ' tokens / 上限 ' + cfg.ctxLimit.toLocaleString();
+  $('meterBar').style.width = Math.min(100, est / MAX_TOTAL * 100) + '%';
+}
+
+/* ---- 全选 / 全不选 ---- */
+$('btnCheckAll').onclick = () => {
+  state.files.forEach(f => { if (!f.skipped) f.checked = true; });
+  renderTree(); updateMeta();
+};
+$('btnUncheckAll').onclick = () => {
+  state.files.forEach(f => f.checked = false);
+  renderTree(); updateMeta();
+};
+
+/* ---- 读取文件为文本 ---- */
+function readAsText(file){
+  return new Promise(res => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result || ''));
+    fr.onerror = () => res('');
+    fr.readAsText(file, 'utf-8');
+  });
+}
+
+/* =========================================================
+   三、加入上下文
+   ========================================================= */
+$('btnAddCtx').onclick = async () => {
+  const picked = state.files.filter(f => f.checked && !f.skipped);
+  if (!picked.length){ alert('请先勾选要加入上下文的文本文件'); return; }
+
+  const btn = $('btnAddCtx');
+  btn.disabled = true;
+  btn.textContent = '读取中…';
+
+  let total = 0;
+  const parts = [];
+  for (let i = 0; i < picked.length; i++){
+    const f = picked[i];
+    btn.textContent = '读取中 ' + (i+1) + '/' + picked.length;
+    if (!f.loaded){
+      f.content = await readAsText(f.file);
+      f.loaded = true;
+    }
+    let c = f.content || '';
+    if (c.length > MAX_FILE / 2) c = c.slice(0, Math.floor(MAX_FILE/2)) + '\n…<内容过长已截断>';
+    const block = '\n\n===== FILE: ' + f.path + ' =====\n' + c;
+    if (total + block.length > MAX_TOTAL){
+      parts.push('\n\n…<上下文已达上限，其余 ' + (picked.length - i) + ' 个文件未包含>');
+      break;
+    }
+    total += block.length;
+    parts.push(block);
+  }
+
+  state.picked = picked;
+  state.context = '以下是用户提供的本地文件夹「' + state.rootName + '」中的文件内容：' + parts.join('');
+
+  btn.textContent = '已加入 ✓';
+  setTimeout(() => { btn.textContent = '重新加入'; btn.disabled = false; }, 1200);
+
+  renderChips();
+  $('input').focus();
+};
+
+function renderChips(){
+  const box = $('chips');
+  if (!state.context){
+    box.innerHTML = '';
+    return;
+  }
+  const tok = Math.round(state.context.length / 2.6);
+  box.innerHTML = '<span class="chip">📁 <b>' + esc(state.rootName) + '</b> · '
+    + state.picked.length + ' 个文件 · ≈' + tok.toLocaleString() + ' tokens'
+    + ' <span class="x" id="chipClear">✕</span></span>';
+  $('chipClear').onclick = () => {
+    state.context = ''; state.picked = [];
+    renderChips();
+  };
+}
+
+/* =========================================================
+   四、上传文件夹到服务器
+   ========================================================= */
+$('btnUpload').onclick = async () => {
+  const list = state.files;
+  if (!list.length){ alert('请先选择文件夹'); return; }
+
+  const btn = $('btnUpload');
+  btn.disabled = true;
+  btn.textContent = '上传中…';
+
+  const fd = new FormData();
+  fd.append('folder', state.rootName);
+  for (const f of list) fd.append('files', f.file, f.path);
+
+  try{
+    const r = await fetch('/api/upload', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok){
+      alert('上传完成 ✓\n文件夹：' + j.folder + '\n文件数：' + j.saved
+        + '\n大小：' + fmtSize(j.bytes) + '\n保存位置：' + j.path
+        + (j.skipped && j.skipped.length ? '\n跳过：' + j.skipped.length + ' 个' : ''));
+    }else{
+      alert('上传失败：' + (j.error || '未知错误'));
+    }
+  }catch(e){
+    alert('上传失败：' + e.message);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '上传到服务器';
+  }
+};
+
+/* =========================================================
+   五、流式实时对话
+   ========================================================= */
+
+/* ---- 渲染辅助 ---- */
+function renderMarkdown(raw){
+  let s = esc(raw);
+  // 代码块
+  s = s.replace(/```([\w+-]*)\n?([\s\S]*?)```/g, (m, lang, code) =>
+    '<pre><code>' + code.replace(/\n$/, '') + '</code></pre>');
+  // 行内代码
+  s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  // 粗体
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  // 段落
+  return s.split(/\n{2,}/).map(p => {
+    if (p.trim().startsWith('<pre>')) return p;
+    return '<p>' + p.replace(/\n/g, '<br>') + '</p>';
+  }).join('');
+}
+
+function addMsg(role, text){
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ' + (role === 'user' ? 'user' : 'ai');
+  wrap.innerHTML =
+    '<div class="avatar ' + (role === 'user' ? 'u' : 'a') + '">'
+      + (role === 'user' ? '你' : 'AI') + '</div>'
+    + '<div class="bubble"></div>';
+  const bubble = wrap.querySelector('.bubble');
+  bubble.textContent = text || '';
+  bubble._wrap = wrap;
+  bubble._acc = text || '';
+  $('msgs').appendChild(wrap);
+  return bubble;
+}
+
+function clearWelcome(){
+  const w = $('msgs').querySelector('.welcome');
+  if (w) w.remove();
+}
+
+function nearBottom(){
+  const el = $('msgs');
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+}
+function stickBottom(force){
+  const el = $('msgs');
+  if (force || nearBottom()) el.scrollTop = el.scrollHeight;
+}
+
+/* =========================================================
+   五-A、流式核心（发送 / 继续 共用）
+   ========================================================= */
+
+/* 去掉「继续」时模型重复输出的尾巴。
+   例：prev="...第3."  add="3. 运行模型"  ->  返回 " 运行模型" */
+function dedupeTail(prev, add){
+  if (!prev || !add) return add;
+  const max = Math.min(prev.length, add.length, 600);
+  for (let k = max; k >= 8; k--){
+    if (prev.slice(-k) === add.slice(0, k)) return add.slice(k);
+  }
+  return add;
+}
+
+/* 把一个 SSE 流写进 bubble。
+   返回 { acc, think, firstAt, t0, aborted, errMsg } */
+async function runStream(bubble, messages, opt){
+  opt = opt || {};
+  const btn = $('btnSend');
+  const baseText = opt.baseText || '';
+
+  state.streaming = true;
+  state.controller = new AbortController();
+  btn.textContent = '停止';
+  btn.classList.add('stop');
+
+  const t0 = performance.now();
+  let acc = '', think = '', firstAt = 0, aborted = false, errMsg = '';
+
+  const body = {
+    model: cfg.model,
+    messages,
+    stream: true,
+    temperature: opt.temperature != null ? opt.temperature : cfg.temperature,
+    top_p: cfg.top_p,
+  };
+  if (cfg.max_tokens) body.max_tokens = cfg.max_tokens;
+  // 续写时关掉思考链：更快，而且模型不容易「重新开头」
+  if (opt.noThink) body.chat_template_kwargs = { enable_thinking: false };
+
+  let rafPending = false;
+  function paint(){
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      const shown = baseText + (opt.dedupe ? dedupeTail(baseText, acc) : acc);
+      let html = '';
+      if (think){
+        html += '<details class="think"><summary>思考过程</summary>' + esc(think) + '</details>';
+      }
+      html += renderMarkdown(shown) + '<span class="cursor"></span>';
+      bubble.innerHTML = html;
+      stickBottom(false);
+    });
+  }
+
+  try{
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: state.controller.signal,
+    });
+
+    if (!res.ok){
+      const err = await res.json().catch(() => ({}));
+      errMsg = (err.error || ('HTTP ' + res.status))
+             + (err.detail ? ' — ' + err.detail : '');
+      return { acc: '', think: '', firstAt: 0, t0, aborted: false, errMsg };
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder('utf-8');
+    let buf = '';
+
+    while (true){
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0){
+        let line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (line.endsWith('\r')) line = line.slice(0, -1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+
+        let obj;
+        try{ obj = JSON.parse(payload); }catch(e){ continue; }
+        const d = obj.choices && obj.choices[0] && obj.choices[0].delta;
+        if (!d) continue;
+
+        if (d.reasoning_content){
+          think += d.reasoning_content;
+          paint();
+          continue;
+        }
+        if (typeof d.content === 'string' && d.content.length){
+          if (!firstAt) firstAt = performance.now();
+          acc += d.content;
+          paint();
+        }
+      }
+    }
+  }catch(e){
+    if (e.name === 'AbortError') aborted = true;
+    else errMsg = e.message;
+  }finally{
+    state.streaming = false;
+    state.controller = null;
+    btn.textContent = '发送';
+    btn.classList.remove('stop');
+  }
+
+  return { acc, think, firstAt, t0, aborted, errMsg };
+}
+
+/* 收尾渲染 + 速率统计 */
+function finalizeBubble(bubble, r, baseText){
+  const full = (baseText || '') + r.acc;
+  let html = '';
+  if (r.think){
+    html += '<details class="think"><summary>思考过程</summary>' + esc(r.think) + '</details>';
+  }
+  if (full) html += renderMarkdown(full);
+  if (r.errMsg){
+    html += '<p style="color:var(--red)">请求失败：' + esc(r.errMsg) + '</p>';
+  }else if (r.aborted){
+    html += '<p class="sysnote">（已停止）</p>';
+  }else if (!full){
+    html += '<p class="sysnote">（空回复）</p>';
+  }
+  bubble.innerHTML = html;
+  bubble._acc = full;
+  if (full) attachMsgActions(bubble, full);
+
+  const dt = ((r.firstAt || performance.now()) - r.t0) / 1000;
+  if (full.length && dt > 0){
+    $('streamInfo').textContent =
+      '首字 ' + ((r.firstAt ? r.firstAt - r.t0 : 0)/1000).toFixed(2) + 's · '
+      + full.length + ' 字符 · 总耗时 ' + dt.toFixed(1) + 's · ≈ '
+      + (full.length / Math.max(dt, .001)).toFixed(1) + ' 字符/s';
+  }
+  stickBottom(false);
+  $('input').focus();
+}
+
+/* 消息下方的动作条 */
+function attachMsgActions(bubble){
+  const wrap = bubble._wrap;
+  if (!wrap) return;
+  let bar = wrap.querySelector('.msgacts');
+  if (!bar){
+    bar = document.createElement('div');
+    bar.className = 'msgacts';
+    wrap.appendChild(bar);
+  }
+  bar.innerHTML =
+    '<button class="tbtn" data-act="continue" title="从断点继续生成">⏩ 继续</button>'
+  + '<button class="tbtn" data-act="copy">⧉ 复制</button>';
+}
+
+/* ---- 发送 ---- */
+async function send(){
+  const input = $('input');
+  const q = input.value.trim();
+  if (!q || state.streaming) return;
+
+  clearWelcome();
+  addMsg('user', q);
+  state.history.push({ role: 'user', content: q });
+  input.value = '';
+  autoGrow();
+  setEnhBadge(false);
+
+  const bubble = addMsg('ai', '');
+  bubble.innerHTML = '<span class="cursor"></span>';
+
+  const messages = [];
+  if (state.context){
+    messages.push({ role: 'system', content: state.context });
+  }
+  messages.push(...state.history);
+
+  const r = await runStream(bubble, messages, {});
+  finalizeBubble(bubble, r, '');
+  if (r.acc) state.history.push({ role: 'assistant', content: r.acc });
+}
+
+/* ---- 一键继续执行 ---- */
+const CONTINUE_INSTRUCTION =
+  '紧接着上面的内容继续写下去。要求：\n'
++ '1. 直接从断点处续写，第一个字就是断点后的下一个字；\n'
++ '2. 不要重复上面已经出现过的任何内容；\n'
++ '3. 不要重新开头，不要加「好的」「以下是」之类的引导语；\n'
++ '4. 保持原有的格式与语气。';
+
+async function continueMsg(bubble){
+  if (state.streaming) return;
+  const wrap = bubble._wrap;
+  const all = $('msgs').querySelectorAll('.msg');
+  if (all.length && all[all.length - 1] !== wrap){
+    $('streamInfo').textContent = '只能对最后一条回复执行「继续」';
+    setTimeout(() => { $('streamInfo').textContent = ''; }, 2500);
+    return;
+  }
+  const prev = bubble._acc || '';
+  if (!prev) return;
+
+  // 让会话历史末尾正好是这条回复，否则补上
+  const last = state.history[state.history.length - 1];
+  if (!last || last.role !== 'assistant' || last.content !== prev){
+    state.history.push({ role: 'assistant', content: prev });
+  }
+
+  const messages = [];
+  if (state.context) messages.push({ role: 'system', content: state.context });
+  messages.push(...state.history);
+  messages.push({ role: 'user', content: CONTINUE_INSTRUCTION });
+
+  const r = await runStream(bubble, messages, {
+    baseText: prev, dedupe: true, noThink: true,
+  });
+
+  const add = dedupeTail(prev, r.acc || '');
+  finalizeBubble(bubble, Object.assign({}, r, { acc: add }), prev);
+
+  const full = prev + add;
+  const tail = state.history[state.history.length - 1];
+  if (tail && tail.role === 'assistant') tail.content = full;
+  else state.history.push({ role: 'assistant', content: full });
+}
+
+/* ---- 发送 / 停止按钮 ---- */
+$('btnSend').onclick = () => {
+  if (state.streaming && state.controller){
+    state.controller.abort();
+  }else{
+    send();
+  }
+};
+
+/* ---- 消息动作（继续 / 复制） ---- */
+$('msgs').addEventListener('click', async e => {
+  const b = e.target.closest('.tbtn');
+  if (!b) return;
+  const wrap = b.closest('.msg');
+  if (!wrap) return;
+  const bubble = wrap.querySelector('.bubble');
+
+  if (b.dataset.act === 'continue'){
+    b.disabled = true;
+    try{ await continueMsg(bubble); }finally{ b.disabled = false; }
+  }else if (b.dataset.act === 'copy'){
+    try{
+      await navigator.clipboard.writeText(bubble._acc || '');
+      b.textContent = '✓ 已复制';
+    }catch(err){
+      b.textContent = '复制失败';
+    }
+    setTimeout(() => { b.textContent = '⧉ 复制'; }, 1400);
+  }
+});
+
+/* ---- 输入框 ---- */
+const input = $('input');
+function autoGrow(){
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+}
+input.addEventListener('input', autoGrow);
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing){
+    e.preventDefault();
+    send();
+  }
+});
+
+/* ---- 卡片快捷提问 ---- */
+document.addEventListener('click', e => {
+  const c = e.target.closest('.card');
+  if (c){
+    input.value = c.dataset.p;
+    autoGrow();
+    setEnhBadge(false);
+    input.focus();
+  }
+});
+
+/* ---- 清空对话 ---- */
+$('btnClear').onclick = () => {
+  if (state.streaming) return;
+  state.history = [];
+  state.context = '';
+  state.picked = [];
+  enh.backup = null;
+  enh.variants = [];
+  setEnhBadge(false);
+  closePanels();
+  renderChips();
+  $('msgs').innerHTML = '<div class="welcome"><h2>对话已清空</h2>'
+    + '<p>可以重新开始，或先选择文件夹作为上下文。</p></div>';
+  $('streamInfo').textContent = '';
+};
+
+/* ---- 设置面板 ---- */
+$('btnSettings').onclick = () => $('settings').classList.toggle('show');
+document.addEventListener('click', e => {
+  if (!$('settings').contains(e.target) && e.target.id !== 'btnSettings'){
+    $('settings').classList.remove('show');
+  }
+});
+$('btnSaveSet').onclick = () => {
+  cfg.model = $('sModel').value.trim() || cfg.model;
+  const t = parseFloat($('sTemp').value); if (!isNaN(t)) cfg.temperature = t;
+  const p = parseFloat($('sTopP').value); if (!isNaN(p)) cfg.top_p = p;
+  const m = parseInt($('sMaxTok').value, 10); cfg.max_tokens = isNaN(m) ? null : m;
+  const c = parseInt($('sCtx').value, 10); if (!isNaN(c)) cfg.ctxLimit = c;
+  updateMeta();
+  $('settings').classList.remove('show');
+  $('streamInfo').textContent = '参数已保存';
+  setTimeout(() => $('streamInfo').textContent = '', 1800);
+};
+
+/* =========================================================
+   六、提示词增强
+   ---------------------------------------------------------
+   用本地模型改写草稿。调用是完全无状态的：
+   它既不读也不写 state.history，所以不会污染主对话。
+   ========================================================= */
+const enh = {
+  style: 'conservative',
+  count: 2,
+  variants: [],
+  active: 0,
+  backup: null,     // 增强前的原始草稿，用于「撤销」
+  busy: false,
+  ctrl: null,
+};
+
+function openPanel(id){
+  ['enhPanel', 'tplPanel'].forEach(p => $(p).classList.toggle('show', p === id));
+}
+function closePanels(){
+  $('enhPanel').classList.remove('show');
+  $('tplPanel').classList.remove('show');
+}
+
+function setEnhBadge(on){
+  $('enhBadge').style.display = on ? '' : 'none';
+}
+
+/* ---- 字符级 diff（LCS） ---- */
+function diffOps(a, b){
+  const A = Array.from(a), B = Array.from(b);
+  const n = A.length, m = B.length;
+  if (!n) return [{ op: '+', s: b }];
+  if (!m) return [{ op: '-', s: a }];
+  // 太长就不做精细 diff，避免卡界面
+  if (n * m > 1200000) return [{ op: '-', s: a }, { op: '+', s: b }];
+
+  const w = m + 1;
+  const dp = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--){
+    for (let j = m - 1; j >= 0; j--){
+      dp[i * w + j] = A[i] === B[j]
+        ? dp[(i + 1) * w + (j + 1)] + 1
+        : Math.max(dp[(i + 1) * w + j], dp[i * w + (j + 1)]);
+    }
+  }
+  const ops = [];
+  const push = (op, ch) => {
+    const last = ops[ops.length - 1];
+    if (last && last.op === op) last.s += ch;
+    else ops.push({ op, s: ch });
+  };
+  let i = 0, j = 0;
+  while (i < n && j < m){
+    if (A[i] === B[j]){ push('=', A[i]); i++; j++; }
+    else if (dp[(i + 1) * w + j] >= dp[i * w + (j + 1)]){ push('-', A[i]); i++; }
+    else { push('+', B[j]); j++; }
+  }
+  while (i < n) push('-', A[i++]);
+  while (j < m) push('+', B[j++]);
+  return ops;
+}
+
+function renderDiff(a, b){
+  let left = '', right = '';
+  for (const o of diffOps(a, b)){
+    if (o.op === '='){ left += esc(o.s); right += esc(o.s); }
+    else if (o.op === '-'){ left += '<span class="del">' + esc(o.s) + '</span>'; }
+    else { right += '<span class="add">' + esc(o.s) + '</span>'; }
+  }
+  return { left, right };
+}
+
+function renderEnh(){
+  const body = $('enhBody');
+  const vs = enh.variants;
+  if (!vs.some(v => v && v.trim())){
+    body.innerHTML = '<div class="enh-empty">'
+      + '点「生成」，用本地模型改写你的草稿。全程在本机完成，不出网。<br>'
+      + '<span style="color:var(--text-faint)">'
+      + '保守 = 只把话说清楚，不添加你没提过的需求；'
+      + '激进 = 自动补全角色、背景、约束、输出格式。</span></div>';
+    return;
+  }
+  let tabs = '';
+  for (let i = 0; i < vs.length; i++){
+    const n = (vs[i] || '').trim().length;
+    tabs += '<button class="' + (i === enh.active ? 'on' : '') + '" data-v="' + i + '">'
+          + '版本 ' + (i + 1) + (n ? ' · ' + n + ' 字' : '') + '</button>';
+  }
+  const cur = vs[enh.active] || '';
+  const d = renderDiff(enh.backup || '', cur);
+  body.innerHTML = '<div class="vtabs">' + tabs + '</div>'
+    + '<div class="diff">'
+    +   '<div class="col"><h4>原文 · ' + (enh.backup || '').length + ' 字</h4>' + d.left + '</div>'
+    +   '<div class="col"><h4>增强后 · ' + cur.length + ' 字</h4>' + d.right + '</div>'
+    + '</div>';
+}
+
+function updateEnhBtns(){
+  const cur = (enh.variants[enh.active] || '').trim();
+  $('enhApply').disabled = enh.busy || !cur;
+  $('enhUndo').disabled = enh.backup == null;
+}
+
+async function runEnhance(){
+  const draft = $('input').value.trim();
+  if (!draft){
+    $('enhInfo').textContent = '请先在输入框写点内容';
+    return;
+  }
+  if (enh.busy) return;
+
+  enh.backup = draft;
+  enh.busy = true;
+  enh.variants = [];
+  enh.active = 0;
+  enh.ctrl = new AbortController();
+  $('enhGen').disabled = true;
+  $('enhGen').textContent = '生成中…';
+  $('enhApply').disabled = true;
+  $('enhUndo').disabled = true;
+  $('enhInfo').textContent = '正在改写…';
+  renderEnh();
+
+  const t0 = performance.now();
+  let firstAt = 0, pending = false;
+  const schedule = () => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; renderEnh(); });
+  };
+
+  try{
+    const res = await fetch('/api/enhance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draft, style: enh.style, count: enh.count }),
+      signal: enh.ctrl.signal,
+    });
+
+    if (!res.ok){
+      const j = await res.json().catch(() => ({}));
+      $('enhInfo').textContent = '失败：' + (j.error || ('HTTP ' + res.status));
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder('utf-8');
+    let buf = '';
+
+    while (true){
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0){
+        const line = buf.slice(0, nl).replace(/\r$/, '');
+        buf = buf.slice(nl + 1);
+        if (!line.startsWith('data:')) continue;
+        const p = line.slice(5).trim();
+        if (!p) continue;
+        let ev;
+        try{ ev = JSON.parse(p); }catch(e){ continue; }
+
+        if (ev.type === 'delta'){
+          if (!firstAt) firstAt = performance.now();
+          enh.variants[ev.i] = (enh.variants[ev.i] || '') + ev.text;
+          schedule();
+        }else if (ev.type === 'variant'){
+          if (enh.variants[ev.i] == null) enh.variants[ev.i] = '';
+          schedule();
+        }else if (ev.type === 'error'){
+          $('enhInfo').textContent = '失败：' + ev.message;
+        }
+      }
+    }
+
+    // 规整稀疏数组，并丢掉空版本
+    const norm = [];
+    for (let i = 0; i < enh.variants.length; i++) norm.push(enh.variants[i] || '');
+    const kept = norm.filter(v => v.trim());
+    enh.variants = kept.length ? kept : [''];
+    enh.active = Math.min(enh.active, enh.variants.length - 1);
+    if (!(enh.variants[enh.active] || '').trim()) enh.active = 0;
+
+    const dt = ((performance.now() - t0) / 1000).toFixed(2);
+    const n = enh.variants.filter(v => v && v.trim()).length;
+    $('enhInfo').textContent = n + ' 个版本 · 首字 '
+      + (firstAt ? ((firstAt - t0) / 1000).toFixed(2) : '?') + 's · 共 ' + dt + 's';
+
+  }catch(e){
+    $('enhInfo').textContent = (e.name === 'AbortError')
+      ? '已取消' : ('连接出错：' + e.message);
+  }finally{
+    enh.busy = false;
+    enh.ctrl = null;
+    $('enhGen').disabled = false;
+    $('enhGen').textContent = '重新生成';
+    renderEnh();
+    updateEnhBtns();
+  }
+}
+
+function doUndoEnhance(){
+  if (enh.backup == null) return;
+  $('input').value = enh.backup;
+  autoGrow();
+  setEnhBadge(false);
+  $('enhInfo').textContent = '已撤销，恢复到增强前的草稿';
+  $('input').focus();
+}
+
+/* ---- 打开 / 关闭 ---- */
+$('btnEnhance').onclick = () => {
+  if (state.streaming) return;
+  const inp = $('input');
+  if (!inp.value.trim()){
+    $('streamInfo').textContent = '先在输入框写点内容，再点 ✨ 增强';
+    setTimeout(() => { $('streamInfo').textContent = ''; }, 2500);
+    inp.focus();
+    return;
+  }
+  openPanel('enhPanel');
+  runEnhance();
+};
+
+$('btnTpl').onclick = () => {
+  if (state.streaming) return;
+  renderTemplates();
+  openPanel('tplPanel');
+};
+
+$('enhClose').onclick = closePanels;
+$('tplClose').onclick = closePanels;
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closePanels();
+});
+
+/* ---- 风格 / 候选数 ---- */
+$('enhStyle').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  enh.style = b.dataset.s;
+  Array.prototype.forEach.call($('enhStyle').children,
+    x => x.classList.toggle('on', x === b));
+});
+
+$('enhCount').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  enh.count = parseInt(b.dataset.c, 10);
+  Array.prototype.forEach.call($('enhCount').children,
+    x => x.classList.toggle('on', x === b));
+});
+
+/* ---- 版本切换 ---- */
+$('enhBody').addEventListener('click', e => {
+  const b = e.target.closest('.vtabs button');
+  if (!b) return;
+  enh.active = parseInt(b.dataset.v, 10);
+  renderEnh();
+  updateEnhBtns();
+});
+
+/* ---- 生成 / 应用 / 撤销 ---- */
+$('enhGen').onclick = runEnhance;
+
+$('enhApply').onclick = () => {
+  const cur = (enh.variants[enh.active] || '').trim();
+  if (!cur) return;
+  $('input').value = cur;
+  autoGrow();
+  setEnhBadge(true);
+  $('enhInfo').textContent = '已应用到输入框，可以直接改，也可以直接发送';
+  $('input').focus();
+};
+
+$('enhUndo').onclick = doUndoEnhance;
+$('enhUndoLink').onclick = e => { e.preventDefault(); doUndoEnhance(); };
+
+/* =========================================================
+   七、提示词模板库
+   ---------------------------------------------------------
+   模板文本以换行结尾，点击时插到草稿「前面」，
+   所以「请审查以下代码：\n\n」+ 你粘的代码 就是一条完整指令。
+   ========================================================= */
+const TEMPLATES = [
+  { cat: '代码', items: [
+    { t: '代码审查', p: '请审查以下代码，找出潜在的 bug、边界条件问题和改进点，按严重程度排序，并给出修改后的代码。\n\n' },
+    { t: '重构建议', p: '请分析以下代码的结构问题，给出重构方案，说明每一步的理由，并输出重构后的代码。\n\n' },
+    { t: '写单元测试', p: '请为以下代码编写单元测试，覆盖正常路径、边界条件和异常路径，并说明每个用例验证了什么。\n\n' },
+    { t: '解释代码', p: '请逐段解释以下代码的作用、关键设计取舍和潜在陷阱，假设读者是刚接手这个项目的人。\n\n' },
+    { t: '性能优化', p: '请找出以下代码的性能瓶颈，给出优化方案，并说明每项优化的预期收益和代价。\n\n' },
+    { t: '补充注释', p: '请为以下代码补充清晰的中文注释和文档字符串，不要改动任何逻辑。\n\n' },
+  ]},
+  { cat: '文档', items: [
+    { t: '写 README', p: '请为这个项目写一份 README，包含：项目简介、功能特性、安装步骤、快速开始、配置说明、常见问题。\n\n' },
+    { t: '写提交信息', p: '请根据以下改动生成符合 Conventional Commits 规范的提交信息，并补充正文说明改动原因。\n\n' },
+    { t: '翻译成中文', p: '请把以下内容翻译成中文，保持专业术语准确、语气自然，不要逐字硬译。\n\n' },
+    { t: '提炼要点', p: '请把以下内容提炼成要点清单，保留关键数据和结论，去掉冗余表述。\n\n' },
+  ]},
+  { cat: '分析', items: [
+    { t: '对比方案', p: '请对比以下方案，从实现复杂度、性能、可维护性、适用场景四个维度列表分析，最后给出明确推荐。\n\n' },
+    { t: '找问题', p: '请找出以下内容中的逻辑漏洞、事实错误和自相矛盾之处，逐条指出并说明理由。\n\n' },
+    { t: '帮我做决策', p: '请帮我就以下问题做决策：先列出可选方案，再列出评估标准，逐项打分，最后给出结论和主要风险。\n\n' },
+    { t: '拆解任务', p: '请把以下目标拆解成可执行的步骤清单，标注每步的产出物、依赖关系和预估工作量。\n\n' },
+  ]},
+  { cat: '写作', items: [
+    { t: '改成正式语气', p: '请把以下内容改写成正式、专业的书面语气，保留全部信息，不要添加新内容。\n\n' },
+    { t: '扩写', p: '请把以下内容扩写成完整段落，补充必要的细节和例子，保持原意不变。\n\n' },
+    { t: '精简一半', p: '请把以下内容精简到原来一半的长度，保留核心信息和关键数据。\n\n' },
+  ]},
+];
+
+/* 属性值转义：必须先把 & 换掉，换行用 &#10; 保住 */
+function attrEsc(s){
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\n/g, '&#10;');
+}
+
+function renderTemplates(){
+  let h = '';
+  for (const cat of TEMPLATES){
+    h += '<div class="tplcat"><h4>' + esc(cat.cat) + '</h4><div class="tplgrid">';
+    for (const it of cat.items){
+      h += '<div class="tplcard" data-p="' + attrEsc(it.p) + '">'
+         +   '<div class="n">' + esc(it.t) + '</div>'
+         +   '<div class="d">' + esc(it.p.replace(/\n/g, ' ').trim()) + '</div>'
+         + '</div>';
+    }
+    h += '</div></div>';
+  }
+  $('tplGrid').innerHTML = h;
+}
+
+$('tplGrid').addEventListener('click', e => {
+  const c = e.target.closest('.tplcard');
+  if (!c) return;
+  applyTemplate(c.dataset.p);
+});
+
+function applyTemplate(p){
+  const inp = $('input');
+  const s = inp.selectionStart, en = inp.selectionEnd;
+  if (s != null && en != null && en > s){
+    // 有选中内容：用模板替换选中部分
+    inp.value = inp.value.slice(0, s) + p + inp.value.slice(en);
+  }else{
+    // 否则插到最前面
+    inp.value = p + inp.value;
+  }
+  autoGrow();
+  closePanels();
+  inp.focus();
+  inp.setSelectionRange(inp.value.length, inp.value.length);
+}
+
+/* 初始聚焦 */
+input.focus();
+</script>
+</body>
+</html>

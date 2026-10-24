@@ -1,0 +1,22 @@
+{
+  "name": "local-ai-kit",
+  "version": "1.10.0",
+  "description": "一站式基于用户配置配置本地 AI 模型 —— 图形化安装向导 + 本地控制台，零第三方依赖",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "lint": "node --check scripts/console.mjs && node --check scripts/installer.mjs && node --check scripts/probe.mjs && node --check ui/app.js && node --check ui/console.js && node --check ui/charts.js && node --check ui/strata.js",
+    "console": "node scripts/console.mjs",
+    "installer": "node scripts/installer.mjs"
+  },
+  "keywords": ["ollama", "llm", "local-ai", "installer", "windows"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/regdiliKUN/local-ai-kit.git"
+  }
+}

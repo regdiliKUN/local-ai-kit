@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex 切换器 · 界面设计</title>
+<style>
+/* ==============================================================
+   设计令牌（Design Tokens）
+   --------------------------------------------------------------
+   色值直接取自 codex_switcher.py 里的 DARK / LIGHT 两套调色板，
+   保证 Web 原型与原桌面端逐像素同色。
+   ============================================================== */
+:root{
+  /* ---- 深色（默认，对应 DARK）---- */
+  --bg:#1c1d21;          /* 页面底 */
+  --card:#26282d;        /* 卡片面 */
+  --line:#3a3d43;        /* 描边 / 分隔线 */
+  --fg:#eceff3;          /* 主文字 */
+  --sub:#9aa3ae;         /* 次要文字 / 标签 */
+  --accent:#4f8cff;      /* 主色（主按钮、选中态） */
+  --accent-fg:#ffffff;   /* 主色上的文字 */
+  --ok:#3fbf6f;
+  --warn:#e0a33e;
+  --err:#f0605d;
+  --btn:#33363c;         /* 次按钮面 */
+  --btn-hover:#3f434a;   /* 次按钮悬停 */
+  --entry:#2c2f35;       /* 输入控件面 */
+  --titlebar:#16171a;    /* 窗口标题栏 */
+  --shadow:0 18px 48px rgba(0,0,0,.55);
+
+  /* ---- 间距阶梯（4px 基准）---- */
+  --sp-1:4px;  --sp-2:6px;  --sp-3:8px;  --sp-4:12px;
+  --sp-5:14px; --sp-6:18px; --sp-7:24px;
+
+  /* ---- 圆角 ---- */
+  --r-card:6px;  --r-ctl:4px;  --r-win:8px;
+
+  /* ---- 字体 ---- */
+  --font-ui:"Microsoft YaHei UI","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+  --font-mono:Consolas,"Cascadia Mono",Menlo,monospace;
+}
+
+/* 浅色主题（对应 LIGHT） */
+html[data-theme="light"]{
+  --bg:#f2f3f5; --card:#ffffff; --line:#dcdfe4;
+  --fg:#1c1e21; --sub:#5f6672; --accent:#2f6feb; --accent-fg:#ffffff;
+  --ok:#1f9d55; --warn:#b8770f; --err:#c9382f;
+  --btn:#e8eaed; --btn-hover:#dadee3; --entry:#ffffff;
+  --titlebar:#e6e8ec;
+  --shadow:0 18px 48px rgba(0,0,0,.16);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:#0f1013;
+  font-family:var(--font-ui);
+  color:var(--fg);
+  -webkit-font-smoothing:antialiased;
+  padding:32px 16px 56px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:16px;
+}
+html[data-theme="light"] body{background:#e4e6ea}
+
+/* ==============================================================
+   窗口外壳（模拟 Windows 深色标题栏）
+   ============================================================== */
+.win{
+  width:min(720px,100%);
+  background:var(--bg);
+  border-radius:var(--r-win);
+  box-shadow:var(--shadow);
+  overflow:hidden;
+  border:1px solid var(--line);
+}
+.titlebar{
+  display:flex;align-items:center;gap:var(--sp-3);
+  height:36px;padding:0 var(--sp-4) 0 var(--sp-5);
+  background:var(--titlebar);
+  border-bottom:1px solid var(--line);
+  user-select:none;
+}
+.tb-icon{
+  width:16px;height:16px;border-radius:3px;flex:0 0 16px;
+  background:linear-gradient(135deg,#6f7cff,#4f8cff);
+  position:relative;
+}
+.tb-icon::after{
+  content:"";position:absolute;inset:4px 3px;
+  border:1.5px solid rgba(255,255,255,.85);border-radius:1px;
+}
+.tb-title{font-size:12.5px;color:var(--fg);opacity:.9}
+.tb-spacer{flex:1}
+.tb-btns{display:flex;gap:2px}
+.tb-btns span{
+  width:44px;height:36px;display:flex;align-items:center;justify-content:center;
+  color:var(--sub);font-size:11px;cursor:default;transition:background .12s;
+}
+.tb-btns span:hover{background:rgba(255,255,255,.07);color:var(--fg)}
+.tb-btns span.close:hover{background:#c9382f;color:#fff}
+
+/* ==============================================================
+   内容区
+   ============================================================== */
+.body{
+  padding:var(--sp-6) var(--sp-6) var(--sp-7);
+  display:flex;flex-direction:column;
+}
+
+/* ---- 页面标题 ---- */
+.app-title{
+  margin:var(--sp-2) 0 var(--sp-1);
+  font-size:22px;font-weight:700;letter-spacing:.2px;line-height:1.25;
+}
+.app-sub{
+  margin:0 0 var(--sp-5);
+  font-size:12px;color:var(--sub);min-height:1px;
+}
+
+/* ---- 卡片 ---- */
+.card{
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--r-card);
+  padding:var(--sp-5);
+}
+.card + .card{margin-top:var(--sp-4)}
+
+.card-title{
+  font-size:15px;font-weight:700;line-height:1.3;
+}
+.card-detail{
+  margin-top:var(--sp-1);
+  font-family:var(--font-mono);
+  font-size:12.5px;line-height:1.7;
+  color:var(--sub);
+  word-break:break-all;
+}
+
+/* ---- 表单 ---- */
+.field-label{
+  display:block;font-size:12px;color:var(--sub);
+  margin-bottom:var(--sp-2);
+}
+
+.radio-row{display:flex;flex-wrap:wrap;gap:var(--sp-5);margin-bottom:var(--sp-5)}
+.radio{
+  display:inline-flex;align-items:center;gap:var(--sp-2);
+  font-size:13px;color:var(--fg);cursor:pointer;user-select:none;
+}
+.radio input{position:absolute;opacity:0;pointer-events:none}
+.radio .mark{
+  width:15px;height:15px;border-radius:50%;
+  border:1.5px solid var(--sub);flex:0 0 15px;
+  display:flex;align-items:center;justify-content:center;
+  transition:border-color .12s;
+}
+.radio .mark::after{
+  content:"";width:7px;height:7px;border-radius:50%;
+  background:var(--accent);transform:scale(0);transition:transform .12s;
+}
+.radio:hover .mark{border-color:var(--fg)}
+.radio input:checked + .mark{border-color:var(--accent)}
+.radio input:checked + .mark::after{transform:scale(1)}
+.radio input:focus-visible + .mark{outline:2px solid var(--accent);outline-offset:2px}
+
+.form-row{display:flex;gap:var(--sp-5);align-items:flex-end}
+.field{display:flex;flex-direction:column;min-width:0}
+.field.grow{flex:1 1 auto}
+.field.f-effort{flex:0 0 116px}
+.field.f-ctx{flex:0 0 128px}
+.field label{font-size:12px;color:var(--sub);margin-bottom:var(--sp-2)}
+
+select{
+  width:100%;
+  appearance:none;-webkit-appearance:none;
+  background:var(--entry);
+  color:var(--fg);
+  border:1px solid var(--line);
+  border-radius:var(--r-ctl);
+  padding:7px 30px 7px 10px;
+  font-size:13px;font-family:var(--font-ui);
+  cursor:pointer;
+  transition:border-color .12s,box-shadow .12s;
+  background-image:linear-gradient(45deg,transparent 50%,var(--sub) 50%),
+                   linear-gradient(135deg,var(--sub) 50%,transparent 50%);
+  background-position:calc(100% - 15px) calc(50% + 1px),calc(100% - 10px) calc(50% + 1px);
+  background-size:5px 5px,5px 5px;
+  background-repeat:no-repeat;
+}
+select.mono{font-family:var(--font-mono);font-size:13px}
+select:hover{border-color:var(--sub)}
+select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(79,140,255,.22)}
+select:disabled{
+  color:var(--sub);cursor:not-allowed;opacity:.65;
+  background-image:linear-gradient(45deg,transparent 50%,var(--sub) 50%),
+                   linear-gradient(135deg,var(--sub) 50%,transparent 50%);
+}
+
+.hint{
+  margin:var(--sp-5) 0 0;
+  font-size:12px;line-height:1.75;color:var(--sub);
+  white-space:pre-line;
+}
+
+/* ---- 网关状态条 ---- */
+.gw{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-4) var(--sp-5)}
+.dot{
+  width:9px;height:9px;border-radius:50%;flex:0 0 9px;
+  background:var(--sub);transition:background .2s;
+}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px rgba(63,191,111,.16)}
+.dot.off{background:var(--sub)}
+.gw-text{font-size:12.5px;color:var(--sub);flex:1 1 auto;min-width:0}
+.gw-text.live{color:var(--fg)}
+.gw-actions{display:flex;gap:var(--sp-2);flex:0 0 auto}
+
+/* ---- 按钮 ---- */
+.btn{
+  font-family:var(--font-ui);font-size:12.5px;
+  background:var(--btn);color:var(--fg);
+  border:1px solid transparent;border-radius:var(--r-ctl);
+  padding:6px 12px;cursor:pointer;
+  transition:background .12s,border-color .12s,opacity .12s;
+  white-space:nowrap;
+}
+.btn:hover:not(:disabled){background:var(--btn-hover)}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{
+  background:var(--accent);color:var(--accent-fg);
+  font-weight:700;font-size:13px;padding:10px 18px;
+}
+.btn.primary:hover:not(:disabled){filter:brightness(1.08);background:var(--accent)}
+
+.actions{display:flex;flex-wrap:wrap;gap:var(--sp-3);margin-top:var(--sp-5)}
+.actions .btn:not(.primary){padding:9px 14px}
+
+/* ---- 日志 ---- */
+.log{
+  margin-top:var(--sp-4);
+  min-height:132px;max-height:240px;overflow:auto;
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:var(--r-card);
+  padding:var(--sp-4) var(--sp-5);
+  font-family:var(--font-mono);font-size:12.5px;line-height:1.75;
+  color:var(--sub);
+  white-space:pre-wrap;word-break:break-word;
+}
+.log .ok{color:var(--ok)}
+.log .warn{color:var(--warn)}
+.log .err{color:var(--err)}
+.log .sub{color:var(--sub)}
+.log .fg{color:var(--fg)}
+
+/* ==============================================================
+   演示控件（在窗口外，不属于界面本身）
+   ============================================================== */
+.demo-bar{
+  display:flex;align-items:center;gap:var(--sp-4);
+  font-size:12px;color:#8b929c;flex-wrap:wrap;justify-content:center;
+}
+.demo-bar button{
+  font-family:var(--font-ui);font-size:12px;
+  background:#26282d;color:#cfd4db;border:1px solid #3a3d43;
+  border-radius:4px;padding:6px 12px;cursor:pointer;
+}
+.demo-bar button:hover{background:#33363c}
+.demo-bar button.on{background:#4f8cff;color:#fff;border-color:#4f8cff}
+
+/* ==============================================================
+   响应式
+   --------------------------------------------------------------
+   ≥ 640px  三列并排（还原参考图）
+   < 640px  表单改为纵向堆叠，网关按钮换行
+   < 420px  进一步收紧内边距
+   ============================================================== */
+@media (max-width:640px){
+  body{padding:20px 10px 40px}
+  .body{padding:var(--sp-5) var(--sp-5) var(--sp-6)}
+  .app-title{font-size:19px}
+  .form-row{flex-direction:column;align-items:stretch;gap:var(--sp-4)}
+  .field.f-effort,.field.f-ctx{flex:1 1 auto}
+  .gw{flex-wrap:wrap;row-gap:var(--sp-3)}
+  .gw-text{flex:1 1 100%;order:2}
+  .gw-actions{flex:1 1 100%;order:3}
+  .gw-actions .btn{flex:1 1 auto}
+  .actions .btn{flex:1 1 auto}
+}
+@media (max-width:420px){
+  .body{padding:var(--sp-4)}
+  .app-title{font-size:17px}
+  .radio-row{gap:var(--sp-4)}
+  .tb-btns span{width:36px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *{transition:none !important}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ 窗口 ============ -->
+<div class="win" role="application" aria-label="Codex 切换器">
+
+  <!-- 标题栏 -->
+  <div class="titlebar">
+    <div class="tb-icon" aria-hidden="true"></div>
+    <span class="tb-title">Codex 切换器</span>
+    <span class="tb-spacer"></span>
+    <div class="tb-btns" aria-hidden="true">
+      <span>&#8211;</span><span>&#9633;</span><span class="close">&#10005;</span>
+    </div>
+  </div>
+
+  <!-- 内容 -->
+  <div class="body">
+    <h1 class="app-title">Codex 切换器</h1>
+    <p class="app-sub" id="subtitle"></p>
+
+    <!-- 卡片 1：当前状态 -->
+    <section class="card" aria-labelledby="curTitle">
+      <div class="card-title" id="curTitle">当前：官方账号</div>
+      <div class="card-detail" id="curDetail"></div>
+    </section>
+
+    <!-- 卡片 2：配置 -->
+    <section class="card">
+      <span class="field-label" id="lblProvider">服务商</span>
+      <div class="radio-row" id="modeRow" role="radiogroup" aria-labelledby="lblProvider"></div>
+
+      <div class="form-row">
+        <div class="field grow">
+          <label for="modelBox">模型</label>
+          <select id="modelBox" class="mono"></select>
+        </div>
+        <div class="field f-effort">
+          <label for="effortBox">推理强度</label>
+          <select id="effortBox" class="mono"></select>
+        </div>
+        <div class="field f-ctx">
+          <label for="ctxBox">上下文上限</label>
+          <select id="ctxBox"></select>
+        </div>
+      </div>
+
+      <p class="hint" id="hint"></p>
+    </section>
+
+    <!-- 卡片 3：网关 -->
+    <section class="card gw">
+      <span class="dot off" id="gwDot" aria-hidden="true"></span>
+      <span class="gw-text" id="gwText" role="status" aria-live="polite">网关状态检查中…</span>
+      <div class="gw-actions">
+        <button class="btn" id="btnStart">启动网关</button>
+        <button class="btn" id="btnStop">停止网关</button>
+        <button class="btn" id="btnReset">重置密钥状态</button>
+      </div>
+    </section>
+
+    <!-- 操作行 -->
+    <div class="actions">
+      <button class="btn primary" id="btnApply">应用并重启 Codex</button>
+      <button class="btn" id="btnSave">只写配置</button>
+      <button class="btn" id="btnRefresh">刷新端砚模型目录</button>
+    </div>
+
+    <!-- 日志 -->
+    <div class="log" id="log" role="log" aria-live="polite"></div>
+  </div>
+</div>
+
+<!-- ============ 演示控件 ============ -->
+<div class="demo-bar">
+  <span>演示：</span>
+  <button id="tDark" class="on">深色</button>
+  <button id="tLight">浅色</button>
+  <button id="tNarrow">窄屏（400px）</button>
+  <button id="tReset">重置日志</button>
+</div>
+
+<script>
+/* ==============================================================
+   数据：完全照搬 codex_switch_core.py 的 MODES 定义
+   ============================================================== */
+const CTX_PRESETS = [
+  ['模型最大值', null],
+  ['512K', 524288], ['256K', 262144], ['128K', 131072],
+  ['64K', 65536],   ['32K', 32768],
+];
+
+const MODES = {
+  openai: {
+    label: '官方账号',
+    models: ['gpt-6.1-sol', 'gpt-6.1-sol-mini', 'gpt-6.1-nova', 'gpt-5.9-turbo'],
+    default_model: 'gpt-6.1-sol',
+    reasoning_effort: 'high',
+    reasoning_options: ['low','medium','high','xhigh','ultra','max'],
+    needs_gateway: false,
+    note: '使用 Codex 桌面端已登录的官方账号，不经过任何本地代理。',
+  },
+  intern: {
+    label: '端砚 API 密钥',
+    models: ['Atria-Dawn-Preview', 'Atria-Night-Preview', 'Atria-Dawn-2', 'Atria-Lite'],
+    default_model: 'Atria-Dawn-Preview',
+    reasoning_effort: 'low',
+    reasoning_options: ['low','high','max'],
+    needs_gateway: true,
+    note: '经由本机 127.0.0.1:18791 代理，7 把密钥顺序轮换，用光一把自动换下一把。',
+  },
+  deepseek: {
+    label: 'DeepSeek 官方',
+    models: ['deepseek-flash', 'deepseek-pro', 'deepseek-reasoner'],
+    default_model: 'deepseek-flash',
+    reasoning_effort: 'high',
+    reasoning_options: ['low','high','max'],
+    needs_gateway: false,
+    note: '直连 DeepSeek 官方接口，使用 DeepSeek 平台签发的 API 密钥。',
+  },
+};
+const MODE_ORDER = ['openai','intern','deepseek'];
+const CONFIG_PATH = 'C:\\Users\\xukunhang\\.codex\\config.toml';
+
+/* ==============================================================
+   状态
+   ============================================================== */
+const S = {
+  mode: 'openai',
+  model: 'gpt-6.1-sol',
+  effort: 'high',
+  ctx: '模型最大值',
+  gatewayUp: false,
+  busy: false,
+  autostart: true,
+};
+
+const $ = id => document.getElementById(id);
+const spec = () => MODES[S.mode];
+
+/* ==============================================================
+   渲染
+   ============================================================== */
+function renderRadios(){
+  $('modeRow').innerHTML = MODE_ORDER.map(k => `
+    <label class="radio">
+      <input type="radio" name="mode" value="${k}" ${k===S.mode?'checked':''}>
+      <span class="mark"></span>${MODES[k].label}
+    </label>`).join('');
+  $('modeRow').querySelectorAll('input').forEach(el => {
+    el.addEventListener('change', () => onModeChange(el.value));
+  });
+}
+
+function renderModels(){
+  $('modelBox').innerHTML = spec().models
+    .map(m => `<option value="${m}" ${m===S.model?'selected':''}>${m}</option>`).join('');
+}
+
+function renderEffort(){
+  $('effortBox').innerHTML = spec().reasoning_options
+    .map(e => `<option value="${e}" ${e===S.effort?'selected':''}>${e}</option>`).join('');
+}
+
+function renderCtx(){
+  const need = spec().needs_gateway;
+  $('ctxBox').disabled = !need;
+  $('ctxBox').innerHTML = CTX_PRESETS
+    .map(([n]) => `<option ${n===S.ctx?'selected':''}>${n}</option>`).join('');
+}
+
+function renderCurrent(){
+  $('curTitle').textContent = '当前：' + spec().label;
+  $('curDetail').innerHTML =
+    `模型 ${S.model || '—'} · 推理 ${S.effort || '—'}<br>配置 ${CONFIG_PATH}`;
+}
+
+function renderHint(){
+  let note = spec().note;
+  if (S.mode === 'intern'){
+    note += '\n注：gpt-6.1-sol 不支持 Responses 协议，在 Codex 里用不了，已从列表移除。';
+  }
+  $('hint').textContent = note;
+}
+
+function renderGateway(){
+  if (S.gatewayUp){
+    $('gwDot').className = 'dot on';
+    $('gwText').className = 'gw-text live';
+    $('gwText').textContent = '网关运行中 · 当前第 3 把 · 共 6 把可用 · 已标记 #2';
+  } else {
+    $('gwDot').className = 'dot off';
+    $('gwText').className = 'gw-text';
+    $('gwText').textContent = '网关未运行（端砚模式会自动拉起）';
+  }
+}
+
+function renderAll(){
+  renderModels(); renderEffort(); renderCtx();
+  renderCurrent(); renderHint(); renderGateway();
+}
+
+/* ==============================================================
+   日志
+   ============================================================== */
+function say(text, kind='sub'){
+  const el = document.createElement('div');
+  el.className = kind;
+  el.textContent = text;
+  $('log').appendChild(el);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+/* ==============================================================
+   交互逻辑
+   ============================================================== */
+function onModeChange(key){
+  S.mode = key;
+  S.model = MODES[key].default_model;
+  S.effort = MODES[key].reasoning_effort;
+  S.ctx = MODES[key].needs_gateway ? '128K' : '模型最大值';
+  renderAll();
+  if (key === 'intern' && !S.gatewayUp) ensureGateway();
+}
+
+function setBusy(on){
+  S.busy = on;
+  ['btnApply','btnSave','btnStart','btnStop','btnReset','btnRefresh']
+    .forEach(id => $(id).disabled = on);
+}
+
+function run(lines, done){
+  if (S.busy){ say('上一个操作还在进行，稍等。','warn'); return; }
+  setBusy(true);
+  $('log').innerHTML = '';
+  let i = 0;
+  const step = () => {
+    if (i < lines.length){
+      const [t,k] = lines[i++];
+      say(t, k);
+      setTimeout(step, 220);
+    } else {
+      setBusy(false);
+      if (done) done();
+    }
+  };
+  step();
+}
+
+function ensureGateway(){
+  if (S.gatewayUp) return;
+  say('检测到端砚模式下网关没在跑，正在自动拉起…','warn');
+  setTimeout(() => {
+    S.gatewayUp = true;
+    renderGateway();
+    say('  网关已自动恢复。','ok');
+  }, 700);
+}
+
+/* ---- 服务商 / 模型 / 推理 / 上下文 ---- */
+$('modelBox').addEventListener('change', e => {
+  S.model = e.target.value;
+  renderCurrent();
+});
+$('effortBox').addEventListener('change', e => {
+  S.effort = e.target.value;
+  renderCurrent();
+});
+$('ctxBox').addEventListener('change', e => { S.ctx = e.target.value; });
+
+/* ---- 主按钮 ---- */
+$('btnApply').addEventListener('click', () => {
+  if (!S.model){ say('请先选择或填写模型 ID。','warn'); return; }
+  S.autostart = true;
+  run([
+    [`✓ 已切到「${spec().label}」，模型 ${S.model}，推理 ${S.effort}`, 'ok'],
+    ['  原配置已备份到 config.toml.bak-20261017-095812', 'sub'],
+    ['✓ 已重启 Codex。', 'ok'],
+  ], () => {
+    renderCurrent();
+    if (S.mode === 'intern'){ S.gatewayUp = true; renderGateway(); }
+  });
+});
+
+$('btnSave').addEventListener('click', () => {
+  run([
+    [`✓ 已写配置（未重启），模型 ${S.model}，推理 ${S.effort}`, 'ok'],
+    ['  原配置已备份到 config.toml.bak-20261017-095812', 'sub'],
+  ]);
+});
+
+$('btnRefresh').addEventListener('click', () => {
+  run([
+    ['✓ 端砚模型目录已刷新，共 27 个模型。', 'ok'],
+    ['  注：gpt-6.1-sol 不支持 Responses 协议，在 Codex 里用不了，已从列表移除。', 'sub'],
+  ]);
+});
+
+/* ---- 网关 ---- */
+$('btnStart').addEventListener('click', () => {
+  S.autostart = true;
+  run([['✓ 网关已启动。','ok']], () => { S.gatewayUp = true; renderGateway(); });
+});
+$('btnStop').addEventListener('click', () => {
+  S.autostart = false;
+  run([['已停止网关（本次不再自动拉起）','sub']], () => { S.gatewayUp = false; renderGateway(); });
+});
+$('btnReset').addEventListener('click', () => {
+  run([
+    ['已清掉 7 把密钥的「额度耗尽 / 失效」标记。','sub'],
+    ['  余额没恢复的话，下一轮请求会再次被标记。','sub'],
+  ]);
+});
+
+/* ==============================================================
+   演示控件
+   ============================================================== */
+$('tDark').onclick = () => {
+  document.documentElement.dataset.theme = 'dark';
+  $('tDark').classList.add('on'); $('tLight').classList.remove('on');
+};
+$('tLight').onclick = () => {
+  document.documentElement.dataset.theme = 'light';
+  $('tLight').classList.add('on'); $('tDark').classList.remove('on');
+};
+$('tNarrow').onclick = () => {
+  const w = document.querySelector('.win');
+  const on = $('tNarrow').classList.toggle('on');
+  w.style.width = on ? '400px' : '';
+};
+$('tReset').onclick = () => {
+  $('log').innerHTML = '';
+  say('已读取当前配置。','sub');
+};
+
+/* ---- 首屏 ---- */
+renderRadios();
+renderAll();
+say('已读取当前配置。','sub');
+</script>
+</body>
+</html>

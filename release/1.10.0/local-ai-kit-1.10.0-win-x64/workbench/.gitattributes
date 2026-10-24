@@ -1,0 +1,23 @@
+# Windows 批处理必须是 CRLF + 纯 ASCII，否则双击会闪退。
+# 强制检出为 CRLF，不依赖使用者本地的 core.autocrlf 设置。
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# 其余按 LF 走
+*.py    text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.html  text eol=lf
+
+# 二进制
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.gguf  binary
+
+# 让 GitHub 正确统计语言
+*.bat   linguist-language=Batchfile
+*.ps1   linguist-language=PowerShell
