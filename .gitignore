@@ -27,6 +27,9 @@ stop-ai.cmd
 重建桌面图标.cmd
 卸载.cmd
 
+# 本地界面冒烟测试的产物（截图 / 临时脚本，需要 playwright，不进仓库）
+.smoke/
+
 # 系统文件
 Thumbs.db
 desktop.ini
