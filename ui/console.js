@@ -2,9 +2,16 @@
 
 const $ = (id) => document.getElementById(id);
 
-async function post(url, body) {
+/**
+ * 发一个会改数据的请求（POST / DELETE …）。
+ *
+ * 必须带令牌：服务端对所有非 GET 都校验 `X-LocalAI-Token`。
+ * 以前有几个 DELETE 是裸 `fetch(...)` —— 服务端回 403，而 fetch 对 403 不抛错，
+ * 于是界面照样弹「已删除 / 已清空」，刷新一下数据又回来了。
+ */
+async function send(method, url, body) {
   const r = await fetch(url, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', 'X-LocalAI-Token': window.__TOKEN__ || '' },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -13,6 +20,15 @@ async function post(url, body) {
   if (r.status === 429) throw new Error('操作太频繁了，等几秒再试');
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
+}
+
+async function post(url, body) {
+  return send('POST', url, body);
+}
+
+/** 删除类请求：和 post 一样要带令牌、要检查状态码 */
+async function del(url) {
+  return send('DELETE', url);
 }
 
 function esc(s) {
@@ -186,19 +202,34 @@ function currentTheme() {
   try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch { return 'auto'; }
 }
 
+/**
+ * 「按时段」的定时器。运行期切到 schedule 时也要启动，
+ * 以前只在页面初始化时创建 —— 用户手动切到「按时段」后颜色就定死在那里，
+ * 直到刷新页面才恢复自动切换。
+ */
+let scheduleTimer = null;
+
+function syncScheduleTimer() {
+  const on = currentTheme() === 'schedule';
+  if (on && !scheduleTimer) {
+    scheduleTimer = setInterval(() => {
+      if (currentTheme() !== 'schedule') { syncScheduleTimer(); return; }
+      const want = scheduledTheme();
+      if (document.documentElement.getAttribute('data-theme') !== want) {
+        document.documentElement.setAttribute('data-theme', want);
+      }
+    }, 300000);
+  } else if (!on && scheduleTimer) {
+    clearInterval(scheduleTimer);
+    scheduleTimer = null;
+  }
+}
+
 (function initTheme() {
   const saved = currentTheme();
   if (saved === 'schedule') {
     document.documentElement.setAttribute('data-theme', scheduledTheme());
-    // 每 5 分钟看一眼，天色变了自动切
-    setInterval(() => {
-      if (currentTheme() === 'schedule') {
-        const want = scheduledTheme();
-        if (document.documentElement.getAttribute('data-theme') !== want) {
-          document.documentElement.setAttribute('data-theme', want);
-        }
-      }
-    }, 300000);
+    syncScheduleTimer();
   } else if (saved !== 'auto') {
     document.documentElement.setAttribute('data-theme', saved);
   }
@@ -246,6 +277,8 @@ function saveShortcuts(list) {
 }
 
 let shortcutDefs = loadShortcuts();
+/** 正在等待「按下新键」的那个 document 级监听（同一时间只该有一个） */
+let pendingShortcutHandler = null;
 
 function renderShortcuts() {
   const box = $('shortcutList');
@@ -260,21 +293,32 @@ function renderShortcuts() {
       const id = k.dataset.sk;
       const def = shortcutDefs.find((s) => s.id === id);
       if (!def) return;
+      // 上一次点开别的键位但没按键就改点这一行时，那个监听还挂在 document 上。
+      // 不清掉的话，下一次按键会同时改掉两个快捷键、弹两次提示。
+      if (pendingShortcutHandler) {
+        document.removeEventListener('keydown', pendingShortcutHandler, true);
+        pendingShortcutHandler = null;
+      }
       const handler = (e) => {
         e.preventDefault();
         e.stopPropagation();
         const key = e.key.length === 1 ? e.key : e.key.toLowerCase();
-        if (key === 'escape') { document.removeEventListener('keydown', handler, true); return; }
+        if (key === 'escape') { cancel(); return; }
         // 功能键不绑定，免得和浏览器快捷键打架
         if (['control', 'shift', 'alt', 'meta'].includes(key)) return;
         def.key = key;
         def.mod = e.ctrlKey || e.metaKey ? 'ctrl' : (e.altKey ? 'alt' : (e.shiftKey ? 'shift' : ''));
         def.label = formatShortcut(def.key, def.mod);
         saveShortcuts(shortcutDefs);
-        document.removeEventListener('keydown', handler, true);
+        cancel();
         renderShortcuts();
         toast(`「${def.name}」改成了 ${def.label}`);
       };
+      const cancel = () => {
+        document.removeEventListener('keydown', handler, true);
+        if (pendingShortcutHandler === handler) pendingShortcutHandler = null;
+      };
+      pendingShortcutHandler = handler;
       document.addEventListener('keydown', handler, true);
       k.textContent = '按下新键…（Esc 取消）';
     });
@@ -342,6 +386,17 @@ const KEYMAP = {
 };
 
 document.addEventListener('keydown', (e) => {
+  // 正在输入框里打字：只放行带修饰键的快捷键。
+  // 这段判断必须在自定义快捷键匹配之前 —— 以前放在后面，
+  // 于是「R」「1」「2」「3」「4」这几个无修饰键的快捷键会先被 preventDefault 吃掉，
+  // 在搜索框、聊天框、重复次数输入框里根本打不出这些字符（输入「3」直接跳页）。
+  const el = e.target;
+  const tagName = (el && el.tagName || '').toLowerCase();
+  const typing = tagName === 'input' || tagName === 'textarea' || tagName === 'select'
+    || (el && el.isContentEditable);
+  const hasMod = e.ctrlKey || e.metaKey || e.altKey;
+  if (typing && !hasMod) return;
+
   // 用户自定义过的快捷键优先
   const custom = shortcutDefs.find((s) => {
     if (s.mod === 'ctrl' && !(e.ctrlKey || e.metaKey)) return false;
@@ -369,9 +424,7 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
-
+  // 输入框已在函数开头挡掉，这里开始都是「不在输入框里」的裸键
   if (KEYMAP[e.key]) {
     const li = document.querySelector(`#tabs li[data-tab="${KEYMAP[e.key]}"]`);
     if (li) { li.click(); e.preventDefault(); }
@@ -862,11 +915,7 @@ function pickIdleModels() {
     c.checked = on;
     if (on) n++;
   }
-  const btn = $('btnBatchDel');
-  if (btn) {
-    btn.disabled = n === 0;
-    btn.textContent = n ? `批量删除（${n}）` : '批量删除';
-  }
+  syncBatchBtn();
   if (typeof toast === 'function') toast(`已勾选 ${n} 个闲置模型，确认后点「批量删除」`);
 }
 
@@ -914,6 +963,13 @@ function renderModels() {
     return;
   }
 
+  // 轮询每 5 秒重渲染一次列表，勾选状态要带过去。
+  // 以前不带：用户勾了 3 个模型准备批量删，5 秒后复选框全回退，
+  // 但按钮文案还是「批量删除（3）」，点下去一个都没选中，看起来像没反应。
+  const picked = new Set([...document.querySelectorAll('[data-pick]:checked')].map((i) => i.dataset.pick));
+  // 体积对比条的基准，只算一次（以前写在 map 里，每个模型都重算一遍）
+  const maxSize = Math.max(1, ...all.map((x) => x.sizeGB || 0));
+
   $('modelList').innerHTML = list.map((m) => {
     const caps = (state.caps || {})[m.name] || [];
     const tags = [];
@@ -921,12 +977,11 @@ function renderModels() {
     if (caps.includes('tools')) tags.push('工具调用');
     if (caps.includes('thinking')) tags.push('深度思考');
     // 体积对比条：一眼看出哪个模型最占地方
-    const maxSize = Math.max(1, ...all.map((x) => x.sizeGB || 0));
     const w = Math.max(3, Math.round(((m.sizeGB || 0) / maxSize) * 100));
     const isCurrent = state.model && state.model === m.name;
     return `
     <div class="mrow${isCurrent ? ' current' : ''}${favSet.has(m.name) ? ' starred' : ''}" data-model="${esc(m.name)}">
-      <label class="mcheck"><input type="checkbox" data-pick="${esc(m.name)}"></label>
+      <label class="mcheck"><input type="checkbox" data-pick="${esc(m.name)}"${picked.has(m.name) ? ' checked' : ''}></label>
       <div class="mi">
         <div class="mn">${esc(m.name)}${isCurrent ? '<span class="tag current">使用中</span>' : ''}${tags.map((t) => `<span class="tag">${t}</span>`).join('')}${staleTag(m.name)}</div>
         <div class="ms">${esc(m.params || '')} ${esc(m.quant || '')}${m.modified ? ' · ' + esc(String(m.modified).slice(0, 10)) : ''}${useText(m.name)}</div>
@@ -949,15 +1004,9 @@ function renderModels() {
     b.addEventListener('click', () => askAlias(b.dataset.alias));
   }
   for (const c of document.querySelectorAll('[data-pick]')) {
-    c.addEventListener('change', () => {
-      const picked = document.querySelectorAll('[data-pick]:checked');
-      const btn = $('btnBatchDel');
-      if (btn) {
-        btn.disabled = picked.length === 0;
-        btn.textContent = picked.length ? `批量删除（${picked.length}）` : '批量删除';
-      }
-    });
+    c.addEventListener('change', syncBatchBtn);
   }
+  syncBatchBtn();
 
   for (const b of document.querySelectorAll('[data-star]')) {
     b.addEventListener('click', () => toggleFav(b.dataset.star));
@@ -981,6 +1030,15 @@ function renderModels() {
   }
 }
 
+/** 批量删除按钮的可用状态与文案，永远跟着「实际勾了几个」走 */
+function syncBatchBtn() {
+  const btn = $('btnBatchDel');
+  if (!btn) return;
+  const n = document.querySelectorAll('[data-pick]:checked').length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `批量删除（${n}）` : '批量删除';
+}
+
 /** 删除前先在原地确认一次，不用浏览器自带的弹窗 */
 function askDelete(model, btn) {
   const row = btn.closest('.mrow');
@@ -990,16 +1048,28 @@ function askDelete(model, btn) {
     <div class="mi"><div class="mn">删除 ${esc(model)}？</div>
       <div class="ms">会释放磁盘空间，以后想用需要重新下载。</div></div>
     <div class="ma">
-      <button class="btn primary small" id="delYes">确认删除</button>
-      <button class="btn ghost small" id="delNo">取消</button>
+      <button class="btn primary small" data-del-yes>确认删除</button>
+      <button class="btn ghost small" data-del-no>取消</button>
     </div>`;
-  $('delNo').addEventListener('click', () => { row.classList.remove('confirming'); row.innerHTML = backup; renderModels(); });
-  $('delYes').addEventListener('click', async () => {
+  // 必须在这行里查，不能用全局 id：
+  // 以前用的是 $('delYes')（= getElementById），两行都进确认态时它只会返回第一个，
+  // 于是点 B 行的「确认删除」实际绑到了 A 行的按钮上 —— 一次删掉两个模型。
+  const restore = () => {
+    row.classList.remove('confirming');
+    row.innerHTML = backup;
+    renderModels();
+    // 焦点还给这一行的删除按钮，键盘用户不用从头 Tab 一遍
+    const again = document.querySelector(`[data-model="${CSS.escape(model)}"] [data-del]`);
+    if (again) again.focus();
+  };
+  row.querySelector('[data-del-no]').addEventListener('click', restore);
+  row.querySelector('[data-del-yes]').addEventListener('click', async () => {
     try {
       showLog(true);
       await post('/api/delete', { model });
     } catch (e) { toast(e.message); }
   });
+  row.querySelector('[data-del-no]').focus();
 }
 
 if ($('modelSearch')) {
@@ -1898,11 +1968,23 @@ function playRender() {
     return;
   }
   box.innerHTML = list.map((m) => `
-    <div class="msg ${m.role}">
+    <div class="msg ${m.role}" data-mid="${esc(m.id)}">
       <div class="msg-role">${m.role === 'user' ? '我' : '模型'}</div>
-      <div class="msg-body">${m.pending ? '<span class="typing">正在思考…</span>' : esc(m.content)}</div>
+      <div class="msg-body">${isPending(m) ? '<span class="typing">正在思考…</span>' : esc(m.content)}</div>
     </div>`).join('');
   box.scrollTop = box.scrollHeight;
+  // 「重新生成」以前永远是 hidden：全文只有它的 addEventListener，没有任何地方把它显示出来，
+  // 于是分支树（playSiblings / renderBranches / playSwitchTo）整块都是死代码。
+  const regen = $('btnPlayRegen');
+  if (regen) {
+    const canRegen = !playPending && list.some((m) => m.role === 'assistant');
+    regen.hidden = !canRegen;
+  }
+}
+
+/** 这个节点是不是「刚发出去、还在等第一个字」的那一个 */
+function isPending(m) {
+  return !!(playPending && m && m.id === playPending.id && !m.content);
 }
 
 /** 分支切换器：同一个问题下有几个回答就摆几个按钮 */
@@ -2004,7 +2086,10 @@ async function playSend(opts = {}) {
         try { ev = JSON.parse(payload); } catch { continue; }
         if (ev.type === 'chunk') {
           answerNode.content += ev.content;
-          const body = document.querySelector('.msg.assistant:last-of-type .msg-body');
+          // 按节点 id 找那一格，不用 `.msg.assistant:last-of-type`：
+          // :last-of-type 看的是「同类型标签里的最后一个」，遇到分支 / 重新生成时
+          // 会指到别的气泡上。
+          const body = document.querySelector(`.msg[data-mid="${CSS.escape(String(answerNode.id))}"] .msg-body`);
           if (body) body.textContent = answerNode.content;
           $('chatBox').scrollTop = $('chatBox').scrollHeight;
         } else if (ev.type === 'error') {
@@ -2078,7 +2163,7 @@ if ($('btnPlayDel')) {
     const id = $('playSession').value;
     if (!id) { toast('先选一段对话'); return; }
     try {
-      await fetch(`/api/sessions?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await del(`/api/sessions?id=${encodeURIComponent(id)}`);
       if (playSessionId === id) { playReset(); playSessionId = ''; playRender(); }
       await loadSessions();
       toast('已删除');
@@ -2295,7 +2380,7 @@ async function loadTrend(kind) {
 
 if ($('btnClearHealth')) {
   $('btnClearHealth').addEventListener('click', async () => {
-    try { await fetch('/api/history?kind=health', { method: 'DELETE' }); loadTrend('health'); toast('体检历史已清空'); }
+    try { await del('/api/history?kind=health'); loadTrend('health'); toast('体检历史已清空'); }
     catch (e) { toast(e.message); }
   });
 }
@@ -2313,7 +2398,7 @@ if ($('btnMdBench')) {
 }
 if ($('btnClearBench')) {
   $('btnClearBench').addEventListener('click', async () => {
-    try { await fetch('/api/history?kind=bench', { method: 'DELETE' }); loadTrend('bench'); toast('测速历史已清空'); }
+    try { await del('/api/history?kind=bench'); loadTrend('bench'); toast('测速历史已清空'); }
     catch (e) { toast(e.message); }
   });
 }
@@ -2800,6 +2885,12 @@ try {
 
 const notifications = [];
 let unread = 0;
+
+/**
+ * 已经通知过的下载任务（`模型|状态|排队时间`）。
+ * 放模块作用域而不是挂在事件对象上，原因见 SSE queue 分支的注释。
+ */
+const notifiedQueue = new Set();
 
 /** 记一条通知 */
 function notify(title, detail, tone) {
@@ -3768,15 +3859,17 @@ function connectSSE() {
       renderRanking({ results: ev.results, advice: ev.advice });
     } else if (ev.type === 'queue') {
       renderQueue(ev.state);
+      // 去重键要存在本地，不能挂在事件对象上：
+      // 服务端每次推的都是全新对象（snapshot 里 items.map(it => ({...it}))），
+      // 挂在对象上的 _notified 一推送就没了 —— 下载中每 300ms 推一次，
+      // 于是每个已完成的任务每 300ms 重新通知一遍，铃铛计数一直涨。
       for (const it of (ev.state && ev.state.items) || []) {
-        if (it._notified) continue;
-        if (it.status === 'done') {
-          it._notified = true;
-          notify(`「${it.model}」下载完成`, '可以在「试用」页直接跟它对话了', 'ok');
-        } else if (it.status === 'error') {
-          it._notified = true;
-          notify(`「${it.model}」下载失败`, it.error || '', 'error');
-        }
+        if (it.status !== 'done' && it.status !== 'error') continue;
+        const key = `${it.model}|${it.status}|${it.queuedAt || ''}`;
+        if (notifiedQueue.has(key)) continue;
+        notifiedQueue.add(key);
+        if (it.status === 'done') notify(`「${it.model}」下载完成`, '可以在「试用」页直接跟它对话了', 'ok');
+        else notify(`「${it.model}」下载失败`, it.error || '', 'error');
       }
     } else if (ev.type === 'health-item') {
       healthDone++;
@@ -3998,6 +4091,8 @@ function setupButtons() {
       const idx = THEMES.findIndex((t) => t.id === cur);
       const next = THEMES[(idx + 1) % THEMES.length];
       applyTheme(next.id);
+      // 切到 / 切离「按时段」时，定时器要跟着启停（以前只有刷新页面才会建）
+      syncScheduleTimer();
       toast(`主题：${next.label}`);
     });
   }
