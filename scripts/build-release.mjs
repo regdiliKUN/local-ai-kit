@@ -32,16 +32,31 @@ const DEPLOY_ITEMS = ['launcher', 'shortcuts', 'workbench', 'dist', '本地AI.cm
 const KIT_SKIP = new Set([
   '.git', '.smoke', 'node_modules', 'node', 'release',
   'dsh-runtime', '__pycache__', 'check_out', 'probe_out',
+  // tests 不进快照：快照是「拷走就能跑」的部署，不是源码归档（离线包里也没有）。
+  // 而且 `node --test` 会递归收走快照里那份测试，跑一遍等于跑两遍，
+  // 那份副本又不在仓库根目录，路径相关的用例必然失败。
+  'tests',
 ]);
 /**
  * 项目本体里不该进快照的东西。
  *
- * `.gitattributes` 必须排除：它一旦落进快照里的 local-ai-kit/ 目录，
- * 就会被 git 当成「嵌套属性文件」，反过来覆盖根目录那条 release/** -text ——
- * 于是包体又走回换行符规范化，整份快照变成假 diff，校验清单也失效。
- * 离线包里本来也没有这个文件（package-offline 的清单里没有它）。
+ * 这里排除的都是「跑起来才会生成的东西」和「别人机器上的残留」：
+ *   - 配置.json / 使用记录.json / 出字快测.json：运行期数据，别人的机器不该带着
+ *   - start-ai.cmd 等入口：安装向导会生成，仓库里本来就不提交
+ *   - *.bak-2026... / *.tmp / *.log：备份和日志
+ *
+ * `.gitattributes` / `.gitignore` 也必须排除：它们一旦落进快照里的子目录，
+ * 就会被 git 当成嵌套规则，反过来覆盖根目录的设置 ——
+ * .gitattributes 会让包体走回换行符规范化（整份快照变假 diff），
+ * .gitignore 会把本该入库的文件挡在仓库外（清单里算了它、仓库里却没有）。
+ * 离线包里本来也没有这两个文件。
  */
-const KIT_SKIP_FILE = /^(配置\.json(\..*)?|使用记录\.json|出字快测\.json|\.gitattributes|.*\.(bak|tmp|zip|log))$/;
+const KIT_SKIP_FILE = new RegExp('^(' + [
+  '配置\\.json(\\..*)?', '使用记录\\.json', '出字快测\\.json',
+  '\\.gitattributes', '\\.gitignore', 'Thumbs\\.db', 'desktop\\.ini', '\\.DS_Store',
+  'start-ai\\.cmd', 'stop-ai\\.cmd', '控制台\\.cmd', '重建桌面图标\\.cmd', '卸载\\.cmd',
+  '.*\\.(bak|tmp|zip|log)([-.].*)?',
+].join('|') + ')$');
 
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
