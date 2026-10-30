@@ -98,18 +98,28 @@ function setGaugeNum(id, val, suffix) {
 
 /* --------------------------------------------------- 指标缓存 */
 let metricsCache = { at: 0, data: null };
+/** 用量 / 磁盘列表上次刷新的时间（30 秒节流，不跟 2 秒轮询） */
+let lastUsageAt = 0;
 
 /* ------------------------------------------------------------------ 标签 */
 
 for (const li of document.querySelectorAll('#tabs li')) {
   li.addEventListener('click', () => {
-    for (const x of document.querySelectorAll('#tabs li')) x.classList.toggle('active', x === li);
+    for (const x of document.querySelectorAll('#tabs li')) {
+      const on = x === li;
+      x.classList.toggle('active', on);
+      // 读屏靠 aria-selected 判断「当前在哪一页」；tabindex 只给当前页留一个 Tab 落点
+      x.setAttribute('aria-selected', on ? 'true' : 'false');
+      x.tabIndex = on ? 0 : -1;
+    }
     for (const v of document.querySelectorAll('.view')) v.hidden = true;
     $(`view-${li.dataset.tab}`).hidden = false;
     if (location.hash !== `#${li.dataset.tab}`) history.replaceState(null, '', `#${li.dataset.tab}`);
     window.scrollTo(0, 0);
     // 概览页的数据是「按需拉」的，切过去才拉，省得后台一直跑 nvidia-smi
     if (li.dataset.tab === 'dashboard') loadDashboard().catch(() => {});
+    // 离开概览页就停掉 2 秒轮询，回来再开（否则在别的页面上白画一堆图）
+    startDashTimer();
     if (li.dataset.tab === 'health') { loadTrend('health').catch(() => {}); loadRanking().catch(() => {}); }
     if (li.dataset.tab === 'bench') loadTrend('bench').catch(() => {});
     if (li.dataset.tab === 'compare') renderFitRadar().catch(() => {});
@@ -117,6 +127,19 @@ for (const li of document.querySelectorAll('#tabs li')) {
     if (li.dataset.tab === 'context') { loadVramPlan(); renderProbes(); }
     if (li.dataset.tab === 'settings') { loadCheckpoints().catch(() => {}); renderShortcuts(); }
     if (li.dataset.tab === 'help') renderHelp();
+  });
+  // 键盘：Enter / 空格切页，左右方向键在同级标签间移动（ARIA tablist 的常规行为）
+  li.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); li.click(); return; }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const all = [...document.querySelectorAll('#tabs li')];
+    const i = all.indexOf(li);
+    const step = (e.key === 'ArrowDown' || e.key === 'ArrowRight') ? 1 : -1;
+    const next = all[(i + step + all.length) % all.length];
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+    next.click();
   });
 }
 
@@ -479,7 +502,24 @@ function explainError(text) {
 
 /* ------------------------------------------------------------------ 状态 */
 
-async function loadState() {
+/**
+ * 拉一次全量状态并重渲染。
+ *
+ * 并发去重很重要：轮询定时器、切回标签页、按 R、命令面板、SSE done 都会调它，
+ * 两路并发时后到的旧响应会把新状态盖掉（界面闪回上一帧）。
+ * 另外加了超时：服务端某个接口卡住时，不能让它一直挂着把后续刷新全堵死。
+ */
+let stateLoading = null;
+
+function loadState() {
+  if (stateLoading) return stateLoading;
+  stateLoading = (async () => {
+    await loadStateOnce();
+  })().finally(() => { stateLoading = null; });
+  return stateLoading;
+}
+
+async function loadStateOnce() {
   // 首屏数据是服务端注入的（window.__BOOT__），先直接用，省一次往返也避免闪白
   if (window.__BOOT__ && window.__BOOT__.state && !state) {
     state = window.__BOOT__.state;
@@ -496,12 +536,19 @@ async function loadState() {
     renderServices();
     loadSpace().catch(() => {});
     loadCaps();
-    if (window.__BOOT__.metrics) renderMetrics(window.__BOOT__.metrics);
+    if (window.__BOOT__.metrics) {
+      // 首屏注入的指标也要画 KPI 卡片行 —— 只画仪表盘的话，概览页第一眼
+      // 会缺一整行（要等 2 秒后第一次轮询才补上），看起来像没加载完。
+      renderMetrics(window.__BOOT__.metrics);
+      renderKpi(window.__BOOT__.metrics);
+    }
     renderChecklist();
     loadModelUsage();
     return;
   }
-  state = await (await fetch('/api/state')).json();
+  const r = await fetch('/api/state', { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error(`状态读取失败（HTTP ${r.status}）`);
+  state = await r.json();
   renderStatus();
   renderModels();
   renderSettings();
@@ -624,8 +671,13 @@ function renderMetrics(data) {
   }
 
   renderVramBreakdown(m);
-  loadUsage().catch(() => {});
-  loadDisks().catch(() => {});
+  // 用量折线和磁盘列表不用 2 秒刷一次（这两块的变化是按天 / 按分钟的），
+  // 以前放在这里，跟着 2 秒轮询一起重画整块折线图。现在 30 秒一次。
+  if (Date.now() - lastUsageAt > 30000) {
+    lastUsageAt = Date.now();
+    loadUsage().catch(() => {});
+    loadDisks().catch(() => {});
+  }
 
   /* ---- 正在跑的模型 ---- */
   const running = (m.ollama && m.ollama.models) || [];
@@ -743,8 +795,11 @@ function renderKpi(data) {
     });
   }
   if (m.disk) {
+    // 大容量盘按 TB 显示：卡片只有一百来像素宽，"6667.6 GB" 会折成两行
+    const free = m.disk.freeGB;
+    const big = free >= 1000;
     cards.push({
-      icon: '💾', label: '磁盘剩余', value: fmtGB(m.disk.freeGB), unit: 'GB',
+      icon: '💾', label: '磁盘剩余', value: big ? (free / 1000).toFixed(1) : fmtGB(free), unit: big ? 'TB' : 'GB',
       sub: `${m.disk.path} · 已用 ${Math.round(m.disk.usedPercent || 0)}%`,
       tone: m.disk.usedPercent >= 90 ? 'bad' : m.disk.usedPercent >= 80 ? 'warn' : '',
     });
@@ -771,7 +826,12 @@ function renderKpi(data) {
 function startDashTimer() {
   if (dashTimer) clearInterval(dashTimer);
   dashTimer = null;
-  if (dashOn) dashTimer = setInterval(() => loadDashboard().catch(() => {}), 2000);
+  // 只在「概览页可见 + 页面在前台」时轮询。
+  // 以前只判断了页面可见性：用户切到「模型管理」后，概览页每 2 秒还在
+  // 重建十来个 SVG（4 条迷你趋势 + 仪表 + 瀑布 + 环形），全是白算。
+  const view = $('view-dashboard');
+  const visible = !document.hidden && view && !view.hidden;
+  if (dashOn && visible) dashTimer = setInterval(() => loadDashboard().catch(() => {}), 2000);
 }
 
 /* 页面在后台时不轮询 —— 省 CPU，也省得把限流器打满 */
@@ -922,7 +982,7 @@ function pickIdleModels() {
 function useText(name) {
   const u = usageMap[name];
   if (!u) return '';
-  if (u.never) return ' · <span style="color:var(--warn)">装完没用过</span>';
+  if (u.never) return ' · <span style="color:var(--warn-text)">装完没用过</span>';
   if (u.daysAgo === 0) return ' · 今天用过';
   if (u.daysAgo === 1) return ' · 昨天用过';
   return ` · ${u.daysAgo} 天前用过`;
@@ -931,7 +991,7 @@ function useText(name) {
 function staleTag(name) {
   const u = usageMap[name];
   if (!u || !u.stale) return '';
-  return `<span class="tag" style="color:var(--warn);border-color:var(--warn)">闲置</span>`;
+  return `<span class="tag" style="color:var(--warn-text);border-color:var(--warn)">闲置</span>`;
 }
 
 function renderModels() {
@@ -1578,7 +1638,7 @@ async function testCtxModel() {
   try {
     const r = await probeOne(model);
     if (hint) {
-      hint.innerHTML = `<span style="color:var(--ok)">✓ 能正常出字</span> · `
+      hint.innerHTML = `<span style="color:var(--ok-text)">✓ 能正常出字</span> · `
         + `首字 ${r.firstMs} ms · 共 ${r.totalMs} ms · ${r.chars} 字`;
     }
     toast(`${model} 可以正常使用`);
@@ -1588,7 +1648,7 @@ async function testCtxModel() {
     // 常见错误直接用引导里的话术翻译一下
     const g = window.Guidance && Guidance.explain ? Guidance.explain(msg) : null;
     if (hint) {
-      hint.innerHTML = `<span style="color:var(--err)">✗ ${esc(msg)}</span>`
+      hint.innerHTML = `<span style="color:var(--err-text)">✗ ${esc(msg)}</span>`
         + (g ? `<br><b>${esc(g.title)}</b>：${esc(g.fix)}`
              + (g.where ? ` <a href="#${esc(g.where)}">去处理</a>` : '') : '');
     }
@@ -1668,8 +1728,8 @@ async function renderProbes() {
     const p = probes[m];
     const isFastest = m === fastest;
     const status = !p ? '<span class="muted">未测</span>'
-      : p.ok ? `<span style="color:var(--ok)">✓ 出字</span>${isFastest ? ' <span class="probe-badge">⚡ 最快</span>' : ''}`
-        : '<span style="color:var(--err)">✗ 未通过</span>';
+      : p.ok ? `<span style="color:var(--ok-text)">✓ 出字</span>${isFastest ? ' <span class="probe-badge">⚡ 最快</span>' : ''}`
+        : '<span style="color:var(--err-text)">✗ 未通过</span>';
     const first = p && p.ok ? `${p.firstMs} ms` : '—';
     const total = p && p.ok ? `${p.totalMs} ms` : '—';
     const chars = p && p.ok ? `${p.chars} 字` : '—';
@@ -1680,8 +1740,8 @@ async function renderProbes() {
   });
 
   const summary = `<p class="row-hint" style="margin:0 0 8px">共 ${models.length} 个模型：`
-    + `<span style="color:var(--ok)">${okCount} 能出字</span>`
-    + (failCount ? ` · <span style="color:var(--err)">${failCount} 未通过</span>` : '')
+    + `<span style="color:var(--ok-text)">${okCount} 能出字</span>`
+    + (failCount ? ` · <span style="color:var(--err-text)">${failCount} 未通过</span>` : '')
     + (untested ? ` · <span class="muted">${untested} 未测</span>` : '')
     + (fastest ? ` · 最快：<b>${esc(fastest)}</b>（首字 ${probes[fastest].firstMs} ms）` : '')
     + '</p>';
@@ -1800,10 +1860,39 @@ function renderQueue(state) {
   if (!panel) return;
   const items = (state && state.items) || [];
   panel.hidden = items.length === 0;
-  if (!items.length) return;
+  if (!items.length) { queueSig = ''; return; }
 
   const done = items.filter((it) => it.status === 'done').length;
   $('queueCount').textContent = `${items.length} 个任务 · 已完成 ${done}`;
+
+  /**
+   * 只有「结构」变了才重建列表。
+   *
+   * 服务端下载中每 300ms 推一次队列，以前每次都整块 innerHTML 重建：
+   * 每秒 3 次以上 DOM 全替换，还会把用户正要点的那颗「取消」按钮销毁重建
+   * （点下去经常没反应）。现在进度类的字段原地更新。
+   */
+  const sig = items.map((it) => `${it.model}|${it.status}|${it.error || ''}|${it.total || 0}`).join('#');
+  if (sig === queueSig) {
+    for (const it of items) {
+      const row = $('queueList').querySelector(`[data-qrow="${CSS.escape(it.model)}"]`);
+      if (!row) continue;
+      const stats = [];
+      if (it.total > 0) stats.push(`${fmtBytes(it.got)} / ${fmtBytes(it.total)}`);
+      if (it.speed > 0) stats.push(`${fmtBytes(it.speed)}/s`);
+      if (it.eta > 0) stats.push(`剩余 ${fmtEta(it.eta)}`);
+      const meta = QUEUE_STATUS[it.status] || { text: it.status, cls: '' };
+      const qs = row.querySelector('.qs');
+      if (qs) qs.textContent = `${meta.text}${stats.length ? ' · ' + stats.join(' · ') : ''}`;
+      const bar = row.querySelector('.bar');
+      if (bar) bar.style.width = `${Math.max(0, Math.min(100, it.percent || 0))}%`;
+      const qp = row.querySelector('.qp');
+      if (qp) qp.textContent = it.status === 'running' ? `${Math.round(it.percent || 0)}%` : '';
+    }
+    renderQueueTimeline(items);
+    return;
+  }
+  queueSig = sig;
 
   $('queueList').innerHTML = items.map((it) => {
     const meta = QUEUE_STATUS[it.status] || { text: it.status, cls: '' };
@@ -1813,7 +1902,7 @@ function renderQueue(state) {
     if (it.eta > 0) stats.push(`剩余 ${fmtEta(it.eta)}`);
     const canCancel = ['queued', 'running'].includes(it.status);
     return `
-      <div class="qitem ${meta.cls}">
+      <div class="qitem ${meta.cls}" data-qrow="${esc(it.model)}">
         <div class="qi">
           <div class="qn">${esc(it.model)}</div>
           <div class="qs">${esc(meta.text)}${it.error ? ` · ${esc(it.error)}` : (stats.length ? ' · ' + esc(stats.join(' · ')) : '')}</div>
@@ -1831,28 +1920,42 @@ function renderQueue(state) {
     });
   }
 
-  // 下载时间轴（v1.10.0）：谁先排队、各自花了多久，一眼看清
-  const tl = $('queueTimeline');
-  if (tl) {
-    const now = Date.now();
-    const bars = items.map((it) => {
-      const seen = it.queuedAt || queueSeen.get(it.model) || now;
-      if (!it.queuedAt) queueSeen.set(it.model, seen);
-      const end = it.finishedAt || (it.status === 'done' ? now : now);
-      return {
-        label: it.model.length > 14 ? `${it.model.slice(0, 13)}…` : it.model,
-        start: seen,
-        end: Math.max(end, seen),
-        text: it.status === 'done' ? '已完成' : it.status === 'running' ? '下载中' : '排队中',
-        color: it.status === 'done' ? 'var(--ok)' : it.status === 'running' ? 'var(--accent)' : 'var(--chart-4)',
-      };
-    });
-    tl.innerHTML = bars.length > 1
-      ? Chart.timeline(bars, { width: 460, unit: '' })
-        + '<p class="row-hint" style="margin-top:6px">从这一批任务进入队列算起。并排下载时，后开始的会等前面腾出带宽。</p>'
-      : '';
-  }
+  renderQueueTimeline(items);
 }
+
+/** 队列签名：用来判断「结构变没变」，变了才重建 DOM */
+let queueSig = '';
+
+/**
+ * 下载时间轴（v1.10.0）：谁先排队、各自花了多久。
+ *
+ * 单独抽出来是为了能节流 —— 它是整张 SVG，跟 300ms 的进度更新一起重画没有意义。
+ */
+function renderQueueTimeline(items) {
+  const tl = $('queueTimeline');
+  if (!tl) return;
+  const now = Date.now();
+  if (now - lastTimelineAt < 1500) return;
+  lastTimelineAt = now;
+  const bars = items.map((it) => {
+    const seen = it.queuedAt || queueSeen.get(it.model) || now;
+    if (!it.queuedAt) queueSeen.set(it.model, seen);
+    const end = it.finishedAt || now;
+    return {
+      label: it.model.length > 14 ? `${it.model.slice(0, 13)}…` : it.model,
+      start: seen,
+      end: Math.max(end, seen),
+      text: it.status === 'done' ? '已完成' : it.status === 'running' ? '下载中' : '排队中',
+      color: it.status === 'done' ? 'var(--ok)' : it.status === 'running' ? 'var(--accent)' : 'var(--chart-4)',
+    };
+  });
+  tl.innerHTML = bars.length > 1
+    ? Chart.timeline(bars, { width: 460, unit: '' })
+      + '<p class="row-hint" style="margin-top:6px">从这一批任务进入队列算起。并排下载时，后开始的会等前面腾出带宽。</p>'
+    : '';
+}
+
+let lastTimelineAt = 0;
 
 /* 记录每个下载任务第一次出现在队列里的时间，用来画时间轴 */
 const queueSeen = new Map();
@@ -2010,6 +2113,13 @@ function playModels() {
   const sel = $('playModel');
   if (!sel) return;
   const names = (state.models || []).map((m) => m.name);
+  // 模型列表没变就别重建 <select>：每 5 秒重建一次会把用户正展开的下拉关掉
+  const key = names.join('|');
+  if (sel.dataset.key === key && sel.options.length) {
+    if (state && state.model && !sel.value) sel.value = state.model;
+    return;
+  }
+  sel.dataset.key = key;
   if (!names.length) {
     sel.innerHTML = '<option value="">（没有已安装的模型）</option>';
     return;
@@ -2203,6 +2313,10 @@ function benchModels() {
   const sel = $('benchModel');
   if (!sel) return;
   const names = (state.models || []).map((m) => m.name);
+  // 同上：列表没变就不重建
+  const key = names.join('|');
+  if (sel.dataset.key === key && sel.options.length) return;
+  sel.dataset.key = key;
   if (!names.length) { sel.innerHTML = '<option value="">（没有已安装的模型）</option>'; return; }
   const cur = sel.value || (state && state.model) || names[0];
   sel.innerHTML = names.map((n) => `<option value="${esc(n)}"${n === cur ? ' selected' : ''}>${esc(n)}</option>`).join('');
@@ -2568,11 +2682,30 @@ function renderCompare() {
     const meta = s
       ? `${s.tokens} tokens · ${s.tokensPerSec || '—'} t/s · ${(r.wallMs / 1000).toFixed(1)} 秒`
       : r.wallMs ? `${(r.wallMs / 1000).toFixed(1)} 秒` : '';
-    return `<div class="cmpcard">
+    return `<div class="cmpcard" data-cmp="${esc(m)}">
       <div class="cmp-head"><b>${esc(m)}</b><span class="cmp-meta">${esc(meta)}</span></div>
       <div class="cmp-body">${body}</div>
     </div>`;
   }).join('');
+}
+
+/**
+ * 流式输出时只更新那一张卡片。
+ *
+ * 以前每个 chunk 都调一次 renderCompare()，而它会把 #compareResults 里
+ * 所有卡片整块重建 —— 4 个模型各生成 500 token 就是 2000 次全量 innerHTML，
+ * 页面会明显卡顿，正在滚动的文字也会被打断。
+ */
+function updateCompareCard(model) {
+  const r = compareState[model];
+  const card = $('compareResults').querySelector(`[data-cmp="${CSS.escape(model)}"]`);
+  if (!r || !card) { renderCompare(); return; }
+  const body = card.querySelector('.cmp-body');
+  if (body) body.textContent = r.content;
+  const meta = card.querySelector('.cmp-meta');
+  if (meta && r.stats) {
+    meta.textContent = `${r.stats.tokens} tokens · ${r.stats.tokensPerSec || '—'} t/s · ${((r.wallMs || 0) / 1000).toFixed(1)} 秒`;
+  }
 }
 
 async function startCompare() {
@@ -2619,11 +2752,13 @@ async function startCompare() {
           if (ev.status === 'error') item.content = ev.content;
           if (ev.stats) item.stats = ev.stats;
           if (ev.wallMs) item.wallMs = ev.wallMs;
+          renderCompare();
         } else if (ev.type === 'compare-chunk') {
           item.status = 'running';
           item.content += ev.content;
+          // 只改这一张卡片，不重建整个结果区
+          updateCompareCard(ev.model);
         }
-        renderCompare();
       }
     }
   } catch (e) {
@@ -4146,7 +4281,9 @@ function setupButtons() {
     try {
       const bundle = JSON.parse(await file.text());
       const out = await post('/api/config/import', bundle);
-      const warn = (out.warnings || []).map((w) => `· ${w}`).join('<br>');
+      // warnings 里会带上导入文件里的字段值（比如 modelDir），那是**别人给的 JSON**，
+      // 不转义就直接拼进 innerHTML 等于给配置文件开了个 XSS 口子。
+      const warn = (out.warnings || []).map((w) => `· ${esc(w)}`).join('<br>');
       $('importHint').innerHTML = `已导入：${esc(out.config.model || '（未设置模型）')} · 窗口 ${out.config.contextWindow || 8192}`
         + (warn ? `<br><span class="ctx-bad">${warn}</span>` : '')
         + '<br>重启工作台后生效。';

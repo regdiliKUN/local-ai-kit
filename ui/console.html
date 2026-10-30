@@ -8,7 +8,7 @@
 </head>
 <body class="console-body">
 
-<a href="#view-dashboard" class="skip-link" id="skipLink">跳到主内容</a>
+<a href="#mainContent" class="skip-link" id="skipLink">跳到主内容</a>
 
 <div class="app">
   <aside class="sidebar">
@@ -21,19 +21,19 @@
       <button class="help-btn" id="btnHelp" title="快捷键（?）">?</button>
     </div>
 
-    <ol class="steps" id="tabs">
-      <li data-tab="dashboard" class="active"><span class="dot"></span><span class="label">系统概览</span></li>
-      <li data-tab="models"><span class="dot"></span><span class="label">模型管理</span></li>
-      <li data-tab="play"><span class="dot"></span><span class="label">试用</span></li>
-      <li data-tab="compare"><span class="dot"></span><span class="label">模型对比</span></li>
-      <li data-tab="bench"><span class="dot"></span><span class="label">性能基准</span></li>
-      <li data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
-      <li data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
-      <li data-tab="fix"><span class="dot"></span><span class="label">修复中心</span></li>
-      <li data-tab="tools"><span class="dot"></span><span class="label">诊断与维护</span></li>
-      <li data-tab="services"><span class="dot"></span><span class="label">服务</span></li>
-      <li data-tab="help"><span class="dot"></span><span class="label">帮助</span></li>
-      <li data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
+    <ol class="steps" id="tabs" role="tablist" aria-label="主导航">
+      <li role="tab" tabindex="0" aria-selected="true" data-tab="dashboard" class="active"><span class="dot"></span><span class="label">系统概览</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="models"><span class="dot"></span><span class="label">模型管理</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="play"><span class="dot"></span><span class="label">试用</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="compare"><span class="dot"></span><span class="label">模型对比</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="bench"><span class="dot"></span><span class="label">性能基准</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="context"><span class="dot"></span><span class="label">上下文与模型</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="health"><span class="dot"></span><span class="label">模型体检</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="fix"><span class="dot"></span><span class="label">修复中心</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="tools"><span class="dot"></span><span class="label">诊断与维护</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="services"><span class="dot"></span><span class="label">服务</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="help"><span class="dot"></span><span class="label">帮助</span></li>
+      <li role="tab" tabindex="-1" aria-selected="false" data-tab="settings"><span class="dot"></span><span class="label">服务设置</span></li>
     </ol>
 
     <div class="checklist" id="checklist" hidden>
@@ -53,7 +53,7 @@
     </div>
   </aside>
 
-  <main class="content">
+  <main class="content" id="mainContent" tabindex="-1">
 
     <!-- ============ 系统概览 ============ -->
     <section class="view" id="view-dashboard">

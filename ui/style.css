@@ -12,6 +12,32 @@
   --warn: #d97706;
   --err: #dc2626;
   --radius: 12px;
+
+  /* ---- 语义色（浅色）----
+     这些以前散落在十几个 @media (prefers-color-scheme: dark) 块里：
+     组件底色 + 深色覆盖。问题是「跟随系统」和「手动选主题」是两套机制，
+     系统浅色 + 手动深色时，这些组件仍然是浅色底（深色页面上刺眼的浅色卡片）。
+     现在全部提成变量，四个地方（:root / 系统深色 / 手动深色 / 手动浅色）一起定义。 */
+  --tint-ok: #eefaf1;
+  --tint-warn: #fdf6e7;
+  --tint-err: #fdeeee;
+  --soft-warn-bg: #fdf7e8;
+  --soft-warn-line: #f0d9a8;
+  --soft-warn-fg: #8a5a00;
+  --soft-err-bg: #fdeeee;
+  --soft-err-line: #f3c3c3;
+  --soft-err-fg: #9b1c1c;
+  --chip-warn-bg: #fdf1dd;
+  --code-inset: rgba(255, 255, 255, .5);
+  --hm-1: #fecaca;
+  --hm-2: #fed7aa;
+  --hm-3: #fde68a;
+  --hm-4: #86efac;
+  /* 小字号用的深一档文字色：--warn / --ok 直接当 12px 文字色时对比度只有 3.2:1，
+     低于 WCAG AA 的 4.5:1。图形填充继续用 --warn / --ok。 */
+  --warn-text: #b45309;
+  --ok-text: #15803d;
+  --err-text: #b91c1c;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -23,6 +49,29 @@
     --text-dim: #9aa1ab;
     --accent: #5b8def;
     --accent-soft: #1e2a42;
+
+    --tint-ok: #12261a;
+    --tint-warn: #2c2413;
+    --tint-err: #2c1717;
+    --soft-warn-bg: #2c2413;
+    --soft-warn-line: #5a4718;
+    --soft-warn-fg: #e5b95e;
+    --soft-err-bg: #2c1717;
+    --soft-err-line: #5c2626;
+    --soft-err-fg: #f08c8c;
+    --chip-warn-bg: #2c2413;
+    --code-inset: rgba(0, 0, 0, .25);
+    --hm-1: #7f1d1d;
+    --hm-2: #92400e;
+    --hm-3: #a16207;
+    --hm-4: #166534;
+    --warn-text: #e5b95e;
+    --ok-text: #4ade80;
+    --err-text: #f08c8c;
+
+    --chart-grid: #2b3038;
+    --chart-axis: #9aa1ab;
+    --chart-track: #2b3038;
   }
 }
 
@@ -75,8 +124,10 @@ html, body {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px; border-radius: 8px;
   color: var(--text-dim); font-size: 13px;
+  cursor: pointer;   /* 整行可点，但以前没有手型光标，看着不像能点 */
   transition: background .15s, color .15s;
 }
+.steps li:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .steps li .dot {
   width: 18px; height: 18px; border-radius: 50%;
@@ -140,13 +191,9 @@ html, body {
 }
 .issue-main { font-weight: 500; }
 .issue-hint { font-size: 12.5px; opacity: .82; }
-.issue.warn { border-color: #f0d9a8; background: #fdf7e8; color: #8a5a00; }
-.issue.error { border-color: #f3c3c3; background: #fdeeee; color: #9b1c1c; }
+.issue.warn { border-color: var(--soft-warn-line); background: var(--soft-warn-bg); color: var(--soft-warn-fg); }
+.issue.error { border-color: var(--soft-err-line); background: var(--soft-err-bg); color: var(--soft-err-fg); }
 .issue.info { color: var(--text-dim); }
-@media (prefers-color-scheme: dark) {
-  .issue.warn { background: #2c2413; border-color: #5a4718; color: #e5b95e; }
-  .issue.error { background: #2c1717; border-color: #5c2626; color: #f08c8c; }
-}
 
 /* 模型卡片 */
 
@@ -362,11 +409,10 @@ html, body {
 }
 .modal-icon {
   width: 42px; height: 42px; border-radius: 50%;
-  background: #fdf1dd; color: var(--warn);
+  background: var(--chip-warn-bg); color: var(--warn);
   display: grid; place-items: center; font-weight: 700; font-size: 20px;
   margin-bottom: 16px;
 }
-@media (prefers-color-scheme: dark) { .modal-icon { background: #2c2413; } }
 .modal h2 { font-size: 17px; margin: 0 0 9px; font-weight: 600; }
 .modal p { margin: 0 0 9px; font-size: 13.5px; color: var(--text-dim); }
 .modal-hint { font-size: 12.5px; }
@@ -438,12 +484,9 @@ html, body {
 /* ---- 没有可用磁盘时的提示 ---- */
 
 .warn-block {
-  border: 1px solid #f0d9a8; background: #fdf7e8; color: #8a5a00;
+  border: 1px solid var(--soft-warn-line); background: var(--soft-warn-bg); color: var(--soft-warn-fg);
   border-radius: 10px; padding: 12px 15px; font-size: 13px; line-height: 1.7;
   margin: 0 0 16px;
-}
-@media (prefers-color-scheme: dark) {
-  .warn-block { background: #2c2413; border-color: #5a4718; color: #e5b95e; }
 }
 
 /* ---- 安装页：请勿关闭提示条 ---- */
@@ -458,11 +501,8 @@ html, body {
 /* ---- 失败面板 ---- */
 
 .error-panel {
-  border: 1px solid #f3c3c3; background: #fdeeee; color: #9b1c1c;
+  border: 1px solid var(--soft-err-line); background: var(--soft-err-bg); color: var(--soft-err-fg);
   border-radius: 12px; padding: 16px 18px; margin: 4px 0 20px;
-}
-@media (prefers-color-scheme: dark) {
-  .error-panel { background: #2c1717; border-color: #5c2626; color: #f08c8c; }
 }
 .err-head { display: flex; align-items: center; gap: 9px; font-size: 14.5px; margin-bottom: 10px; }
 .err-ico {
@@ -474,11 +514,10 @@ html, body {
 .err-stage b { font-weight: 600; }
 .err-why {
   font-size: 13px; margin-bottom: 14px; padding: 9px 12px;
-  background: rgba(255, 255, 255, .5); border-radius: 8px;
+  background: var(--code-inset); border-radius: 8px;
   font-family: ui-monospace, Consolas, monospace; font-size: 12px;
   word-break: break-all;
 }
-@media (prefers-color-scheme: dark) { .err-why { background: rgba(0, 0, 0, .25); } }
 .err-how-title { font-size: 13px; font-weight: 600; margin-bottom: 7px; }
 .err-how { margin: 0 0 16px; padding-left: 22px; font-size: 13px; line-height: 1.85; }
 .err-actions { display: flex; gap: 9px; flex-wrap: wrap; }
@@ -572,14 +611,9 @@ html, body {
 
 .ctx-hint { margin: 10px 0 0; font-size: 12.5px; color: var(--text-dim); }
 .ctx-flag { font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 20px; margin-left: 4px; }
-.ctx-flag.ok { background: var(--okbg, #eefaf1); color: var(--ok); }
-.ctx-flag.tight { background: #fdf6e7; color: var(--warn); }
-.ctx-flag.over { background: #fdeeee; color: var(--err); }
-@media (prefers-color-scheme: dark) {
-  .ctx-flag.ok { background: #12261a; }
-  .ctx-flag.tight { background: #2c2413; }
-  .ctx-flag.over { background: #2c1717; }
-}
+.ctx-flag.ok { background: var(--tint-ok); color: var(--ok-text); }
+.ctx-flag.tight { background: var(--tint-warn); color: var(--warn-text); }
+.ctx-flag.over { background: var(--tint-err); color: var(--err-text); }
 
 /* ---- 磁盘空间预检 ---- */
 
@@ -633,8 +667,7 @@ html, body {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 10px; padding: 13px 16px;
 }
-.mrow.confirming { border-color: var(--err); background: #fdeeee; }
-@media (prefers-color-scheme: dark) { .mrow.confirming { background: #2c1717; } }
+.mrow.confirming { border-color: var(--err); background: var(--tint-err); }
 .mrow .mi { flex: 1; min-width: 0; }
 .mrow.current { border-color: var(--accent); }
 .mrow .mcheck { flex: none; display: flex; align-items: center; }
@@ -787,13 +820,7 @@ html, body {
   --chart-track: #eceff3;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --chart-grid: #2b3038;
-    --chart-axis: #9aa1ab;
-    --chart-track: #2b3038;
-  }
-}
+/* 图表用的色板与网格色：深色值统一放在上面的 :root 深色块里 */
 
 /* 手动切换主题时（浅色/深色/跟随系统）覆盖同一组变量 */
 html[data-theme="light"] {
@@ -801,12 +828,24 @@ html[data-theme="light"] {
   --text: #1a1d21; --text-dim: #6b7280;
   --accent: #2f6fed; --accent-soft: #eaf1fe;
   --chart-grid: #e8ebef; --chart-axis: #6b7280; --chart-track: #eceff3;
+  --tint-ok: #eefaf1; --tint-warn: #fdf6e7; --tint-err: #fdeeee;
+  --soft-warn-bg: #fdf7e8; --soft-warn-line: #f0d9a8; --soft-warn-fg: #8a5a00;
+  --soft-err-bg: #fdeeee; --soft-err-line: #f3c3c3; --soft-err-fg: #9b1c1c;
+  --chip-warn-bg: #fdf1dd; --code-inset: rgba(255, 255, 255, .5);
+  --hm-1: #fecaca; --hm-2: #fed7aa; --hm-3: #fde68a; --hm-4: #86efac;
+  --warn-text: #b45309; --ok-text: #15803d; --err-text: #b91c1c;
 }
 html[data-theme="dark"] {
   --bg: #16181c; --surface: #1e2126; --border: #2e333a;
   --text: #e8eaed; --text-dim: #9aa1ab;
   --accent: #5b8def; --accent-soft: #1e2a42;
   --chart-grid: #2b3038; --chart-axis: #9aa1ab; --chart-track: #2b3038;
+  --tint-ok: #12261a; --tint-warn: #2c2413; --tint-err: #2c1717;
+  --soft-warn-bg: #2c2413; --soft-warn-line: #5a4718; --soft-warn-fg: #e5b95e;
+  --soft-err-bg: #2c1717; --soft-err-line: #5c2626; --soft-err-fg: #f08c8c;
+  --chip-warn-bg: #2c2413; --code-inset: rgba(0, 0, 0, .25);
+  --hm-1: #7f1d1d; --hm-2: #92400e; --hm-3: #a16207; --hm-4: #166534;
+  --warn-text: #e5b95e; --ok-text: #4ade80; --err-text: #f08c8c;
 }
 
 /* ---- 通用图表元素 ---- */
@@ -862,16 +901,10 @@ html[data-theme="dark"] {
 
 .hm-cell { fill: var(--chart-track); }
 .hm-cell.none { fill: transparent; }
-.hm-cell.l1 { fill: #fecaca; }
-.hm-cell.l2 { fill: #fed7aa; }
-.hm-cell.l3 { fill: #fde68a; }
-.hm-cell.l4 { fill: #86efac; }
-@media (prefers-color-scheme: dark) {
-  .hm-cell.l1 { fill: #7f1d1d; }
-  .hm-cell.l2 { fill: #92400e; }
-  .hm-cell.l3 { fill: #a16207; }
-  .hm-cell.l4 { fill: #166534; }
-}
+.hm-cell.l1 { fill: var(--hm-1); }
+.hm-cell.l2 { fill: var(--hm-2); }
+.hm-cell.l3 { fill: var(--hm-3); }
+.hm-cell.l4 { fill: var(--hm-4); }
 .hm-month { fill: var(--text-dim); font-size: 10px; }
 .hm-legend-tx { fill: var(--text-dim); font-size: 10px; }
 
@@ -888,7 +921,9 @@ html[data-theme="dark"] {
 /* ---- 概览页：仪表盘卡片 ---- */
 
 .gauge-row {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  /* 四张仪表卡（显存 / CPU / 内存 / 磁盘）：190px 在常规窗口宽度下只排得下 3 张，
+     第 4 张单独掉一行。150px 刚好一行放下四张，窄屏仍会自动折行。 */
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px; margin-bottom: 22px;
 }
 .gauge-card {
@@ -1171,15 +1206,10 @@ html[data-theme="dark"] {
 .diskrow .dh { flex: 1; min-width: 160px; display: flex; align-items: center; gap: 8px; }
 .diskrow .dn { font-size: 12px; color: var(--text-dim); }
 .diskrow .dlevel { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 20px; background: var(--border); color: var(--text-dim); }
-.diskrow .dlevel.ok { background: #eefaf1; color: var(--ok); }
-.diskrow .dlevel.warn { background: #fdf6e7; color: var(--warn); }
-.diskrow .dlevel.error { background: #fdeeee; color: var(--err); }
+.diskrow .dlevel.ok { background: var(--tint-ok); color: var(--ok-text); }
+.diskrow .dlevel.warn { background: var(--tint-warn); color: var(--warn-text); }
+.diskrow .dlevel.error { background: var(--tint-err); color: var(--err-text); }
 .diskrow .dmeta { flex: none; display: flex; gap: 10px; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-@media (prefers-color-scheme: dark) {
-  .diskrow .dlevel.ok { background: #12261a; }
-  .diskrow .dlevel.warn { background: #2c2413; }
-  .diskrow .dlevel.error { background: #2c1717; }
-}
 
 /* ---- 模型实测排行 ---- */
 
@@ -1269,9 +1299,8 @@ html[data-theme="dark"] {
 .alert-chip {
   display: inline-block; margin-left: 8px; padding: 1px 8px;
   border-radius: 20px; font-size: 11.5px; font-weight: 600;
-  background: #fdf1dd; color: var(--warn);
+  background: var(--chip-warn-bg); color: var(--warn-text);
 }
-@media (prefers-color-scheme: dark) { .alert-chip { background: #2c2413; } }
 
 /* ---- 一键按推荐装 ---- */
 
@@ -1378,14 +1407,9 @@ html[data-theme="dark"] {
   font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 20px;
   background: var(--accent-soft); color: var(--accent);
 }
-.fixbadge.ok { background: #eefaf1; color: var(--ok); }
-.fixbadge.warn { background: #fdf6e7; color: var(--warn); }
-.fixbadge.error { background: #fdeeee; color: var(--err); }
-@media (prefers-color-scheme: dark) {
-  .fixbadge.ok { background: #12261a; }
-  .fixbadge.warn { background: #2c2413; }
-  .fixbadge.error { background: #2c1717; }
-}
+.fixbadge.ok { background: var(--tint-ok); color: var(--ok-text); }
+.fixbadge.warn { background: var(--tint-warn); color: var(--warn-text); }
+.fixbadge.error { background: var(--tint-err); color: var(--err-text); }
 
 /* ---- 体检结果可视化 ---- */
 
@@ -1728,7 +1752,9 @@ html[data-theme="dark"] {
 
 /* KPI 卡片组 */
 .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.kpi-row.compact { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+/* 概览页那一行是 6 张卡：minmax 定得太宽（120px）时只排得下 5 张，
+   第 6 张孤零零掉到第二行。104px 能让 6 张并排，窄屏时仍然会自动折行。 */
+.kpi-row.compact { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: 8px; }
 .kpi-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r, 10px);
   padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0;
@@ -1741,7 +1767,7 @@ html[data-theme="dark"] {
 .kpi-delta { font-size: 11px; font-weight: 600; white-space: nowrap; }
 .kpi-delta.up { color: var(--ok); }
 .kpi-delta.down { color: var(--err); }
-.kpi-value { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.15; font-variant-numeric: tabular-nums; }
+.kpi-value { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1.15; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .kpi-unit { font-size: 12px; font-weight: 500; color: var(--text-dim); margin-left: 2px; }
 .kpi-sub { font-size: 11px; color: var(--text-dim); }
 .kpi-spark { margin-top: 2px; }
