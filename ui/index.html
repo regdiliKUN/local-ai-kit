@@ -18,7 +18,7 @@
       </div>
     </div>
 
-    <ol class="steps" id="steps">
+    <ol class="steps" id="steps" aria-label="安装步骤">
       <li data-step="detect"><span class="dot"></span><span class="label">环境检测</span></li>
       <li data-step="model"><span class="dot"></span><span class="label">选择模型</span></li>
       <li data-step="location"><span class="dot"></span><span class="label">存放位置</span></li>
@@ -29,7 +29,7 @@
     <div class="sidebar-foot" id="envBadge"></div>
   </aside>
 
-  <main class="content">
+  <main class="content" id="mainContent" tabindex="-1">
 
     <!-- 1. 环境检测 -->
     <section class="view" id="view-detect">
@@ -184,6 +184,7 @@
         <ol class="err-how" id="errHow"></ol>
         <div class="err-actions">
           <button class="btn primary small" id="errRetry">重试安装</button>
+          <button class="btn ghost small" id="errBack">返回上一步修改</button>
           <button class="btn ghost small" id="errRedetect">重新检测</button>
           <button class="btn ghost small" id="errCopy">复制诊断信息</button>
           <button class="btn ghost small" id="errLogs">打开日志</button>
@@ -245,7 +246,7 @@
 
 <!-- 需要用户配合时弹出的窗口（管理员授权 / 安装 Ollama） -->
 <div class="modal-mask" id="modalMask" hidden>
-  <div class="modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalReason">
     <div class="modal-icon">!</div>
     <h2 id="modalTitle">需要你配合一下</h2>
     <p id="modalReason"></p>

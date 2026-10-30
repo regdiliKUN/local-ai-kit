@@ -422,7 +422,9 @@ const server = createSafeServer(async (req, res) => {
   // 失败后一键重试：用上次的参数再跑一遍（已完成的步骤会自动跳过 / 续传）
   if (p === '/api/retry' && req.method === 'POST') {
     if (installing || ollamaInstalling) return json(res, 409, { error: '安装已在进行中' });
-    if (!lastInstall) return json(res, 400, { error: '没有可重试的安装，请重新走一遍向导' });
+    // needWizard 让前端知道「这次不能原地重试」，直接把人送回向导，
+    // 而不是让他反复点「重试安装」看同一句报错
+    if (!lastInstall) return json(res, 400, { error: '这次没有可重试的安装（可能是模型名或磁盘校验没通过），请回到上一步改一下再装', needWizard: true });
     const detect = await detectCached(true);
     if (!detect.install.root) return json(res, 400, { error: '找不到可写的安装目录' });
     lastInstall.root = detect.install.root;

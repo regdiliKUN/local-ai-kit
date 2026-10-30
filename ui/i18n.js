@@ -992,6 +992,21 @@ const DICT = {
   '（空对话）': '(empty conversation)',
   '（请先点一个磁盘，或在上面输入完整路径）': '(pick a disk first, or type a full path above)',
 
+  // ---- 安装向导：暂停 / 断线 / 返回修改 ----
+  '30 秒没有返回（显卡驱动可能卡住了）': 'no response in 30 seconds (the GPU driver may be stuck)',
+  '我已经装好了，继续安装': 'I installed it — continue',
+  '检测到组件已装好，正在继续安装…': 'Component detected — resuming the install…',
+  '等待你完成操作…': 'Waiting for you…',
+  '返回修改': 'Go back and change',
+  '连接已断开 —— 请看页面顶部的提示': 'Connection lost — see the banner at the top',
+  '需要重新走一遍向导': 'Please run through the wizard again',
+  '按下面说的做；做完点「我已经装好了，继续安装」，或者等它自己检测到。': 'Follow the steps below, then click "I installed it — continue" (or wait for it to be detected).',
+  '缺少一个必须先装好的组件。': 'A required component is not installed yet.',
+  '装好后回到这个页面点「我已经装好了，继续安装」。': 'Once installed, come back to this page and click "I installed it — continue".',
+  '与安装服务的连接已断开': 'Lost connection to the setup service',
+  '请检查那个黑色窗口是否还开着。重新双击「① 双击这里开始安装.cmd」可以继续安装，已完成的步骤不会重来。': 'Check whether that black window is still open. Double-click "① 双击这里开始安装.cmd" again to continue — finished steps are not repeated.',
+  '重新加载页面': 'Reload the page',
+  '可以先点上面的「重新检测」；还是不行就更新显卡驱动后，关掉向导重新运行一次。': 'Try "Detect again" above first; if that fails too, update your GPU driver and restart the wizard.',
   // ---- 危险操作确认弹窗（askConfirm）----
   '回滚': 'Roll back',
   '局域网共享本来就是开着的': 'LAN sharing was already on',

@@ -240,8 +240,10 @@ html, body {
 
 .disks { display: flex; flex-direction: column; gap: 9px; }
 
+/* 用 <button> 而不是 <div>：键盘和读屏都能选（原来只有 click，Tab 跳不进来）*/
 .disk {
   display: flex; align-items: center; gap: 13px;
+  width: 100%; text-align: left; font: inherit; color: inherit;
   background: var(--surface); border: 1.5px solid var(--border);
   border-radius: var(--radius); padding: 13px 16px;
   cursor: pointer; transition: border-color .15s, background .15s;
@@ -847,6 +849,27 @@ html[data-theme="dark"] {
   --hm-1: #7f1d1d; --hm-2: #92400e; --hm-3: #a16207; --hm-4: #166534;
   --warn-text: #e5b95e; --ok-text: #4ade80; --err-text: #f08c8c;
 }
+
+/* ---- 断线横幅（安装服务连接断开时贴在页面顶部） ---- */
+.conn-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 18px;
+  background: var(--soft-warn-bg); color: var(--soft-warn-fg);
+  border-bottom: 1px solid var(--soft-warn-line);
+  font-size: 13px;
+}
+.conn-banner b { font-size: 13.5px; }
+.conn-banner span { opacity: .9; }
+.conn-banner .btn { margin-left: auto; }
+
+/* ---- 错误面板的「需要你操作」变体（缺前置组件，不是失败） ---- */
+.error-panel.warn {
+  border-color: var(--soft-warn-line);
+  background: var(--soft-warn-bg);
+  color: var(--soft-warn-fg);
+}
+.error-panel.warn .err-ico { background: var(--warn); }
 
 /* ---- 通用图表元素 ---- */
 

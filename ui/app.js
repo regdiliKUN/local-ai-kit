@@ -16,7 +16,13 @@ async function post(url, body) {
   });
   let data = {};
   try { data = await r.json(); } catch { /* 无内容 */ }
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) {
+    // 把服务端的结构化提示带出来：比如 /api/retry 会告诉前端
+    // 「这次失败没法原地重试，得重新走一遍向导」，前端据此决定是弹错还是回上一步
+    const err = new Error(data.error || `HTTP ${r.status}`);
+    if (data.needWizard) err.needWizard = true;
+    throw err;
+  }
   return data;
 }
 
@@ -105,6 +111,9 @@ function go(step) {
     const i = order.indexOf(li.dataset.step);
     li.classList.toggle('active', i === cur);
     li.classList.toggle('done', i < cur);
+    // 读屏要能听出「现在第几步」（步骤条本身不可点，所以不用 tabindex）
+    if (i === cur) li.setAttribute('aria-current', 'step');
+    else li.removeAttribute('aria-current');
   }
 
   $('btnBack').hidden = !['model', 'location'].includes(step);
@@ -120,12 +129,17 @@ function updateNext() {
     b.disabled = !state.detect || state.detect.issues.some((i) => i.level === 'error');
   } else if (state.step === 'model') {
     b.textContent = '继续';
-    b.disabled = !state.model;
+    // 手动输入的模型名也要校验：以前只判断「非空」，输个 qwen 3!!! 也能点继续，
+    // 然后被服务端 400 打回来，落到「重试安装」的死循环里
+    b.disabled = !state.model || !isValidModelName(state.model);
   } else if (state.step === 'location') {
     b.textContent = '开始安装';
     b.disabled = !state.modelDir || !state.spaceOk;
   } else if (state.step === 'install') {
-    if (state.failed) { b.textContent = '关闭向导'; b.disabled = false; }
+    // 失败时不再给「关闭向导」：那会直接杀掉服务，连重试和日志都没了。
+    // 现在失败/暂停都引导用户用下方面板里的按钮（重试 / 返回修改）。
+    if (state.failed) { b.textContent = '返回修改'; b.disabled = false; }
+    else if (state.paused) { b.textContent = '等待你完成操作…'; b.disabled = true; }
     else if (state.finished) { b.textContent = '完成'; b.disabled = false; }
     else { b.textContent = '安装中…'; b.disabled = true; }
   } else {
@@ -194,7 +208,10 @@ function selfCheckAfterInstall() {
 async function loadDetect(force = false) {
   $('detectBody').innerHTML = '<div class="loading"><span class="spinner"></span> 检测中...</div>';
   try {
-    const d = (!force && window.__DETECT__) || await (await fetch(`/api/detect${force ? '?force=1' : ''}`)).json();
+    // 检测要 spawn 显卡查询，驱动异常时可能长时间不返回 —— 没有超时的话
+    // 页面会永远停在「检测中…」，用户既不能继续也不知道为什么
+    const d = (!force && window.__DETECT__)
+      || await (await fetch(`/api/detect${force ? '?force=1' : ''}`, { signal: AbortSignal.timeout(30000) })).json();
     window.__DETECT__ = d;
     state.detect = d;
     renderDetect(state.detect);
@@ -209,7 +226,10 @@ async function loadDetect(force = false) {
     renderEnvBadge(state.detect);
     updateNext();
   } catch (e) {
-    $('detectBody').innerHTML = `<div class="issue error">检测失败：${esc(e.message)}。请关掉向导重新运行一次。</div>`;
+    const timeout = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    $('detectBody').innerHTML = `<div class="issue error">检测失败：${esc(timeout ? '30 秒没有返回（显卡驱动可能卡住了）' : e.message)}。`
+      + `<br>可以先点上面的「重新检测」；还是不行就更新显卡驱动后，关掉向导重新运行一次。</div>`;
+    updateNext();
   }
 }
 
@@ -369,14 +389,31 @@ function renderModels(d) {
     });
   }
 
+  // 单选按钮和输入框是静态节点，监听只绑一次（见 setupModelInputs）。
+  // 以前写在这里，每次「重新检测」都会再绑一份 —— 点一次检测，输入框里
+  // 敲一个字就触发 N+1 次 updateContext()。
+  $('customModel').disabled = !customRadioChecked();
+}
+
+/** 「手动输入其他模型」这个单选框是否选中 */
+function customRadioChecked() {
+  const r = document.querySelector('input[name=modelPick][value="__custom__"]');
+  return !!(r && r.checked);
+}
+
+/** 手动输入模型的交互：只在启动时绑一次 */
+function setupModelInputs() {
   const customRadio = document.querySelector('input[name=modelPick][value="__custom__"]');
+  if (!customRadio || customRadio.dataset.bound) return;
+  customRadio.dataset.bound = '1';
   customRadio.addEventListener('change', () => {
     $('customModel').disabled = !customRadio.checked;
     if (customRadio.checked) {
       $('customModel').focus();
       state.model = state.customModel || '';
     } else {
-      state.model = d.suggested.model;
+      const d = state.detect;
+      state.model = d ? d.suggested.model : '';
       $('customModelErr').hidden = true;
     }
     selectModelCard(state.model);
@@ -388,6 +425,8 @@ function renderModels(d) {
     state.model = state.customModel;
     $('customModelErr').hidden = !state.customModel || isValidModelName(state.customModel);
     updateContext();
+    // 名字不合法时「继续」要跟着变灰（以前这里不刷新，用户能看到红字但按钮还是亮的）
+    updateNext();
   });
 }
 
@@ -491,14 +530,14 @@ function renderDisks(d) {
   $('diskList').innerHTML = usable.map((x) => {
     const usedPct = Math.round(((x.totalGB - x.freeGB) / x.totalGB) * 100);
     return `
-      <div class="disk" data-root="${esc(x.root)}">
+      <button type="button" class="disk" data-root="${esc(x.root)}" aria-pressed="false">
         <div class="letter">${x.letter}</div>
         <div class="info">
           <div class="t">${x.letter}: 盘</div>
           <div class="s">空闲 ${x.freeGB} GB / 共 ${x.totalGB} GB</div>
         </div>
         <div class="meter"><i style="width:${usedPct}%"></i></div>
-      </div>`;
+      </button>`;
   }).join('');
 
   for (const el of document.querySelectorAll('#diskList .disk')) {
@@ -543,7 +582,10 @@ function setupCustomDir() {
 function selectDisk(dir) {
   const custom = $('customDir').value.trim() !== '';
   for (const el of document.querySelectorAll('#diskList .disk')) {
-    el.classList.toggle('selected', !custom && !!dir && dir.startsWith(el.dataset.root));
+    const on = !custom && !!dir && dir.startsWith(el.dataset.root);
+    el.classList.toggle('selected', on);
+    // 读屏靠 aria-pressed 判断「当前选的是哪个盘」
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
   $('dirPreview').textContent = dir || '（请先点一个磁盘，或在上面输入完整路径）';
 
@@ -672,6 +714,9 @@ function renderProgress(ev) {
 
   if (ev.indeterminate) {
     track.classList.add('indeterminate');
+    // 必须清掉内联宽度：.progress.indeterminate .bar 的 34% 是样式表规则，
+    // 内联 style 优先级更高。上一段下载到 100% 后这里不清，就会看到一条满格条在横冲。
+    $('progressBar').style.width = '';
     $('progressPct').textContent = '';
     $('progressStats').innerHTML = `<div class="stat"><span class="v">${esc(ev.text || '正在处理…')}</span></div>`;
     return;
@@ -749,16 +794,85 @@ const STAGE_NAMES = {
   prepare: '准备安装目录',
   ollama: '准备 Ollama 推理服务',
   model: '下载模型',
+  verify: '校验模型',
   dsh: '安装 DeepSeek Harness',
   config: '写入配置',
   shortcuts: '创建桌面快捷方式',
   internal: '启动安装',
 };
 
+/** 上一次「需要提权 / 需要先装组件」的说明，paused 面板要复用它 */
+let lastNeedsElevation = null;
+let pausedTimer = null;
+
+/**
+ * 「缺前置」不是失败：比如没装 Ollama。
+ *
+ * 以前这里只把标题改一改就完事了 —— 用户点弹窗里的「我自己装」之后，
+ * 弹窗关掉、页面上没有任何按钮可点（「继续」是「安装中…」且禁用、上一步是隐藏的），
+ * 只能关窗口重来。而且提示写着「装完会自动继续」，其实没有人在盯着 Ollama 有没有装好。
+ *
+ * 现在：给出可点的「我已经装好了，继续安装」，并且每 15 秒问一次检测接口，
+ * 真装好了就自动接着装。
+ */
+function showPaused(ev) {
+  state.failed = false;
+  state.finished = false;
+  state.paused = true;
+  $('installTitle').textContent = '需要你完成一步操作';
+  $('installLead').textContent = '按下面说的做；做完点「我已经装好了，继续安装」，或者等它自己检测到。';
+  $('keepOpen').hidden = false;
+  $('progressWrap').hidden = true;
+  pending = null;
+
+  const reason = (lastNeedsElevation && lastNeedsElevation.reason) || '缺少一个必须先装好的组件。';
+  const hint = (lastNeedsElevation && lastNeedsElevation.hint) || '';
+  $('errorPanel').classList.add('warn');
+  $('errTitle').textContent = '需要你完成一步操作';
+  $('errStage').innerHTML = `停在了：<b>${esc(STAGE_NAMES[ev.stage] || ev.stage || '安装过程')}</b>`;
+  $('errWhy').textContent = reason;
+  $('errHow').innerHTML = (hint
+    ? [hint, '装好后回到这个页面点「我已经装好了，继续安装」。']
+    : ['装好后回到这个页面点「我已经装好了，继续安装」。'])
+    .map((s) => `<li>${esc(s)}</li>`).join('');
+  $('errRetry').textContent = '我已经装好了，继续安装';
+  $('errorPanel').hidden = false;
+  footerMsg('等待你完成上一步操作…');
+  updateNext();
+  startPausedWatch();
+}
+
+/** 每 15 秒看一眼组件装好了没，装好了就自动续装 */
+function startPausedWatch() {
+  stopPausedWatch();
+  pausedTimer = setInterval(async () => {
+    if (!state.paused) { stopPausedWatch(); return; }
+    try {
+      const d = await (await fetch('/api/detect?force=1', { signal: AbortSignal.timeout(20000) })).json();
+      if (d && d.ollama && d.ollama.installed) {
+        stopPausedWatch();
+        state.paused = false;
+        footerMsg('检测到组件已装好，正在继续安装…');
+        resetInstallUI();
+        try { await post('/api/retry'); } catch (e) { footerMsg(e.message); }
+      }
+    } catch { /* 检测失败就再等一轮 */ }
+  }, 15000);
+}
+
+function stopPausedWatch() {
+  if (pausedTimer) { clearInterval(pausedTimer); pausedTimer = null; }
+}
+
 function showError(ev) {
   state.failed = true;
   state.finished = true;
+  state.paused = false;
+  stopPausedWatch();
   state.errorInfo = ev;
+  $('errorPanel').classList.remove('warn');
+  $('errTitle').textContent = '安装没有完成';
+  $('errRetry').textContent = '重试安装';
 
   $('installTitle').textContent = '安装没有完成';
   $('installLead').textContent = '别急，下面写清楚了问题出在哪、以及你可以怎么做。';
@@ -895,16 +1009,10 @@ function onEvent(ev) {
     renderProgress(ev);
     updateOverall();
   } else if (ev.type === 'needs-elevation') {
+    lastNeedsElevation = ev;
     showModal(ev.reason, ev.hint, ev.action);
   } else if (ev.type === 'paused') {
-    // 缺前置（比如没装 Ollama）：不是失败，等用户配合完会自动接着装
-    state.failed = false;
-    state.finished = false;
-    $('installTitle').textContent = '需要你完成一步操作';
-    $('installLead').textContent = '按弹窗里的提示操作即可；完成后安装会自动继续，不用重来。';
-    $('keepOpen').hidden = false;
-    footerMsg('等待你完成上一步操作…');
-    updateNext();
+    showPaused(ev);
   } else if (ev.type === 'error') {
     appendLog('错误：' + ev.text);
     showError(ev);
@@ -949,17 +1057,52 @@ function renderSummary(s) {
     : '桌面图标没建成功 —— 到安装目录里双击「重建桌面图标.cmd」可以补上。';
 }
 
+let sseErrors = 0;
+
+/**
+ * 安装服务的连接断了 —— 必须让用户知道。
+ *
+ * EventSource 会自动重连，但有两种情况它会永久 CLOSED：服务进程被杀
+ * （用户关掉了那个黑色窗口，正是页面上反复警告别做的事），以及服务以
+ * 非 200 响应（比如提权重启后端口变了）。以前 onerror 是空的，
+ * 页面就一直停在「安装中…」，进度条还在慢慢爬，用户完全不知道连接已经没了。
+ */
+function showConnBanner() {
+  if ($('connBanner')) return;
+  const el = document.createElement('div');
+  el.id = 'connBanner';
+  el.className = 'conn-banner';
+  el.innerHTML = '<b>与安装服务的连接已断开</b>'
+    + '<span>请检查那个黑色窗口是否还开着。重新双击「① 双击这里开始安装.cmd」可以继续安装，已完成的步骤不会重来。</span>'
+    + '<button class="btn ghost small" id="connReload">重新加载页面</button>';
+  document.body.appendChild(el);
+  const btn = $('connReload');
+  if (btn) btn.addEventListener('click', () => location.reload());
+}
+
 function connectSSE() {
   const es = new EventSource('/api/events');
+  es.onopen = () => { sseErrors = 0; };
   es.onmessage = (m) => {
     try { onEvent(JSON.parse(m.data)); } catch { /* ignore */ }
   };
-  es.onerror = () => { /* 自动重连 */ };
+  es.onerror = () => {
+    sseErrors += 1;
+    if (es.readyState === EventSource.CLOSED || sseErrors >= 3) {
+      try { es.close(); } catch { /* ignore */ }
+      showConnBanner();
+      footerMsg('连接已断开 —— 请看页面顶部的提示');
+    }
+  };
 }
 
 /* ---------------------------------------------------------------- 弹窗 */
 
+let modalReturnFocus = null;
+
 function showModal(reason, hint, action) {
+  // 记下打开弹窗前的焦点，关掉时还回去（键盘用户不会「丢」在页面顶部）
+  modalReturnFocus = document.activeElement;
   const isOllama = action === 'install-ollama';
   $('modalTitle').textContent = isOllama ? '需要先装一个组件' : '需要管理员权限';
   $('modalReason').textContent = reason || '';
@@ -968,11 +1111,25 @@ function showModal(reason, hint, action) {
   $('modalOk').textContent = isOllama ? '自动安装 Ollama' : '自动以管理员身份继续';
   $('modalCancel').textContent = isOllama ? '我自己装' : '稍后再说';
   $('modalMask').hidden = false;
+  // 焦点移进弹窗，Tab 才不会跑到后面的页面上
+  setTimeout(() => { const b = $('modalOk'); if (b) b.focus(); }, 30);
 }
-function hideModal() { $('modalMask').hidden = true; }
+
+function hideModal() {
+  const mask = $('modalMask');
+  if (!mask || mask.hidden) return;
+  mask.hidden = true;
+  if (modalReturnFocus && typeof modalReturnFocus.focus === 'function') {
+    try { modalReturnFocus.focus(); } catch { /* 元素可能已经被重绘掉了 */ }
+  }
+  modalReturnFocus = null;
+}
 
 function setupModal() {
   $('modalCancel').addEventListener('click', hideModal);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('modalMask').hidden) { e.preventDefault(); hideModal(); }
+  });
   $('modalOk').addEventListener('click', async () => {
     const action = $('modalOk').dataset.action;
     hideModal();
@@ -1009,6 +1166,10 @@ function setupButtons() {
     if (state.step === 'detect') go('model');
     else if (state.step === 'model') { if (state.model) go('location'); }
     else if (state.step === 'location') startInstall();
+    else if (state.step === 'install' && state.failed) {
+      resetInstallUI();
+      go('location');
+    }
     else if (state.step === 'done' || state.step === 'install') {
       if (state.finished) {
         try { await post('/api/quit'); } catch { /* 服务可能已退出 */ }
@@ -1023,6 +1184,10 @@ function setupButtons() {
   $('btnRedetect').addEventListener('click', async () => {
     footerMsg('正在重新检测…');
     await loadDetect(true);
+    // 检测结果写在 #view-detect 里，不切过去的话用户只会看到底部文案变了，
+    // 人还停在原来的页面上，以为按钮没反应
+    resetInstallUI();
+    go('detect');
   });
 
   if ($('btnQuickInstall')) {
@@ -1033,12 +1198,33 @@ function setupButtons() {
   $('errRetry').addEventListener('click', async () => {
     footerMsg('正在重试安装…');
     resetInstallUI();
-    try { await post('/api/retry'); } catch (e) { onEvent({ type: 'error', text: e.message, stage: 'internal', remedy: [] }); }
+    try {
+      await post('/api/retry');
+    } catch (e) {
+      // 服务端说「没有可重试的安装」时，再点「重试」只会一直弹同一句错误。
+      // 这种情况直接把人送回向导，让他重新选一次。
+      if (e.needWizard) {
+        toast('需要重新走一遍向导');
+        go('location');
+        return;
+      }
+      onEvent({ type: 'error', text: e.message, stage: 'internal', remedy: [] });
+    }
   });
+
+  // 错误面板里的「返回上一步修改」：模型选错了 / 盘选错了，都得能退回去改
+  if ($('errBack')) {
+    $('errBack').addEventListener('click', () => {
+      resetInstallUI();
+      go('location');
+    });
+  }
 
   $('errRedetect').addEventListener('click', async () => {
     footerMsg('正在重新检测…');
     await loadDetect(true);
+    resetInstallUI();
+    go('detect');
   });
 
   $('errCopy').addEventListener('click', copyDiagnostics);
@@ -1067,6 +1253,7 @@ function setupButtons() {
 setupButtons();
 setupModal();
 setupCustomDir();
+setupModelInputs();
 
 // 每秒刷新「已用时」和整体进度：长步骤（下模型、装依赖）看起来才是「活的」
 setInterval(() => {
