@@ -1,7 +1,7 @@
 888ad66f72e2f6016d26ee022341a6a50e6cc2e8d74cab98c6effa38a0c33a65  release/1.11.0/local-ai-kit-1.11.0-win-x64/dist/local-ai-kit-offline-1.11.0.zip
 81a65f69eb43d2a12a37ca70eafb64bd370fa7ef9322726a36320091a01002db  release/1.11.0/local-ai-kit-1.11.0-win-x64/launcher/open-local-ai.ps1
 ae8a3075dc4c003d9ce99ebff62f403975f43a61cd35865ee2ca53e09cc37791  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/.github/workflows/ci.yml
-f1bdcb8824eb6602d002e9d9efd7734d87e6c003be28108cfabf92a6f20961c2  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/CHANGELOG.md
+ac675a010cae5ba8da268044eaa3750c62c624e4cb651388fe5fab0ac7c41302  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/CHANGELOG.md
 bb1360fd9639e863cc232e76650a205b884c9803f6eb0c3f444d931f3187d7ee  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/CONTRIBUTING.md
 5ca2920d4f56954100c8f365461aba7b6c6154da49734f7b2703d9275ad49d11  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/LICENSE
 f6dcc5c2da7b8df24c9a1b3b2751031d740a5335b9b1d74a5c87bb4fe1a51e06  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/README.md
