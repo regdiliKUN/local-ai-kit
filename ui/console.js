@@ -1777,6 +1777,11 @@ async function copyProbes() {
 
 /** 清空全部快测记录 */
 async function clearProbes() {
+  if (!(await askConfirm({
+    title: '清空全部出字快测记录？',
+    detail: '横向对比表会一起清掉，需要重新测一遍才能有数据。',
+    okText: '清空', danger: true,
+  }))) return;
   try {
     await post('/api/probe', { clear: true });
     toast('已清空快测记录');
@@ -2272,6 +2277,11 @@ if ($('btnPlayDel')) {
   $('btnPlayDel').addEventListener('click', async () => {
     const id = $('playSession').value;
     if (!id) { toast('先选一段对话'); return; }
+    if (!(await askConfirm({
+      title: '删除这段对话？',
+      detail: '删掉就找不回来了（历史对话不会进回收站）。',
+      okText: '删除', danger: true,
+    }))) return;
     try {
       await del(`/api/sessions?id=${encodeURIComponent(id)}`);
       if (playSessionId === id) { playReset(); playSessionId = ''; playRender(); }
@@ -2494,6 +2504,11 @@ async function loadTrend(kind) {
 
 if ($('btnClearHealth')) {
   $('btnClearHealth').addEventListener('click', async () => {
+    if (!(await askConfirm({
+      title: '清空体检历史？',
+      detail: '趋势图会变空，之前的通过率记录找不回来。',
+      okText: '清空', danger: true,
+    }))) return;
     try { await del('/api/history?kind=health'); loadTrend('health'); toast('体检历史已清空'); }
     catch (e) { toast(e.message); }
   });
@@ -2512,6 +2527,11 @@ if ($('btnMdBench')) {
 }
 if ($('btnClearBench')) {
   $('btnClearBench').addEventListener('click', async () => {
+    if (!(await askConfirm({
+      title: '清空测速历史？',
+      detail: '「上次 vs 本次」的对比会一起消失。',
+      okText: '清空', danger: true,
+    }))) return;
     try { await del('/api/history?kind=bench'); loadTrend('bench'); toast('测速历史已清空'); }
     catch (e) { toast(e.message); }
   });
@@ -2927,7 +2947,11 @@ if ($('btnNetCheck')) $('btnNetCheck').addEventListener('click', runNetCheck);
 if ($('btnCheckOrphan')) $('btnCheckOrphan').addEventListener('click', checkOrphan);
 if ($('btnCleanup')) {
   $('btnCleanup').addEventListener('click', async () => {
-    if (!confirm('确定要删除这些残留分片吗？\n（已装的模型不受影响）')) return;
+    if (!(await askConfirm({
+      title: '删除这些残留分片？',
+      detail: '已装的模型不受影响，只是清掉没人引用的碎片。',
+      okText: '删除', danger: true,
+    }))) return;
     $('btnCleanup').disabled = true;
     try {
       const r = await post('/api/cleanup', { dryRun: false });
@@ -3148,7 +3172,11 @@ function renderServices() {
 
   if ($('svcStopAll')) {
     $('svcStopAll').addEventListener('click', async () => {
-      if (!confirm('确定要停止全部服务吗？\n（引擎、WebUI、工作台都会关掉，显存会释放）')) return;
+      if (!(await askConfirm({
+        title: '停止全部服务？',
+        detail: '引擎、WebUI 和工作台都会关掉，显存会立刻释放。',
+        okText: '停止', danger: true,
+      }))) return;
       try {
         const out = await post('/api/strata/service', { action: 'stop' });
         toast(out.message || '已停止');
@@ -3318,6 +3346,48 @@ if ($('btnCopyChat')) {
  * 回滚是不可逆操作（虽然会先备份），所以点之前得让用户看到会改掉什么。
  * 只列有变化的项，没变的折成一句「其余 N 项没变」。
  */
+/**
+ * 统一的二次确认弹窗。
+ *
+ * 以前危险操作有两种做法：原生 `confirm()`（4 处）和完全不确认（4 处）。
+ * 原生 confirm 有三个毛病：会阻塞整个渲染线程、文案进不了 i18n（英文界面弹中文）、
+ * 长得跟控制台完全不搭。这里用控制台自己的样式，返回 Promise。
+ *
+ * @param {{title:string, detail?:string, okText?:string, danger?:boolean}} opts
+ * @returns {Promise<boolean>}
+ */
+function askConfirm({ title, detail = '', okText = '确定', danger = false }) {
+  return new Promise((resolve) => {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    mask.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="askTitle">
+      <div class="modal-icon" aria-hidden="true">${danger ? '!' : '?'}</div>
+      <h2 id="askTitle">${esc(title)}</h2>
+      ${detail ? `<p>${esc(detail)}</p>` : ''}
+      <div class="modal-actions">
+        <button class="btn ghost" data-ask-no>取消</button>
+        <button class="btn ${danger ? 'danger' : 'primary'}" data-ask-yes>${esc(okText)}</button>
+      </div>
+    </div>`;
+    const done = (value) => {
+      document.removeEventListener('keydown', onKey, true);
+      mask.remove();
+      resolve(value);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+      if (e.key === 'Enter') { e.stopPropagation(); done(true); }
+    };
+    mask.addEventListener('click', (e) => { if (e.target === mask) done(false); });
+    // 默认焦点放在「取消」上：误按回车不该执行破坏性操作
+    mask.querySelector('[data-ask-no]').addEventListener('click', () => done(false));
+    mask.querySelector('[data-ask-yes]').addEventListener('click', () => done(true));
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(mask);
+    mask.querySelector('[data-ask-no]').focus();
+  });
+}
+
 async function showConfigDiff(file) {
   const mask = document.createElement('div');
   mask.className = 'modal-mask';
@@ -3390,7 +3460,11 @@ async function loadCheckpoints() {
     }
     for (const b of box.querySelectorAll('[data-restore]')) {
       b.addEventListener('click', async () => {
-        if (!confirm(`确定要回滚到 ${b.dataset.restore} 吗？\n（当前配置会先另存一份，回滚错了还能再退回来）`)) return;
+        if (!(await askConfirm({
+          title: `回滚到 ${b.dataset.restore}？`,
+          detail: '当前配置会先另存一份，回滚错了还能再退回来。',
+          okText: '回滚',
+        }))) return;
         try {
           await post('/api/config/restore', { file: b.dataset.restore });
           toast('已回滚');
@@ -4165,7 +4239,11 @@ function setupButtons() {
         const hit = (state.models || []).find((x) => x.name === m);
         return n + (hit ? hit.sizeGB : 0);
       }, 0);
-      if (!confirm(`确定要删除这 ${picked.length} 个模型吗？\n会释放约 ${total.toFixed(1)} GB 空间。`)) return;
+      if (!(await askConfirm({
+        title: `删除这 ${picked.length} 个模型？`,
+        detail: `会释放约 ${total.toFixed(1)} GB 空间，以后想用需要重新下载。`,
+        okText: '删除', danger: true,
+      }))) return;
       let done = 0;
       for (const m of picked) {
         try {
@@ -4301,9 +4379,19 @@ async function applyLan(on) {
     const r = await post('/api/settings', { lanShare: on });
     $('lanWarn').hidden = true;
     renderSettings();
-    toast(on
-      ? '已开启局域网共享 —— 同网络的设备可以用 http://你的IP:11434 访问'
-      : '已关闭局域网共享，Ollama 只监听本机');
+    if (!on) {
+      toast('已关闭局域网共享，Ollama 只监听本机');
+    } else if (r.lanShare && r.lanShare.unchanged) {
+      toast('局域网共享本来就是开着的');
+    } else {
+      // 把真实的局域网地址列出来：「http://你的IP:11434」这种说法等于没说，
+      // 用户根本不知道自己的 IP，也就没法在手机上填对地址。
+      const addrs = (r.lanShare && r.lanShare.addresses) || [];
+      const first = addrs[0] && addrs[0].address;
+      toast(first
+        ? `已开启局域网共享 —— 手机用 http://${first}:11434 访问${addrs.length > 1 ? `（另有 ${addrs.length - 1} 个地址）` : ''}`
+        : '已开启局域网共享，但没读到本机局域网地址（可能是没连网络）');
+    }
     return r;
   } catch (e) {
     toast(e.message);

@@ -269,9 +269,30 @@ function setAutostart(on) {
  * 局域网共享 = 把 Ollama 的 API 暴露到 0.0.0.0:11434，让同网段的手机 / 其它电脑能调用。
  * 这会让同一个 WiFi 下的任何人（以及某些公共网络里的其他人）都能访问你的模型，
  * 所以默认关闭，打开时界面必须给出明确警告。
+ *
+ * 注意 Ollama 的 API **没有鉴权**：谁能连上 11434，谁就能用你的模型、也能调
+ * /api/delete 删模型。所以这里把本机的局域网地址一起返回，让界面能明确告诉
+ * 用户「这个地址会被谁访问到」，而不是只说一句「已开启」。
  */
+function lanAddresses() {
+  const out = [];
+  try {
+    for (const [name, list] of Object.entries(os.networkInterfaces() || {})) {
+      for (const it of list || []) {
+        if (it.family !== 'IPv4' || it.internal) continue;
+        out.push({ name, address: it.address });
+      }
+    }
+  } catch { /* 取不到就算了，不影响开关本身 */ }
+  return out;
+}
+
 function setLanShare(on) {
   const val = on ? '0.0.0.0:11434' : null;
+  // 值没变就别重启 Ollama —— 以前每次点一下都会 killOllama()，
+  // 正在跑的模型会被踢出显存，用户还得等它重新加载。
+  const before = readSettings().lanShare;
+  if (!!before === !!on) return { ok: true, lanShare: on, unchanged: true, addresses: lanAddresses() };
   let r;
   if (on) {
     r = spawnSync('setx', ['OLLAMA_HOST', val], { stdio: 'ignore', windowsHide: true });
@@ -286,7 +307,7 @@ function setLanShare(on) {
   else delete process.env.OLLAMA_HOST;
   // 让改动生效：重启 Ollama
   killOllama();
-  return { ok: true, lanShare: on };
+  return { ok: true, lanShare: on, addresses: lanAddresses() };
 }
 
 /* ------------------------------------------------------------- 服务控制 */
