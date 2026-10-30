@@ -1,4 +1,4 @@
-888ad66f72e2f6016d26ee022341a6a50e6cc2e8d74cab98c6effa38a0c33a65  release/1.11.0/local-ai-kit-1.11.0-win-x64/dist/local-ai-kit-offline-1.11.0.zip
+0fca6b144a397bbf830663d83000a93e4adaabb026df13320dc8cfaf34453f99  release/1.11.0/local-ai-kit-1.11.0-win-x64/dist/local-ai-kit-offline-1.11.0.zip
 81a65f69eb43d2a12a37ca70eafb64bd370fa7ef9322726a36320091a01002db  release/1.11.0/local-ai-kit-1.11.0-win-x64/launcher/open-local-ai.ps1
 ae8a3075dc4c003d9ce99ebff62f403975f43a61cd35865ee2ca53e09cc37791  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/.github/workflows/ci.yml
 ac675a010cae5ba8da268044eaa3750c62c624e4cb651388fe5fab0ac7c41302  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/CHANGELOG.md
