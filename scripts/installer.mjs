@@ -128,11 +128,26 @@ function spaceProblem(model, modelDir) {
 // 检测结果缓存：避免每次刷新都重跑 nvidia-smi / whoami（也避免并发重复检测）
 let detectCache = null;
 let detectAt = 0;
+/**
+ * 进行中的检测。
+ *
+ * 注释里一直写着「避免并发重复检测」，但代码只有「结果缓存 15 秒」——
+ * 首屏和前端紧接着发的 /api/detect 会同时进来，两边都还没结果，
+ * 于是各 spawn 一遍 nvidia-smi / whoami / powershell，各扫一遍模型目录。
+ * 这里把进行中的 Promise 复用起来。
+ */
+let detectInflight = null;
+
 async function detectCached(force = false) {
   if (!force && detectCache && Date.now() - detectAt < 15000) return detectCache;
-  detectCache = await detectAll();
-  detectAt = Date.now();
-  return detectCache;
+  if (detectInflight) return detectInflight;
+  detectInflight = (async () => {
+    const out = await detectAll();
+    detectCache = out;
+    detectAt = Date.now();
+    return out;
+  })().finally(() => { detectInflight = null; });
+  return detectInflight;
 }
 
 function broadcast(event) {

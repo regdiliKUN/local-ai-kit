@@ -277,6 +277,12 @@ async function main() {
   /* --- 1. 质量基线 --- */
   log('【1/3】质量基线（21 题）');
   const items = loadGolden();
+  if (!items.length) {
+    // 题库被清空 / 全是注释行时，rate 会是 NaN，后面 rate >= 0.9 恒 false，
+    // 摘要里却报「0 题不达标」—— 看起来像模型有问题，其实是题库没了。
+    emit({ type: 'error', text: '题库是空的（healthcheck/golden.jsonl 没有可用的题目），体检无法进行。' });
+    return 1;
+  }
   const rows = [];
   for (const it of items) {
     let ok = false, why = '';
@@ -306,13 +312,16 @@ async function main() {
     log(`      ctx≈${n} → 实际 ${probes.at(-1).ctx} tokens，${sec.toFixed(1)}s`);
   }
   const base = probes[0];
-  const drift = probes.slice(1).map((p) => ({
+  // 显存很小（或窗口被压得很低）时 ctxs 可能一个都不剩，probes 为空：
+  // 后面 base.text 会直接 TypeError，整个体检以 code 1 退出。
+  const drift = base ? probes.slice(1).map((p) => ({
     ctx: p.ctx,
     firstDiv: firstDiv(base.text, p.text),
     len: p.text.length,
     flip: flipRate(base.text, p.text),
     sec: p.sec,
-  }));
+  })) : [];
+  if (!base) log('      窗口太小，一个上下文档位都排不下 —— 跳过漂移检测。');
   for (const d of drift) {
     const tag = d.firstDiv === -2 ? `len≠ ${base.text.length}/${d.len}` : divLabel(d.firstDiv);
     log(`      ${String(d.ctx).padStart(7)}  首分歧=${tag}  ` +

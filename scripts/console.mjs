@@ -41,7 +41,7 @@ import { runBenchmark } from './bench.mjs';
 import { exportBundle, importBundle } from './backup.mjs';
 import { diagnose, repair } from './repair.mjs';
 import { compareVersions } from './version.mjs';
-import { appendItem, readList, writeList, clearList, storePath } from './store.mjs';
+import { appendItem, readList, writeList, clearList, storePath, tailBytes } from './store.mjs';
 import { searchLibrary } from './library.mjs';
 import { diskHealth, diskForPath, diskSummary } from './diskhealth.mjs';
 import { runRanking, rankingAdvice } from './ranking.mjs';
@@ -650,19 +650,11 @@ function logLine(text) {
  * 事件循环会被这几百 MB 卡住。改成从文件末尾按字节读。
  */
 function tailLog(lines = 200) {
-  try {
-    const size = fs.statSync(LOG_FILE).size;
-    // 每行按 200 字节估（日志行带时间戳和中文，很少超过这个数）
-    const want = Math.min(size, Math.max(8192, lines * 200));
-    const buf = Buffer.alloc(want);
-    const fd = fs.openSync(LOG_FILE, 'r');
-    try { fs.readSync(fd, buf, 0, want, size - want); } finally { fs.closeSync(fd); }
-    let text = buf.toString('utf8');
-    // 从中间切开时第一行可能是半行，丢掉
-    if (want < size) text = text.slice(text.indexOf('\n') + 1 || 0);
-    const all = text.split(/\r?\n/);
-    return all.slice(Math.max(0, all.length - lines)).join('\n');
-  } catch { return '（还没有日志）'; }
+  // 每行按 200 字节估（日志行带时间戳和中文，很少超过这个数）
+  const text = tailBytes(LOG_FILE, Math.max(8192, lines * 200));
+  if (!text) return '（还没有日志）';
+  const all = text.split(/\r?\n/);
+  return all.slice(Math.max(0, all.length - lines)).join('\n');
 }
 
 /** 组装 /api/metrics 的内容（首屏注入和接口共用同一份逻辑与形状） */
@@ -1433,14 +1425,18 @@ const server = createSafeServer(async (req, res) => {
 
   if (p === '/api/sessions' && req.method === 'POST') {
     const body = await readBody(req, 1024 * 1024);
-    const messages = Array.isArray(body.messages) ? body.messages : [];
+    // 走 sanitizeMessages：单条上限 2 万字、最多 40 条。
+    // 以前只 slice(-60)，单条 content 不截断 —— 一次粘贴几十万字的对话
+    // 会被原样写进 store.json，而 store.json 是「每存一次就整份重写」的，
+    // 于是「记一次 token 用量」这种小操作也要序列化十几 MB。
+    const messages = sanitizeMessages(Array.isArray(body.messages) ? body.messages : []);
     if (!messages.length) return json(res, 400, { error: '没有可保存的对话' });
     const session = {
       id: String(body.id || `s${Date.now()}`),
       at: Date.now(),
       title: String(body.title || messages[0].content || '').slice(0, 60),
       model: String(body.model || ''),
-      messages: messages.slice(-60),
+      messages,
     };
     const list = readList('chat').filter((s) => s.id !== session.id);
     list.push(session);

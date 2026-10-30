@@ -112,3 +112,46 @@ export function clearList(kind) {
 export function storePath() {
   return storeFile();
 }
+
+/* ------------------------------------------------------------ 文件小工具 */
+
+/**
+ * 原子写一个文本文件：先写 `.tmp` 再改名。
+ *
+ * 直接 `writeFileSync` 覆盖的话，写到一半断电 / 被杀就是半截文件，
+ * 而读的一方（比如出字快测的记录）多半会静默当成「没有数据」，历史全丢。
+ */
+export function writeFileAtomic(file, text) {
+  const temp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temp, text, 'utf8');
+    fs.renameSync(temp, file);
+  } finally { try { fs.rmSync(temp, { force: true }); } catch { /* ignore */ } }
+}
+
+/**
+ * 读文件末尾的若干字节（不整份读进内存）。
+ *
+ * 日志是追加写的，跑几天就是几百 MB；而「看最后 200 行」这种需求
+ * 每隔几秒就来一次。`readFileSync` 整份读再 slice 会把事件循环卡住。
+ *
+ * @param {string} file
+ * @param {number} maxBytes 最多读多少字节（从文件末尾算）
+ * @returns {string} 读不到时返回空串
+ */
+export function tailBytes(file, maxBytes = 8192) {
+  try {
+    const size = fs.statSync(file).size;
+    const want = Math.min(size, Math.max(1, maxBytes));
+    const buf = Buffer.alloc(want);
+    const fd = fs.openSync(file, 'r');
+    try { fs.readSync(fd, buf, 0, want, size - want); } finally { fs.closeSync(fd); }
+    let text = buf.toString('utf8');
+    // 从中间切开时第一行可能是半行（甚至是半个多字节字符），丢掉
+    if (want < size) {
+      const nl = text.indexOf('\n');
+      text = nl >= 0 ? text.slice(nl + 1) : text;
+    }
+    return text;
+  } catch { return ''; }
+}

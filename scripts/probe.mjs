@@ -13,6 +13,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+// 写盘走原子写：直接覆盖时写到一半被杀，文件就是半截 JSON，
+// readProbes 会静默当成「没有数据」，历史全丢。
+import { writeFileAtomic } from './store.mjs';
 
 const FILE = '出字快测.json';
 
@@ -47,7 +50,7 @@ export function recordProbe(root, model, rec) {
     at: Date.now(),
   };
   try {
-    fs.writeFileSync(fileOf(root), JSON.stringify(all, null, 2), 'utf-8');
+    writeFileAtomic(fileOf(root), JSON.stringify(all, null, 2));
   } catch {
     /* 写不进不该崩界面 */
   }
@@ -59,7 +62,7 @@ export function forgetProbe(root, model) {
   if (model in all) {
     delete all[model];
     try {
-      fs.writeFileSync(fileOf(root), JSON.stringify(all, null, 2), 'utf-8');
+      writeFileAtomic(fileOf(root), JSON.stringify(all, null, 2));
     } catch { /* 忽略 */ }
   }
 }
@@ -67,6 +70,6 @@ export function forgetProbe(root, model) {
 /** 清空全部快测记录 */
 export function clearProbes(root) {
   try {
-    fs.writeFileSync(fileOf(root), '{}', 'utf-8');
+    writeFileAtomic(fileOf(root), '{}');
   } catch { /* 忽略 */ }
 }

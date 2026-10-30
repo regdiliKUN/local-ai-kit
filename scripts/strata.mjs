@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readBody, resolveStaticPath, applySecurityHeaders } from './local-http.mjs';
+import { tailBytes } from './store.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let operation = null;
@@ -55,7 +56,9 @@ export async function strataState(cfg) {
     const log = path.join(cfg.deploymentRoot, 'logs', 'kit-engine.stdout.log');
     try {
       if (fs.statSync(log).mtimeMs > lastStop) {
-        const tail = fs.readFileSync(log, 'utf8').slice(-8192);
+        // 只读末尾 8KB：引擎日志跑几天能到几百 MB，
+        // 而这段代码每次 /api/state 都会走（页面每 5 秒轮询一次）。
+        const tail = tailBytes(log, 8192);
         if (/\[FATAL\].*VRAM/.test(tail)) engine.startupError = '显存检查未通过，引擎未启动。请释放显存后重试；详情见 logs/kit-engine.stdout.log。';
         else if (/\[(ERROR|FATAL)\]/.test(tail)) engine.startupError = '引擎启动失败，请查看 logs/kit-engine.stdout.log。';
       }
