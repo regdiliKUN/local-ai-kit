@@ -86,6 +86,38 @@ let busy = null;            // 当前在忙什么（'pull:模型名' 之类）�
 let strataBusy = null;
 let eventLog = [];
 
+/**
+ * 抢一把「同一时间只做一件事」的锁。
+ *
+ * 这里一次堵住三个坑，以前每个接口各写一遍、写法还不一样：
+ *
+ *  1. **先占位再 await**。原来是「先 `if (busy)` 检查 → `await readBody()` → 再置 busy」，
+ *     两个并发请求能同时溜过检查：双击「下载」会真的并发跑两个 pull，
+ *     双击「实测排行」会起两串体检子进程。
+ *  2. **读请求体失败必须放锁**。畸形 JSON / 超过 64 KiB 会让 readBody reject，
+ *     如果锁已经占住却没在 catch 里放掉，控制台就永久 409「正在忙：health」，
+ *     除了重启进程没有任何出口。
+ *  3. **能转交给后台任务**。下载 / 删除 / 排行都是先回 202 再在后台跑，
+ *     锁要一直占到后台任务结束 —— 所以后台的 finally 里调 `lock.release()`，
+ *     不要再去写 `busy = null`（那样可能放掉别人的锁）。
+ *
+ * @returns {null | { rename(next: string): void, release(): void }} 已被占用时返回 null
+ */
+function acquireBusy(name) {
+  if (busy) return null;
+  busy = name;
+  // 用 token 认领，防止「A 的 finally」把「B 刚抢到的锁」放掉
+  const token = Symbol(name);
+  busyOwner = token;
+  return {
+    rename(next) { if (busyOwner === token) busy = next; },
+    release() { if (busyOwner === token) { busy = null; busyOwner = null; } },
+  };
+}
+let busyOwner = null;
+/** 排行是否被用户点了停止（/api/ranking/stop 置位，排行收尾时复位） */
+let rankingStopped = false;
+
 /** 限流器：GET 宽松（页面要轮询），POST 收紧（会改东西） */
 const rateLimit = createRateLimiter({ getLimit: 600, postLimit: 60 });
 
@@ -495,10 +527,13 @@ async function applyConfig(body) {
  * 用 process.execPath 而不是 'node'：控制台本身就是 node 起的，
  * 直接复用同一个可执行文件，避免用户 PATH 里没有 node 的情况。
  */
-function runHealth(quick) {
+function runHealth(quick, lock) {
+  // 锁由调用方（/api/health）抢好再传进来；体检子进程退出/启动失败时还回去。
+  // 以前这里直接写 busy = null —— 一旦有别的任务在这期间抢到锁就会被误放。
+  const done = () => { if (lock) lock.release(); else busy = null; };
   const script = path.join(ROOT, 'healthcheck', 'quick.mjs');
   if (!fs.existsSync(script)) {
-    busy = null;
+    done();
     broadcast({ type: 'health-error', text: '找不到 healthcheck/quick.mjs' });
     return;
   }
@@ -565,12 +600,12 @@ function runHealth(quick) {
   child.stderr.on('data', (d) => broadcast({ type: 'health-log', text: d.toString('utf8').trim() }));
 
   child.on('error', (e) => {
-    busy = null;
+    done();
     broadcast({ type: 'health-error', text: `启动体检失败：${e.message}` });
   });
   child.on('exit', (code) => {
     if (buf.trim()) onLine(buf);
-    busy = null;
+    done();
     if (code !== 0 && code !== 2) {
       broadcast({ type: 'health-error', text: `体检进程退出（code=${code}）` });
     }
@@ -607,10 +642,24 @@ function logLine(text) {
   try { logStream.write(`[${new Date().toLocaleTimeString()}] ${text}\n`); } catch { /* ignore */ }
 }
 
-/** 读日志最后 n 行 */
+/**
+ * 读日志最后 n 行。
+ *
+ * 不能 `readFileSync` 整份再切尾巴：日志是追加写的，跑几天就是几百 MB，
+ * 而 /api/logs 是页面在轮询的接口 —— 每轮都全量读入 + split 一遍，
+ * 事件循环会被这几百 MB 卡住。改成从文件末尾按字节读。
+ */
 function tailLog(lines = 200) {
   try {
-    const text = fs.readFileSync(LOG_FILE, 'utf8');
+    const size = fs.statSync(LOG_FILE).size;
+    // 每行按 200 字节估（日志行带时间戳和中文，很少超过这个数）
+    const want = Math.min(size, Math.max(8192, lines * 200));
+    const buf = Buffer.alloc(want);
+    const fd = fs.openSync(LOG_FILE, 'r');
+    try { fs.readSync(fd, buf, 0, want, size - want); } finally { fs.closeSync(fd); }
+    let text = buf.toString('utf8');
+    // 从中间切开时第一行可能是半行，丢掉
+    if (want < size) text = text.slice(text.indexOf('\n') + 1 || 0);
     const all = text.split(/\r?\n/);
     return all.slice(Math.max(0, all.length - lines)).join('\n');
   } catch { return '（还没有日志）'; }
@@ -914,9 +963,10 @@ const server = createSafeServer(async (req, res) => {
   // 视觉 / 工具调用能力，界面上用小标签显示
   if (p === '/api/model-caps') {
     const models = (await listModels()) || [];
-    const out = {};
-    for (const m of models) out[m.name] = await modelCaps(m.name);
-    return json(res, 200, out);
+    // 并行问：capsFor 单次超时 8 秒，串行问 10 个模型最坏要 80 秒，
+    // 期间页面这个请求一直挂着（同源只有 6 条连接）。
+    const pairs = await Promise.all(models.map(async (m) => [m.name, await modelCaps(m.name)]));
+    return json(res, 200, Object.fromEntries(pairs));
   }
 
   if (p === '/api/state') {
@@ -928,24 +978,33 @@ const server = createSafeServer(async (req, res) => {
   }
 
   if (p === '/api/config' && req.method === 'POST') {
-    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    if (pullQueue.isBusy()) return json(res, 409, { error: '正在下载模型，等下载完再改配置' });
-    busy = 'config';
+    const lock = acquireBusy('config');
+    if (!lock) return json(res, 409, { error: `正在忙：${busy}` });
+    if (pullQueue.isBusy()) {
+      lock.release();
+      return json(res, 409, { error: '正在下载模型，等下载完再改配置' });
+    }
     try {
       const body = await readBody(req);
       const out = await applyConfig(body);
       return json(res, 200, { ok: true, ...out });
     } catch (e) {
       return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
-    } finally { busy = null; }
+    } finally { lock.release(); }
   }
 
   if (p === '/api/health' && req.method === 'POST') {
-    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    // 先占位再 await：readBody 期间第二个请求会从上面那行检查溜过去
-    busy = 'health';
-    const body = await readBody(req);
-    runHealth(!!(body && body.quick));
+    const lock = acquireBusy('health');
+    if (!lock) return json(res, 409, { error: `正在忙：${busy}` });
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      // 请求体畸形：锁必须放掉，否则控制台从此只会回 409，只能重启
+      lock.release();
+      return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
+    }
+    runHealth(!!(body && body.quick), lock);
     return json(res, 202, { started: true });
   }
 
@@ -1230,15 +1289,24 @@ const server = createSafeServer(async (req, res) => {
   }
 
   if (p === '/api/ranking' && req.method === 'POST') {
-    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    const body = await readBody(req);
+    const lock = acquireBusy('ranking');
+    if (!lock) return json(res, 409, { error: `正在忙：${busy}` });
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      lock.release();
+      return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
+    }
     const names = (Array.isArray(body.models) ? body.models : [])
       .map((m) => String(m || '').trim())
       .filter((m) => isValidModelName(m));
-    if (!names.length) return json(res, 400, { error: '没有可测的模型' });
-    busy = 'ranking';
+    if (!names.length) { lock.release(); return json(res, 400, { error: '没有可测的模型' }); }
     json(res, 202, { started: true, total: names.length });
-    let stopped = false;
+    // 「停止」按钮要能真的停。以前 stopped 是这里的局部变量，
+    // /api/ranking/stop 里没有（也不可能有）任何地方把它置 true，
+    // 于是点了停止只是弹一句提示，8 个模型照样一个个跑完。
+    rankingStopped = false;
     runRanking({
       models: names,
       onProgress: (ev) => {
@@ -1248,20 +1316,23 @@ const server = createSafeServer(async (req, res) => {
           broadcast({ type: 'ranking-progress', model: ev.model, index: ev.index, total: ev.total, percent: ev.percent });
         }
       },
-      shouldStop: () => stopped,
+      shouldStop: () => rankingStopped,
     }).then((out) => {
       const payload = { results: out.results, advice: rankingAdvice(out.results), at: out.at };
       writeList('ranking', [payload]);
       broadcast({ type: 'ranking-done', ...payload });
     }).catch((e) => {
       broadcast({ type: 'error', text: `排行失败：${e.message || e}` });
-    }).finally(() => { busy = null; broadcast({ type: 'idle' }); });
+    }).finally(() => { rankingStopped = false; lock.release(); broadcast({ type: 'idle' }); });
     return;
   }
 
   if (p === '/api/ranking/stop' && req.method === 'POST') {
+    // 没有排行在跑时点停止：直接说清楚，别假装「已请求停止」
+    if (busy !== 'ranking') return json(res, 200, { ok: true, running: false });
+    rankingStopped = true;
     broadcast({ type: 'notice', text: '已请求停止排行（当前模型跑完就停）', tone: 'warn' });
-    return json(res, 200, { ok: true });
+    return json(res, 200, { ok: true, running: true });
   }
 
   /* ------------------------------------------------------------ 用量统计 */
@@ -1388,15 +1459,25 @@ const server = createSafeServer(async (req, res) => {
     return json(res, 200, await diagnose({ root: ROOT, cfg, kitDir: ROOT }));
   }
   if (p === '/api/repair' && req.method === 'POST') {
-    const body = await readBody(req);
+    // 以前这里没有锁：连点两次「一键修复」会并发跑同一个动作，
+    // patch-profiles 会同时写同一份 cordis.patch.yml，ollama-start 会 kill 两次再起两个进程。
+    const lock = acquireBusy('repair');
+    if (!lock) return json(res, 409, { error: `正在忙：${busy}` });
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      lock.release();
+      return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
+    }
     const action = String(body.action || '').trim();
-    if (!action) return json(res, 400, { error: '缺少修复动作' });
+    if (!action) { lock.release(); return json(res, 400, { error: '缺少修复动作' }); }
     try {
       const out = await repair(action, { root: ROOT, cfg, kitDir: ROOT });
       return json(res, 200, { ok: true, ...out, report: await diagnose({ root: ROOT, cfg, kitDir: ROOT }) });
     } catch (e) {
       return json(res, 400, { error: String(e.message || e) });
-    }
+    } finally { lock.release(); }
   }
 
   /* ------------------------------------------------------ 配置导出/导入 */
@@ -1426,12 +1507,18 @@ const server = createSafeServer(async (req, res) => {
 
   /* ------------------------------------------------------------ 性能基准 */
   if (p === '/api/bench' && req.method === 'POST') {
-    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    busy = 'bench';
-    const body = await readBody(req);
+    const lock = acquireBusy('bench');
+    if (!lock) return json(res, 409, { error: `正在忙：${busy}` });
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      lock.release();
+      return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
+    }
     const model = String(body.model || cfg.model || '').trim();
-    if (!isValidModelName(model)) { busy = null; return json(res, 400, { error: '模型名不合法' }); }
-    if (!(await ensureOllama())) { busy = null; return json(res, 400, { error: 'Ollama 没在运行' }); }
+    if (!isValidModelName(model)) { lock.release(); return json(res, 400, { error: '模型名不合法' }); }
+    if (!(await ensureOllama())) { lock.release(); return json(res, 400, { error: 'Ollama 没在运行' }); }
     try { recordUse(ROOT, model, 'bench'); } catch { /* ignore */ }
     json(res, 202, { started: true });
     const gpu = (await collectMetrics({ modelDir: resolveModelDir(cfg.modelDir), sampleMs: 0 })).gpu[0];
@@ -1459,7 +1546,7 @@ const server = createSafeServer(async (req, res) => {
         broadcast({ type: 'bench-done', result: out });
       })
       .catch((e) => broadcast({ type: 'error', text: String(e.message || e) }))
-      .finally(() => { busy = null; broadcast({ type: 'idle' }); });
+      .finally(() => { lock.release(); broadcast({ type: 'idle' }); });
     return;
   }
 
@@ -1493,46 +1580,71 @@ const server = createSafeServer(async (req, res) => {
   }
 
   if (p === '/api/pull' && req.method === 'POST') {
-    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    const body = await readBody(req);
+    const lock = acquireBusy('pull');
+    if (!lock) return json(res, 409, { error: `正在忙：${busy}` });
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      lock.release();
+      return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
+    }
     const model = String(body.model || '').trim();
     if (!/^[a-z0-9][a-z0-9._\-/]*(:[a-z0-9._\-]+)?$/i.test(model)) {
+      lock.release();
       return json(res, 400, { error: '模型名不合法，例如 qwen3:8b' });
     }
-    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，而且找不到它的安装位置' });
-    busy = `pull:${model}`;
+    if (!(await ensureOllama())) {
+      lock.release();
+      return json(res, 400, { error: 'Ollama 没在运行，而且找不到它的安装位置' });
+    }
+    lock.rename(`pull:${model}`);
     eventLog = [];
     json(res, 202, { started: true });
     doPull(model, broadcast)
       .then(() => broadcast({ type: 'done', action: 'pull', model }))
       .catch((e) => broadcast({ type: 'error', text: String(e.message || e) }))
-      .finally(() => { busy = null; broadcast({ type: 'idle' }); });
+      .finally(() => { lock.release(); broadcast({ type: 'idle' }); });
     return;
   }
 
   if (p === '/api/delete' && req.method === 'POST') {
-    if (busy) return json(res, 409, { error: `正在忙：${busy}` });
-    if (pullQueue.isBusy()) return json(res, 409, { error: '正在下载模型，等下载完再删除' });
-    const body = await readBody(req);
+    const lock = acquireBusy('delete');
+    if (!lock) return json(res, 409, { error: `正在忙：${busy}` });
+    if (pullQueue.isBusy()) {
+      lock.release();
+      return json(res, 409, { error: '正在下载模型，等下载完再删除' });
+    }
+    let body;
+    try {
+      body = await readBody(req);
+    } catch (e) {
+      lock.release();
+      return json(res, e.statusCode || 400, { error: String((e && e.message) || e) });
+    }
     const model = String(body.model || '').trim();
-    if (!model) return json(res, 400, { error: '缺少模型名' });
+    if (!model) { lock.release(); return json(res, 400, { error: '缺少模型名' }); }
     // 当前配置正在用的模型不能直接删。
     // 控制台只读配置、不回写，所以删掉之后：工作台启动失败 → 用户回控制台装个新的
     // → 配置仍指向被删的那个 → 还是起不来。这是个没有出口的死循环，直接拦掉。
     if (cfg.model && model === cfg.model) {
+      lock.release();
       return json(res, 409, {
         error: `「${model}」是当前工作台正在使用的模型，删掉后无法启动。` +
                `请先双击「① 双击这里开始安装.cmd」换用别的模型，再回来删除。`,
       });
     }
-    if (!(await ensureOllama())) return json(res, 400, { error: 'Ollama 没在运行，无法删除' });
-    busy = `delete:${model}`;
+    if (!(await ensureOllama())) {
+      lock.release();
+      return json(res, 400, { error: 'Ollama 没在运行，无法删除' });
+    }
+    lock.rename(`delete:${model}`);
     eventLog = [];
     json(res, 202, { started: true });
     doDelete(model, broadcast)
       .then(() => broadcast({ type: 'done', action: 'delete', model }))
       .catch((e) => broadcast({ type: 'error', text: String(e.message || e) }))
-      .finally(() => { busy = null; broadcast({ type: 'idle' }); });
+      .finally(() => { lock.release(); broadcast({ type: 'idle' }); });
     return;
   }
 

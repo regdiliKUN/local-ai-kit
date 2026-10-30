@@ -10,7 +10,7 @@
  * 注意：
  *   - 一次要跑好几分钟，中途可以随时停
  *   - 每个模型都要先加载进显存，慢是正常的
- *   - 排���只说明「在这 21 道题上谁更强」，不是全面的胜负
+ *   - 排行只说明「在这 21 道题上谁更强」，不是全面的胜负
  */
 
 import fs from 'node:fs';
@@ -63,6 +63,10 @@ export async function runRanking({ models = [], onProgress = () => {}, shouldSto
 /** 跑一个模型的 21 道题 */
 function runOne(script, model) {
   return new Promise((resolve) => {
+    // stdio 必须显式声明：默认三路都是 pipe，而下面只读了 stdout。
+    // 子进程一旦往 stderr 写满管道缓冲（约 64KB，模型报错刷屏时很容易），
+    // 它就会阻塞在 write 上永不退出 → 这个 Promise 永不 resolve →
+    // busy='ranking' 永不释放，只能重启控制台。stderr 直接丢给父进程继承即可。
     const child = spawn(process.execPath, [script, '--json', '--quick'], {
       cwd: KIT,
       env: {
@@ -71,10 +75,24 @@ function runOne(script, model) {
         LOCAL_AI_BASE_URL: 'http://127.0.0.1:11434/v1',
       },
       windowsHide: true,
+      stdio: ['ignore', 'pipe', 'inherit'],
     });
     let buf = '';
     let summary = null;
     let failed = null;
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    // 兜底：模型卡死时不能让整个排行挂住（一个模型最多 15 分钟）
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch { /* 已经退出 */ }
+      finish({ model, error: '体检超时（15 分钟），已跳过这个模型', passed: 0, total: 0, rate: 0 });
+    }, 15 * 60 * 1000);
+    if (typeof timer.unref === 'function') timer.unref();
 
     const onLine = (line) => {
       const t = line.trim();
@@ -91,14 +109,14 @@ function runOne(script, model) {
       buf = parts.pop() || '';
       for (const p of parts) onLine(p);
     });
-    child.on('error', (e) => resolve({ model, error: String(e.message || e), passed: 0, total: 0, rate: 0 }));
+    child.on('error', (e) => finish({ model, error: String(e.message || e), passed: 0, total: 0, rate: 0 }));
     child.on('close', (code) => {
       if (buf.trim()) onLine(buf);
       if (!summary) {
-        resolve({ model, error: failed || `体检进程退出（code=${code}）`, passed: 0, total: 0, rate: 0 });
+        finish({ model, error: failed || `体检进程退出（code=${code}）`, passed: 0, total: 0, rate: 0 });
         return;
       }
-      resolve({
+      finish({
         model: summary.model || model,
         passed: summary.eval ? summary.eval.passed : 0,
         total: summary.eval ? summary.eval.total : 0,

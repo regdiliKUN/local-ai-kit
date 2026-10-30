@@ -60,11 +60,9 @@ async function probe(target, timeoutMs) {
  * @param {object} opts { timeoutMs }
  */
 export async function checkNetwork({ timeoutMs = 5000 } = {}) {
-  const results = [];
-  for (const target of TARGETS) {
-    const r = await probe(target, timeoutMs);
-    results.push({ ...target, ...r });
-  }
+  // 并行探：以前是一个接一个 await，离线机器上要等满 3 × 5 秒才出结果，
+  // 期间这个请求一直占着浏览器的一条连接（同源只给 6 条）。
+  const results = await Promise.all(TARGETS.map(async (target) => ({ ...target, ...(await probe(target, timeoutMs)) })));
   const proxies = proxySettings();
   const failed = results.filter((r) => !r.ok);
 

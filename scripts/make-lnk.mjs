@@ -30,10 +30,22 @@ function stringData(text) {
   return Buffer.concat([u16(raw.length / 2), raw]);
 }
 
-/** LinkInfo：用 VolumeIDAndLocalBasePath 携带绝对目标路径 */
+/**
+ * LinkInfo：用 VolumeIDAndLocalBasePath 携带绝对目标路径。
+ *
+ * 路径含中文时要用「Unicode 变体」：LinkInfoHeaderSize 放到 0x24（36），
+ * 末尾就多出两个字段 —— LocalBasePathOffsetUnicode / CommonPathSuffixOffsetUnicode，
+ * 指向 UTF-16LE 版本的路径。这是 MS-SHLLINK 规定的做法。
+ *
+ * ASCII 那段必须留着（老解析器只认它），但没法表示中文时写一个空字符串，
+ * 真正的路径交给 Unicode 那段 —— Windows 会优先用 Unicode。
+ */
 function linkInfo(localBasePath) {
-  const lbp = Buffer.concat([Buffer.from(localBasePath, 'ascii'), Buffer.from([0])]);
-  const suffix = Buffer.from([0]);
+  const ascii = /^[\x20-\x7e]*$/.test(localBasePath) ? localBasePath : '';
+  const lbpAscii = Buffer.concat([Buffer.from(ascii, 'ascii'), Buffer.from([0])]);
+  const suffixAscii = Buffer.from([0]);
+  const lbpUni = Buffer.concat([Buffer.from(localBasePath, 'utf16le'), Buffer.from([0, 0])]);
+  const suffixUni = Buffer.from([0, 0]);
   const label = Buffer.alloc(0);
 
   const volumeIdSize = 16 + label.length + 1;
@@ -46,22 +58,33 @@ function linkInfo(localBasePath) {
     Buffer.from([0]),
   ]);
 
-  const volumeIdOff = 28;
-  const lbpOff = volumeIdOff + volumeId.length;
-  const suffixOff = lbpOff + lbp.length;
-  const total = suffixOff + suffix.length;
+  const HEADER = 0x24;      // 36：带 Unicode 偏移字段
+  const volumeIdOff = HEADER;
+  const lbpAsciiOff = volumeIdOff + volumeId.length;
+  const suffixAsciiOff = lbpAsciiOff + lbpAscii.length;
+
+  // UTF-16 字符串必须 2 字节对齐（相对 LinkInfo 起点）
+  const pad = (HEADER + volumeId.length + lbpAscii.length + suffixAscii.length) % 2;
+  const lbpUniOff = suffixAsciiOff + suffixAscii.length + pad;
+  const suffixUniOff = lbpUniOff + lbpUni.length;
+  const total = suffixUniOff + suffixUni.length;
 
   return Buffer.concat([
     u32(total),
-    u32(0x1c),              // LinkInfoHeaderSize
+    u32(HEADER),
     u32(0x00000001),        // VolumeIDAndLocalBasePath
     u32(volumeIdOff),
-    u32(lbpOff),
+    u32(lbpAsciiOff),
     u32(0),                 // 无 CommonNetworkRelativeLink
-    u32(suffixOff),
+    u32(suffixAsciiOff),
+    u32(lbpUniOff),
+    u32(suffixUniOff),
     volumeId,
-    lbp,
-    suffix,
+    lbpAscii,
+    suffixAscii,
+    Buffer.alloc(pad),
+    lbpUni,
+    suffixUni,
   ]);
 }
 

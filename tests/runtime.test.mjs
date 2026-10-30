@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createSafeServer, readBody, tokenMatches } from '../scripts/local-http.mjs';
-import { copyRuntime } from '../scripts/runtime-assets.mjs';
+import { copyRuntime, copyTree } from '../scripts/runtime-assets.mjs';
 import { loadConfig, saveConfig } from '../scripts/config.mjs';
 import { isUp } from '../scripts/ollama.mjs';
 import { handleStrata, runStrataAction } from '../scripts/strata.mjs';
@@ -43,7 +43,9 @@ test('newly installed flat runtime has a working console, presets and healthchec
   let child;
   try {
     copyRuntime(kit, root);
-    fs.cpSync(path.join(kit, 'ui'), path.join(root, 'ui'), { recursive: true });
+    // 不用 fs.cpSync：某些 Node 22 的 Windows 构建上它会直接把进程带走（0xC0000409），
+    // 连 try/catch 都拦不住。copyTree 是项目自己的实现。
+    copyTree(path.join(kit, 'ui'), path.join(root, 'ui'));
     const { readPresetStandard } = await import('file:///' + path.join(root, 'install.mjs').replaceAll('\\', '/'));
     assert.match(readPresetStandard(root), /compaction-basic/);
     assert.ok(fs.existsSync(path.join(root, 'healthcheck', 'golden.jsonl')));

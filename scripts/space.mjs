@@ -126,6 +126,10 @@ export function analyzeModelDir(dir) {
   const manifestRoot = path.join(dir, 'manifests');
   const used = new Set();
   const models = [];
+  // 每个 blob 被多少个模型引用。以前是先跑完上面这个循环，
+  // 再完整走一遍 walk + readManifest 重新统计 —— 同一批 manifest 被
+  // 遍历、读取、JSON.parse 两遍（几百个模型时是几百次多余的同步 IO）。
+  const refCount = new Map();
   if (fs.existsSync(manifestRoot)) {
     for (const file of walk(manifestRoot)) {
       const rel = path.relative(manifestRoot, file.path).split(path.sep);
@@ -140,7 +144,10 @@ export function analyzeModelDir(dir) {
       const label = namespace ? `${namespace}/${name}:${tag}` : `${name}:${tag}`;
       const layers = readManifest(file.path);
       const size = layers.reduce((n, l) => n + l.size, 0);
-      for (const l of layers) used.add(l.digest);
+      for (const l of layers) {
+        used.add(l.digest);
+        refCount.set(l.digest, (refCount.get(l.digest) || 0) + 1);
+      }
       models.push({
         name: label,
         sizeGB: round2(size / GB),
@@ -157,13 +164,6 @@ export function analyzeModelDir(dir) {
   /* ---- 哪些 blob 没被任何 manifest 引用 = 残留（下载中断 / 删模型没删干净） ---- */
   let orphan = 0;
   let shared = 0;
-  const refCount = new Map();
-  // 统计每个 blob 被多少个模型引用
-  for (const file of walk(manifestRoot)) {
-    for (const l of readManifest(file.path)) {
-      refCount.set(l.digest, (refCount.get(l.digest) || 0) + 1);
-    }
-  }
   for (const [digest, size] of blobSizes) {
     const count = refCount.get(digest) || 0;
     if (count === 0) orphan += size;

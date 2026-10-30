@@ -20,6 +20,24 @@ export function tokenMatches(value, expected) {
 }
 
 /**
+ * 探活：这个地址上有没有活着的服务。
+ *
+ * 和 `isUp()` 的区别是**401/403 也算活着**。dsh 工作台带 token 保护，
+ * 匿名 GET / 一定回 401 —— 那是「在监听并且在守门」，不是「没起来」。
+ *
+ * 这个区别很要紧：启动器以前用 isUp() 判断工作台，401 被当成没起来，
+ * 于是「重开启动器」会走到 ensureOllama() → 把正在给 dsh 供模型的 Ollama 杀掉重启，
+ * 再起第二个 dsh 撞 3080 端口。注释写着「不能重启正在用的 Ollama」，代码却正好反着做。
+ */
+export async function probeAlive(url, timeout = 3000) {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeout), redirect: 'error' });
+    if (response.ok) return true;
+    return response.status === 401 || response.status === 403;
+  } catch { return false; }
+}
+
+/**
  * 读请求体并解析成 JSON。
  *
  * 按 JSON 规范，application/json 应该是 UTF-8。但中文 Windows 生态里有些客户端

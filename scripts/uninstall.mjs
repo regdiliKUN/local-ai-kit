@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig } from './config.mjs';
 import { findDesktop } from './make-shortcuts.mjs';
 import { killOllama } from './ollama.mjs';
-import { freeSpaceGB } from './detect.mjs';
+import { freeSpaceGB, pidOnPort } from './detect.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const cfg = loadConfig(ROOT) || {};
@@ -50,16 +50,16 @@ function rmSafe(p) {
 
 function stopService() {
   log('[1/6] 停止服务…');
-  try {
-    const out = execSync('netstat -ano -p TCP', { encoding: 'utf8' });
-    for (const line of out.split(/\r?\n/)) {
-      const m = line.match(/^\s*TCP\s+127\.0\.0\.1:3080\s+\S+\s+LISTENING\s+(\d+)/);
-      if (m) {
-        execSync(`taskkill /PID ${m[1]} /T /F`, { stdio: 'ignore' });
-        log('      工作台已停止。');
-      }
-    }
-  } catch { /* 没在跑 */ }
+  // 以前这里只匹配 `127.0.0.1:3080`：开了局域网共享（监听 0.0.0.0）
+  // 或 dsh 走 IPv6（[::]）时匹配不到，进程留着 → 后面删安装目录失败 →
+  // 用户只得到一句「自动删除失败，请手动删除」。现在统一用 pidOnPort。
+  const dshPid = pidOnPort(3080);
+  if (dshPid) {
+    try {
+      execSync(`taskkill /PID ${dshPid} /T /F`, { stdio: 'ignore' });
+      log('      工作台已停止。');
+    } catch { /* 已经退出或没权限，继续往下走 */ }
+  }
   killOllama();
   log('      Ollama 已停止。');
 }

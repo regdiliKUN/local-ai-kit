@@ -19,6 +19,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { loadConfig, saveConfig, sanitizeConfig } from './config.mjs';
+// 版本号从 install.mjs 拿（它已经处理好「源码目录 / 平铺安装目录」两种布局）。
+// 以前这里是用正则去源码文本里抠 `KIT_VERSION = '...'`，
+// 而 install.mjs 早就改成从 package.json 读、不再是字面量赋值了，
+// 于是导出的包体里 kitVersion 恒为 null。
+import { KIT_VERSION } from './install.mjs';
 
 export const BUNDLE_VERSION = 1;
 const MAX_PROFILE_BYTES = 256 * 1024;
@@ -58,13 +63,7 @@ export function exportBundle(root, { dshHome } = {}) {
     kind: 'local-ai-kit/config-bundle',
     version: BUNDLE_VERSION,
     exportedAt: new Date().toISOString(),
-    kitVersion: (() => {
-      try {
-        const text = fs.readFileSync(path.join(root, 'scripts', 'install.mjs'), 'utf8');
-        const m = text.match(/KIT_VERSION\s*=\s*'([^']+)'/);
-        return m ? m[1] : null;
-      } catch { return null; }
-    })(),
+    kitVersion: KIT_VERSION === '0.0.0' ? null : KIT_VERSION,
     config: sanitizeConfig(config),
     profiles: {
       web: readProfile(home, 'web'),

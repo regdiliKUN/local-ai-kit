@@ -132,7 +132,6 @@ const DICT = {
   '聊两句': 'Chat',
   '备份配置': 'Back up config',
   '导出报告': 'Export report',
-  '空��': 'Idle',
   '其它程序': 'Other programs',
   '模型权重': 'Model weights',
   'KV cache': 'KV cache',

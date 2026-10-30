@@ -8,12 +8,13 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const kit = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const scriptsDir = path.join(kit, 'scripts');
-const { SCRIPT_FILES } = await import(pathToFileURL(path.join(scriptsDir, 'runtime-assets.mjs')).href);
+const { SCRIPT_FILES, copyRuntime } = await import(pathToFileURL(path.join(scriptsDir, 'runtime-assets.mjs')).href);
 
 /** 抓一个文件里所有 `from './xxx.mjs'` 的引用 */
 function localImports(file) {
@@ -68,4 +69,20 @@ test('部署清单是纯平铺的（不能带子目录）', () => {
   // copyRuntime 用的是 path.join(root, file)，带子目录会直接抛错
   const nested = SCRIPT_FILES.filter((f) => f.includes('/') || f.includes('\\'));
   assert.deepEqual(nested, [], `清单里不能有子目录：${nested.join(', ')}`);
+});
+
+test('平铺安装之后版本号读得到（package.json 要跟着走）', async () => {
+  // 安装目录里 .mjs 是平铺的，install.mjs 的 KIT_VERSION 靠同级的 package.json。
+  // 少了这份文件，版本号恒为 0.0.0 → 控制台每次都提示「有新版本」。
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'localai-flat-'));
+  try {
+    copyRuntime(kit, root);
+    assert.ok(fs.existsSync(path.join(root, 'package.json')), 'package.json 没被复制过去');
+    const pkg = JSON.parse(fs.readFileSync(path.join(kit, 'package.json'), 'utf8'));
+    // 在平铺目录里真的加载一次 install.mjs，看它读出来的版本号对不对
+    const mod = await import(pathToFileURL(path.join(root, 'install.mjs')).href + `?v=${Date.now()}`);
+    assert.equal(mod.KIT_VERSION, pkg.version, '平铺安装后 KIT_VERSION 应等于 package.json 的版本');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

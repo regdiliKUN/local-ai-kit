@@ -28,11 +28,20 @@ export function validateStrataConfig(cfg) {
   return cfg;
 }
 
+/**
+ * 探活。
+ *
+ * dsh 工作台带 token 保护，匿名 GET / 一定回 401 —— 那是「活着并且在守门」，
+ * 不是「没起来」。以前一律按 not ok 判掉，控制台永远显示「未就绪」，
+ * 用户点「启动工作台」看见没反应就反复点，其实服务早就起来了。
+ * 401/403 说明进程在监听且身份校验生效，就算在线。
+ */
 async function probe(url) {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(1800), redirect: 'error' });
-    if (!response.ok) return { online: false, error: `HTTP ${response.status}` };
-    return { online: true };
+    if (response.ok) return { online: true };
+    if (response.status === 401 || response.status === 403) return { online: true, authRequired: true };
+    return { online: false, error: `HTTP ${response.status}` };
   } catch { return { online: false, error: '服务未启动或尚未就绪' }; }
 }
 
@@ -70,11 +79,14 @@ export function runStrataAction(cfg, action, { dryRun = false } = {}) {
     child.stderr.on('data', (chunk) => { err += chunk.toString('utf8'); });
     // 超时给得宽松些：PowerShell 脚本要核验脚本路径、按端口找进程、逐个停，
     // 机器负载高的时候 20 秒可能不够。宁可多等，也不要让用户以为「没反应」。
-    const timer = setTimeout(() => { child.kill(); reject(new Error('服务操作超时，请查看日志')); }, 60000);
+    // 冷启动引擎时，脚本拉起的常驻进程（引擎 / dsh）会继承本进程的 stdout 管道，
+    // 导致 'close' 事件一直不触发 —— 所以这里用 'exit'（进程退出即算完），
+    // 不要等 stdio 管道关闭，否则前端会卡满 60 秒才报「超时」，其实服务早起来了。
+    const timer = setTimeout(() => { child.kill(); reject(new Error('服务操作超时，请查看日志')); }, 90000);
     child.on('error', (error) => { clearTimeout(timer); reject(error); });
-    child.on('close', (code) => {
+    child.on('exit', (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(err.trim() || '服务操作失败'));
+      if (code !== 0 && code !== null) return reject(new Error(err.trim() || '服务操作失败'));
       try { resolve(JSON.parse(out.replace(/^\uFEFF/, '').trim())); }
       catch { reject(new Error('无法读取服务操作结果')); }
     });
@@ -94,17 +106,14 @@ function json(res, code, value) {
  * Strata 的服务状态作为一个额外的信息源并进来。
  */
 
-/** 找出占用某个端口的进程号（0.0.0.0 / :: / 127.0.0.1 都算） */
-export function pidOnPort(port) {
-  try {
-    const out = execSync('netstat -ano -p TCP', { encoding: 'utf8' });
-    for (const line of out.split(/\r?\n/)) {
-      const m = line.match(/^\s*TCP\s+(?:0\.0\.0\.0|\[::\]|[\d.]+):(\d+)\s+\S+\s+LISTENING\s+(\d+)/);
-      if (m && Number(m[1]) === port) return Number(m[2]);
-    }
-  } catch { /* ignore */ }
-  return null;
-}
+/**
+ * 端口 → 进程号。
+ *
+ * 这里以前有一份自己的实现，但 `execSync` 根本没 import ——
+ * 调用时抛 ReferenceError，又被 `catch {}` 静默吞掉，于是**永远返回 null**。
+ * 现在统一用 detect.mjs 里那一份（那边正则也更宽松，认 0.0.0.0 / [::]）。
+ */
+export { pidOnPort } from './detect.mjs';
 
 export async function handleStrata(req, res, { cfg, root, ui, token, metrics }) {
   const pathname = new URL(req.url, 'http://127.0.0.1').pathname;

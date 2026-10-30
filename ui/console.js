@@ -3885,17 +3885,29 @@ function setupButtons() {
   $('lanCancel').addEventListener('click', () => { $('lanWarn').hidden = true; });
   $('lanOk').addEventListener('click', () => applyLan(true));
 
+  /*
+   * 设置页的「启动工作台 / 停止服务」要按当前部署分流：
+   * Strata 部署下 /api/service 会被后端挡掉（409「服务启停请用服务页」），
+   * 点了必然没反应。这里直接改走 /api/strata/service，两种部署都能用。
+   */
+  const svcApi = () => (state && state.strata ? '/api/strata/service' : '/api/service');
+  const svcPayload = (action) => (state && state.strata ? { action } : { action });
+
   $('btnStartSvc').addEventListener('click', async () => {
+    const btn = $('btnStartSvc');
+    btn.disabled = true;
     try {
-      const r = await post('/api/service', { action: 'start' });
-      if (!r.ok) throw new Error(r.error || '启动失败');
-      $('svcHint').textContent = '已经启动 —— 看新弹出的黑色窗口，浏览器会自动打开工作台。';
+      const r = await post(svcApi(), svcPayload('workbench'));
+      if (r && r.ok === false) throw new Error(r.error || '启动失败');
+      $('svcHint').textContent = '已下发启动。首次启动引擎要加载模型，等十几秒后点「刷新状态」看结果。';
+      setTimeout(() => loadState().catch(() => {}), 1500);
     } catch (e) { toast(e.message); }
+    btn.disabled = false;
   });
 
   $('btnStopSvc').addEventListener('click', async () => {
     try {
-      await post('/api/service', { action: 'stop' });
+      await post(svcApi(), svcPayload('stop'));
       $('svcHint').textContent = '已停止服务，显存已经还给游戏和渲染软件。';
       setTimeout(loadState, 800);
     } catch (e) { toast(e.message); }

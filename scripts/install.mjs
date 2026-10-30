@@ -32,12 +32,13 @@ import { spawn, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { createShortcuts, findDesktop } from './make-shortcuts.mjs';
-import { mergeConfig } from './config.mjs';
+import { mergeConfig, loadConfig } from './config.mjs';
 import {
   isUp, servesDir, killOllama, spawnServe, waitUp, ollamaEnv, persistOllamaVars, modelCapabilities,
   hasModel, OLLAMA_BASE,
 } from './ollama.mjs';
 import { modelInfo } from './models.mjs';
+import { CMD_ENTRIES } from './cmd-entries.mjs';
 import { toLines, seqItemRange, spliceSeqItem, spliceMapKey, insertUnderMapKey } from './yamlpatch.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -193,6 +194,22 @@ function pullViaCli(exe, model, modelDir, emit, tracker, envOverride) {
     const env = envOverride || ollamaEnv({ modelDir });
     const child = spawn(exe, ['pull', model], { env, windowsHide: true });
 
+    // 没有超时的后果：网络半断（TCP 不发 FIN）时 `ollama pull` 可以挂几十分钟，
+    // 向导界面停在一个百分比一动不动，用户除了关窗口没别的办法 ——
+    // 而关窗口时下载还在后台跑。30 分钟足够下完 100GB 级的模型。
+    let settled = false;
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch { /* 已经退出 */ }
+      finish(() => reject(new Error('下载超时（30 分钟没有进展），已中止。请检查网络后重试。')));
+    }, 30 * 60 * 1000);
+    if (typeof timer.unref === 'function') timer.unref();
+    const finish = (fn) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+
     let buf = '';
     const handle = (chunk) => {
       buf += chunk.toString();
@@ -212,8 +229,8 @@ function pullViaCli(exe, model, modelDir, emit, tracker, envOverride) {
 
     child.stdout.on('data', handle);
     child.stderr.on('data', handle);
-    child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ollama pull 退出码 ${code}`))));
-    child.on('error', reject);
+    child.on('exit', (code) => finish(() => (code === 0 ? resolve() : reject(new Error(`ollama pull 退出码 ${code}`)))));
+    child.on('error', (e) => finish(() => reject(e)));
   });
 }
 
@@ -226,46 +243,6 @@ function normPath(p) {
   return String(p).replace(/\//g, '\\').replace(/\\{2,}/g, '\\');
 }
 
-
-
-/**
- * 安装目录里的 .cmd 入口。内容必须是纯 ASCII + CRLF。
- * 优先用安装目录里自带的 node（用便携 Node 安装时会复制一份过来），否则用 PATH 里的。
- */
-const cmdEntry = (title, script) => `@echo off
-chcp 65001 >nul
-set NODE_OPTIONS=
-title ${title}
-set "NODE_EXE=node"
-if exist "%~dp0node\\node.exe" set "NODE_EXE=%~dp0node\\node.exe"
-echo.
-"%NODE_EXE%" "%~dp0${script}"
-echo.
-pause
-`.replace(/\n/g, '\r\n');
-
-/**
- * 卸载入口必须**先切到临时目录**再跑 node：
- * 卸载的最后一步要删掉安装目录本身，如果当前目录还在里面，Windows 会拒绝删除。
- */
-const uninstallEntry = `@echo off
-set NODE_OPTIONS=
-title Uninstall Local AI
-cd /d "%TEMP%"
-set "NODE_EXE=node"
-if exist "%~dp0node\\node.exe" set "NODE_EXE=%~dp0node\\node.exe"
-"%NODE_EXE%" "%~dp0uninstall.mjs"
-echo.
-pause
-`.replace(/\n/g, '\r\n');
-
-export const CMD_ENTRIES = {
-  'start-ai.cmd': cmdEntry('Local AI Workspace', 'start-local-ai.mjs'),
-  'stop-ai.cmd': cmdEntry('Stop Local AI', 'stop-local-ai.mjs'),
-  '控制台.cmd': cmdEntry('Local AI Console', 'console.mjs'),
-  '卸载.cmd': uninstallEntry,
-  '重建桌面图标.cmd': cmdEntry('Rebuild Desktop Shortcuts', 'make-shortcuts.mjs'),
-};
 
 /** 当前 node 是否在 PATH 里（不在 = 用的是部署包自带的便携 Node） */
 function nodeOnPath() {
@@ -650,12 +627,21 @@ const GENERATED_MARK = '# 由本地 AI 安装向导生成';
  *
  * 从 package.json 读而不是写死：之前这里硬编码 '1.5.0'，
  * 而 package.json 已经到 1.6.x，诊断包里报的版本和实际发版号对不上。
+ *
+ * 两个路径都要试，因为存在两种布局：
+ *   - 源码目录：scripts/install.mjs → 上一级的 package.json
+ *   - 安装目录：所有 .mjs 平铺在根目录（copyRuntime 复制的）→ 同级的 package.json
+ * 只认 `../` 的话，装完之后这里读不到文件，版本号恒为 0.0.0，
+ * 于是控制台永远提示「有新版本」。
  */
 export const KIT_VERSION = (() => {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-    return String(pkg.version || '0.0.0');
-  } catch { return '0.0.0'; }
+  for (const rel of ['./package.json', '../package.json']) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'));
+      if (pkg && pkg.version) return String(pkg.version);
+    } catch { /* 换个位置再试 */ }
+  }
+  return '0.0.0';
 })();
 
 /* ------------------------------------------------- dsh 配置块（未缩进） */
@@ -927,12 +913,18 @@ async function stepConfig(opts, emit) {
     const presetText = readPresetStandard(kitDir);
     if (!presetText) emit({ type: 'log', text: '! 没找到 preset-standard 副本，跳过长对话优化' });
 
+    // 用户在控制台里手调过的输出预算要带上。
+    // 不传 budgets 的话 patchProfileText 会按窗口重新推导（窗口/4），
+    // 于是「控制台调好 → 重跑一次向导修别的问题 → 输出上限被打回默认」。
+    // repair.mjs 那边一直是带 budgets 的，这里对齐。
+    const budgets = resolveBudgets(loadConfig(root) || {});
+
     for (const profile of ['web', 'headless']) {
       const dir = path.join(home, 'profiles', profile);
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, 'cordis.patch.yml');
       const prev = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-      const { text, notes } = patchProfileText(prev, { profile, model, contextWindow, input, presetText });
+      const { text, notes } = patchProfileText(prev, { profile, model, contextWindow, input, presetText, budgets });
       if (prev && prev !== text) backupProfile(file, emit);
       if (prev !== text) {
         fs.writeFileSync(file, text, 'utf8');

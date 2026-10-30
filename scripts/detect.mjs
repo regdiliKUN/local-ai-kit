@@ -37,6 +37,19 @@ async function fetchJson(url, timeout = 4000) {
 /* ---------------------------------------------------------------- 各项检测 */
 
 /**
+ * 取一份 netstat 全表。
+ *
+ * 一次 netstat 要几百毫秒（要枚举所有连接），要查好几个端口时**只跑一次**，
+ * 把文本传进 pidOnPort 的第二个参数。修复中心的「检查端口」以前每个端口跑一次，
+ * 两个端口就是两次全表扫描。
+ *
+ * @returns {string} 失败时返回空串（调用方不必再判断 null）
+ */
+export function readNetstat() {
+  try { return execSync('netstat -ano -p TCP', { encoding: 'utf8', timeout: 15000 }) || ''; } catch { return ''; }
+}
+
+/**
  * 查某个端口被哪个进程占着。
  *
  * 不能只认 127.0.0.1：Ollama 开了局域网共享会监听 0.0.0.0，
@@ -45,10 +58,8 @@ async function fetchJson(url, timeout = 4000) {
  */
 export function pidOnPort(port, netstatText) {
   let out = netstatText;
-  if (out === undefined) {
-    try { out = execSync('netstat -ano -p TCP', { encoding: 'utf8' }); } catch { return null; }
-  }
-  for (const line of String(out).split(/\r?\n/)) {
+  if (out === undefined) out = readNetstat();
+  for (const line of String(out || '').split(/\r?\n/)) {
     // 地址可能是 127.0.0.1 / 0.0.0.0 / [::] / [::1]，统一只关心端口号
     const m = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)/i);
     if (m && Number(m[1]) === Number(port)) return Number(m[2]);
@@ -152,7 +163,18 @@ export function detectSystem() {
   };
 }
 
-export function detectDisks() {  const out = [];
+/** 磁盘列表缓存：/api/state 每 5 秒被轮询一次，每次都从 C: 扫到 Z: 是 24 次同步系统调用 */
+let disksCache = { at: 0, data: null };
+const DISKS_TTL = 30000;
+
+/**
+ * 列出所有存在的盘及其容量。
+ *
+ * @param {{ force?: boolean }} [opts] force=true 时跳过缓存（安装前的空间预检要用实时值）
+ */
+export function detectDisks({ force = false } = {}) {
+  if (!force && disksCache.data && Date.now() - disksCache.at < DISKS_TTL) return disksCache.data;
+  const out = [];
   for (let c = 67; c <= 90; c++) {
     const letter = String.fromCharCode(c);
     const root = `${letter}:\\`;
@@ -163,6 +185,7 @@ export function detectDisks() {  const out = [];
       if (totalGB > 0) out.push({ letter, root, freeGB, totalGB });
     } catch { /* 盘不存在 */ }
   }
+  disksCache = { at: Date.now(), data: out };
   return out;
 }
 

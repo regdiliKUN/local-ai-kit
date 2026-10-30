@@ -29,7 +29,9 @@ export function summarize(final) {
   const evalCount = Number(final.eval_count) || 0;
   const promptCount = Number(final.prompt_eval_count) || 0;
   const evalNs = Number(final.eval_duration) || 0;
-  const promptNs = Number(final.prompt_eval_count != null ? final.total_duration : 0) || 0;
+  // 分母必须是「读提示词」的时间。用 total_duration 会把生成时间也算进去，
+  // 算出来的读速比真实值低一个数量级（bench.mjs 一直用的是 prompt_eval_duration）
+  const promptNs = Number(final.prompt_eval_duration) || 0;
   return {
     tokens: evalCount,
     promptTokens: promptCount,

@@ -18,6 +18,15 @@ __pycache__/
 node_modules/
 .cache/
 
+# 安装目录里才会生成的 .cmd 入口
+# （在源码目录里是「重建桌面图标」时补出来的，属于运行期产物，不提交。
+#   仓库自带的「① 双击这里开始安装.cmd」和「备用-命令行安装.cmd」是原始入口，必须留着）
+start-ai.cmd
+stop-ai.cmd
+控制台.cmd
+重建桌面图标.cmd
+卸载.cmd
+
 # 系统文件
 Thumbs.db
 desktop.ini

@@ -21,6 +21,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, deploymentRoot } from './config.mjs';
 import { runStrataAction } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp } from './ollama.mjs';
+// 工作台带 token 保护，匿名请求回 401 —— 那是在守门，不是没起来。
+// isUp() 只认 2xx，拿它判断 dsh 会把活着的服务当成挂了（详见 local-http.mjs 的说明）。
+import { probeAlive } from './local-http.mjs';
 
 const ROOT = deploymentRoot(path.dirname(fileURLToPath(import.meta.url)));
 const DSH_BASE = 'http://127.0.0.1:3080';
@@ -296,7 +299,7 @@ if (isDirectRun) {
 
     (async () => {
       // Reopening the launcher must not restart Ollama under a live dsh session.
-      if (await isUp(DSH_BASE)) {
+      if (await probeAlive(DSH_BASE)) {
         log('工作台已在运行，正在打开浏览器。');
         openBrowser(DSH_BASE);
         return;
@@ -305,7 +308,7 @@ if (isDirectRun) {
       await precheckModel();
       if (!(await warmUp())) log('      工作台仍会启动，但对话前需要先解决上面的问题。');
 
-      if (await isUp(DSH_BASE)) {
+      if (await probeAlive(DSH_BASE)) {
         log('[3/3] DeepSeek Harness');
         log('      已在运行，直接打开浏览器。');
         log();
