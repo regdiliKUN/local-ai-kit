@@ -33,7 +33,15 @@ const KIT_SKIP = new Set([
   '.git', '.smoke', 'node_modules', 'node', 'release',
   'dsh-runtime', '__pycache__', 'check_out', 'probe_out',
 ]);
-const KIT_SKIP_FILE = /^(配置\.json(\..*)?|使用记录\.json|出字快测\.json|.*\.(bak|tmp|zip|log))$/;
+/**
+ * 项目本体里不该进快照的东西。
+ *
+ * `.gitattributes` 必须排除：它一旦落进快照里的 local-ai-kit/ 目录，
+ * 就会被 git 当成「嵌套属性文件」，反过来覆盖根目录那条 release/** -text ——
+ * 于是包体又走回换行符规范化，整份快照变成假 diff，校验清单也失效。
+ * 离线包里本来也没有这个文件（package-offline 的清单里没有它）。
+ */
+const KIT_SKIP_FILE = /^(配置\.json(\..*)?|使用记录\.json|出字快测\.json|\.gitattributes|.*\.(bak|tmp|zip|log))$/;
 
 function sha256(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
