@@ -9,3 +9,8 @@
 
 *.ico binary
 *.png binary
+
+# release/ 是可运行包体的原样快照，必须按字节存取。
+# 交给 text=auto 处理的话：仓库里存的是 CRLF，检出时又按 autocrlf 转一遍，
+# 结果 git 会认为整份包体都被改过（假 diff），release 里的 SHA256 清单也没法验证。
+release/** -text
