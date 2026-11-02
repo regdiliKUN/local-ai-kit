@@ -756,6 +756,23 @@
       </div>
       <p class="row-hint" id="svcHint">「启动工作台」等于双击桌面上的「启动本地AI」。</p>
 
+      <div class="progress-wrap startup" id="startWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="startTitle">启动工作台</span>
+          <span class="progress-pct" id="startPct">0%</span>
+        </div>
+        <div class="progress" id="startTrack" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="startTitle">
+          <div class="bar" id="startBar"></div>
+        </div>
+        <div class="progress-stats">
+          <div class="stat"><span class="k">阶段</span><span class="v" id="startPhase">—</span></div>
+          <div class="stat"><span class="k">已用时</span><span class="v" id="startElapsed">0.0s</span></div>
+          <div class="stat"><span class="k">预计剩余</span><span class="v" id="startEta">—</span></div>
+        </div>
+        <p class="startup-note" id="startNote"></p>
+      </div>
+
       <h2 class="sec-h">快捷入口</h2>
       <div class="row-actions">
         <button class="btn ghost small" id="btnOpenInstall">打开安装目录</button>

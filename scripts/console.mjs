@@ -22,7 +22,7 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
-import { strataState, runStrataAction, handleStrata } from './strata.mjs';
+import { strataState, runStrataAction, handleStrata, startupProgress } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem, pidOnPort, detectGpu } from './detect.mjs';
 import { CONTEXT_OPTIONS, contextFit } from './models.mjs';
@@ -937,6 +937,11 @@ const server = createSafeServer(async (req, res) => {
   if (cfg.backend === 'strata') {
     if (p === '/api/strata/state' && req.method === 'GET') {
       return json(res, 200, await strataState(cfg));
+    }
+    // 启动进度：单独一条 lightweight 接口，页面 500ms 轮询它。
+    // 不塞进 /api/state 是因为后者要探三个端口还要读日志，两秒一次刚好，五百毫秒一次太重。
+    if (p === '/api/strata/progress' && req.method === 'GET') {
+      return json(res, 200, await startupProgress(cfg));
     }
     if (p === '/api/strata/service' && req.method === 'POST') {
       // 必须自己加锁：strata.mjs 里那个 operation 互斥只存在于 handleStrata，

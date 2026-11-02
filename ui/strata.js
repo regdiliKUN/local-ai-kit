@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let loading = false;
 let pending = false;
+let state_enginePort = 8080, state_webPort = 8090, state_dshPort = 3080;
 
 async function refresh() {
   if (loading) return;
@@ -9,6 +10,9 @@ async function refresh() {
     const response = await fetch('/api/state');
     if (!response.ok) throw new Error('状态读取失败');
     const state = await response.json();
+    state_enginePort = state.ports.engine;
+    state_webPort = state.ports.webui;
+    state_dshPort = state.ports.dsh;
     for (const name of ['engine', 'webui', 'dsh']) {
       const service = state[name];
       $(name + '-status').textContent = service.online ? '● 运行中 · :' + state.ports[name] : '○ 未就绪 · :' + state.ports[name];
@@ -36,7 +40,16 @@ for (const button of document.querySelectorAll('[data-action]')) {
         body: JSON.stringify({ action: button.dataset.action }) });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || '部分进程未能停止，请检查是否属于当前部署');
-      message(button.dataset.action === 'stop' ? '服务已停止。' : result.alreadyRunning ? '服务已在运行，点击卡片上的入口即可打开。' : '启动请求已提交。模型加载需要时间，服务就绪后状态会自动更新。');
+      if (button.dataset.action === 'stop') {
+        message('服务已停止。');
+      } else if (result.alreadyRunning) {
+        message('服务已在运行，正在打开工作台…');
+        // 直接打开对应入口，不用让用户再去找链接
+        const port = button.dataset.action === 'workbench' ? state_dshPort : button.dataset.action === 'webui' ? state_webPort : state_enginePort;
+        if (port) window.open('http://127.0.0.1:' + port + '/', '_blank');
+      } else {
+        message('启动请求已提交。模型加载需要时间，服务就绪后状态会自动更新。');
+      }
     } catch (error) { message(error.message, true); }
     finally {
       pending = false;

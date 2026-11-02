@@ -25,6 +25,8 @@ export const SCRIPT_FILES = [
   'probe.mjs',
   // v1.10.1 新增（.cmd 入口模板，快捷方式要靠它）
   'cmd-entries.mjs',
+  // v1.11.1 新增（启动进度模型，strata.mjs 直接 import 它）
+  'progress.mjs',
 ];
 
 /**

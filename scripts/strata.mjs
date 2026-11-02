@@ -5,11 +5,20 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readBody, resolveStaticPath, applySecurityHeaders } from './local-http.mjs';
 import { tailBytes } from './store.mjs';
+import { computeStartupProgress, parseStartupMarkers } from './progress.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let operation = null;
 let lastStart = 0;
 let lastStop = 0;
+
+/**
+ * 本次启动任务的状态。null 表示没有正在进行的启动。
+ *
+ * startedAt 是唯一的真实时钟：进度条上的「已用时」、日志起点、阶段插值都以它为准，
+ * 所以它必须在请求刚进来时就落下，而不是等 PowerShell 跑完。
+ */
+let startupJob = null;
 
 export function validateStrataConfig(cfg) {
   for (const key of ['deploymentRoot', 'strataHome', 'dshDir']) {
@@ -69,11 +78,148 @@ export async function strataState(cfg) {
     ports: { engine: cfg.enginePort, webui: cfg.webPort, dsh: cfg.dshPort } };
 }
 
-export function runStrataAction(cfg, action, { dryRun = false } = {}) {
+/* --------------------------------------------------------------- 启动进度 */
+
+/** 引擎启动日志；里程碑与失败原因都从它尾部读 */
+function startupLogPath(cfg) {
+  return path.join(cfg.deploymentRoot, 'logs', 'kit-engine.stdout.log');
+}
+
+/**
+ * 只读「本次启动之后」写入的那部分日志。
+ *
+ * 为什么要按字节切：这个文件是追加写的，上一次启动留下的 `ready: http://` 还在里面。
+ * 如果直接 tail 8KB，用户刚点完启动就会看到「只剩界面没起」的假进度，
+ * 而引擎其实还在读权重。所以记下启动那一刻的文件长度，只看之后的增量；
+ * 文件比启动时还短说明被截断重写了，那就整体当成本次的日志。
+ */
+function readStartupLog(cfg, sinceBytes) {
+  const file = startupLogPath(cfg);
+  try {
+    const size = fs.statSync(file).size;
+    if (!Number.isFinite(sinceBytes) || size < sinceBytes) return tailBytes(file, 64 * 1024);
+    if (size === sinceBytes) return '';
+    return tailBytes(file, size - sinceBytes);
+  } catch {
+    return '';
+  }
+}
+
+/** 启动那一刻的日志长度，作为「本次启动」的起点 */
+function startupLogSize(cfg) {
+  try {
+    return fs.statSync(startupLogPath(cfg)).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * 进度查询接口的实现。
+ *
+ * 三个信号并行取：引擎健康、界面端口、日志里程碑。任何一个慢都不该拖住整个响应 ——
+ * 这个接口会被 500ms 轮询一次，它自己卡住就等于进度条卡住。
+ */
+export async function startupProgress(cfg) {
+  if (!startupJob) return { active: false };
+  const now = Date.now();
+  // 完成超过一分钟就当作已经结束：否则每次打开控制台都会看到一条 100% 的旧进度
+  if (startupJob.doneAt && now - startupJob.doneAt > 60000) {
+    startupJob = null;
+    return { active: false };
+  }
+  const [engine, dsh] = await Promise.all([
+    probe(`http://127.0.0.1:${cfg.enginePort}/health`),
+    probe(`http://127.0.0.1:${cfg.dshPort}/`),
+  ]);
+  const markers = parseStartupMarkers(readStartupLog(cfg, startupJob.logBytes));
+
+  // 超过 5 分钟还没就绪，就不再假装在启动了：卡住的进度条比明确的失败更让人抓狂
+  const stalled = now - startupJob.startedAt > 5 * 60 * 1000 && !(engine.online && dsh.online);
+  if (stalled && !startupJob.error) {
+    startupJob.error = '启动超时（5 分钟仍未就绪），请查看 logs/kit-engine.stdout.log';
+  }
+
+  const progress = computeStartupProgress({
+    startedAt: startupJob.startedAt,
+    now,
+    engineOnline: engine.online,
+    dshOnline: dsh.online,
+    markers,
+    error: startupJob.error,
+    lastPercent: startupJob.lastPercent,
+  });
+
+  // 记住最高水位：轮询间隔内算出的值只能往前走
+  startupJob.lastPercent = Math.max(startupJob.lastPercent, progress.percent);
+  if (progress.done && !startupJob.doneAt) startupJob.doneAt = now;
+
+  return { active: true, action: startupJob.action, ...progress, startedAt: startupJob.startedAt };
+}
+
+/**
+ * 快速探活：当目标服务已在线时，直接返回"已在运行"，跳过 PowerShell + WMI 的数秒开销。
+ *
+ * 背景：用户点「启动工作台」时，即使引擎和 DSH 都已在运行，原来也要等
+ * strata-process.ps1 跑完一轮 PowerShell 冷启动 + Get-CimInstance WMI 查询
+ * （约 5-8 秒）才返回 alreadyRunning。这里在 Node.js 层先探一下端口：
+ * 如果目标服务已经活着，直接返回，省掉整个 PowerShell 流程。
+ */
+async function quickProbe(cfg, action) {
+  if (action === 'stop') return null; // 停服务不走快速路径
+  if (action === 'engine') {
+    const r = await probe(`http://127.0.0.1:${cfg.enginePort}/health`);
+    if (r.online) return { ok: true, accepted: true, alreadyRunning: true };
+    return null;
+  }
+  if (action === 'webui') {
+    // WebUI 依赖引擎，两个都要在线才算"已在运行"
+    const [engine, webui] = await Promise.all([
+      probe(`http://127.0.0.1:${cfg.enginePort}/health`),
+      probe(`http://127.0.0.1:${cfg.webPort}/api/health`),
+    ]);
+    if (engine.online && webui.online) return { ok: true, accepted: true, alreadyRunning: true };
+    return null;
+  }
+  if (action === 'workbench') {
+    // workbench = 引擎 + DSH。两者都在线才算"已在运行"
+    const [engine, dsh] = await Promise.all([
+      probe(`http://127.0.0.1:${cfg.enginePort}/health`),
+      probe(`http://127.0.0.1:${cfg.dshPort}/`),
+    ]);
+    if (engine.online && dsh.online) return { ok: true, accepted: true, alreadyRunning: true };
+    return null;
+  }
+  return null;
+}
+
+export async function runStrataAction(cfg, action, { dryRun = false } = {}) {
   validateStrataConfig(cfg);
   if (!['engine', 'webui', 'workbench', 'stop'].includes(action)) throw new Error('未知操作');
+
+  // 进度计时从这里开始 —— 不是等 PowerShell 跑完。用户点完按钮到进度条动起来之间
+  // 的几百毫秒，正好用来把日志起点和开始时间钉住。
+  if (action === 'stop') {
+    startupJob = null;
+  } else if (!dryRun) {
+    startupJob = {
+      action,
+      startedAt: Date.now(),
+      logBytes: startupLogSize(cfg),
+      lastPercent: 0,
+      error: null,
+      doneAt: null,
+    };
+  }
+
+  // 快速路径：服务已在线时跳过 PowerShell，省 5-8 秒 WMI 开销
+  if (!dryRun) {
+    const quick = await quickProbe(cfg, action);
+    if (quick) return quick;
+  }
+
   const payload = Buffer.from(JSON.stringify({ ...cfg, action, dryRun, nodeExe: process.execPath })).toString('base64');
-  return new Promise((resolve, reject) => {
+  const task = new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       path.join(HERE, 'strata-process.ps1'), '-Payload', payload],
     { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -93,6 +239,14 @@ export function runStrataAction(cfg, action, { dryRun = false } = {}) {
       try { resolve(JSON.parse(out.replace(/^\uFEFF/, '').trim())); }
       catch { reject(new Error('无法读取服务操作结果')); }
     });
+  });
+
+  // 失败原因要落到进度里：否则进度条只能停在半路，用户不知道是显存不够还是脚本崩了
+  return task.catch((error) => {
+    if (startupJob && startupJob.action === action) {
+      startupJob.error = String((error && error.message) || error);
+    }
+    throw error;
   });
 }
 
@@ -121,6 +275,7 @@ export { pidOnPort } from './detect.mjs';
 export async function handleStrata(req, res, { cfg, root, ui, token, metrics }) {
   const pathname = new URL(req.url, 'http://127.0.0.1').pathname;
   if (pathname === '/api/state' && req.method === 'GET') return json(res, 200, await strataState(cfg));
+  if (pathname === '/api/progress' && req.method === 'GET') return json(res, 200, await startupProgress(cfg));
   if (pathname === '/api/service' && req.method === 'POST') {
     const { action } = await readBody(req);
     if (!['engine', 'webui', 'workbench', 'stop'].includes(action)) return json(res, 400, { error: '未知操作' });

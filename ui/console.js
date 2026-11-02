@@ -4187,6 +4187,119 @@ function setupButtons() {
   $('lanCancel').addEventListener('click', () => { $('lanWarn').hidden = true; });
   $('lanOk').addEventListener('click', () => applyLan(true));
 
+  /* -------------------------------------------------------- 启动进度条 */
+  /**
+   * 「启动工作台」的实时进度。
+   *
+   * 数字全部由后端算（引擎健康 + 界面端口 + 引擎日志里程碑），前端只画不猜：
+   * 没有定时器假进度，所以不会出现「冲到 99% 然后卡住」那种最招人反复点按钮的画面。
+   * 500ms 轮询配合 CSS 的 0.5s 线性过渡，视觉上是一条连续爬升的线。
+   */
+  const startupBar = (() => {
+    const wrap = $('startWrap');
+    let timer = null;
+    let hideTimer = null;
+    let percent = 0;
+
+    const fmtS = (ms) => `${((ms || 0) / 1000).toFixed(1)}s`;
+
+    function stopPolling() {
+      clearTimeout(timer);
+      timer = null;
+    }
+
+    function reset() {
+      stopPolling();
+      clearTimeout(hideTimer);
+      hideTimer = null;
+      percent = 0;
+      if (!wrap) return;
+      wrap.hidden = false;
+      wrap.classList.remove('done', 'failed');
+      $('startBar').style.width = '0%';
+      $('startPct').textContent = '0%';
+      $('startTrack').setAttribute('aria-valuenow', '0');
+      $('startTitle').textContent = '启动工作台';
+      $('startPhase').textContent = '—';
+      $('startElapsed').textContent = '0.0s';
+      $('startEta').textContent = '—';
+      $('startNote').textContent = '';
+      $('startNote').className = 'startup-note';
+    }
+
+    function hide() {
+      stopPolling();
+      if (wrap) wrap.hidden = true;
+    }
+
+    function paint(p) {
+      if (!wrap) return;
+      const pct = Math.max(0, Math.min(100, Math.round(p.percent || 0)));
+      percent = Math.max(percent, pct);            // 只进不退：轮询抖动也不会让数字往回跳
+      $('startBar').style.width = `${percent}%`;
+      $('startPct').textContent = `${percent}%`;
+      $('startTrack').setAttribute('aria-valuenow', String(percent));
+      $('startTitle').textContent = p.title || '启动工作台';
+      $('startPhase').textContent = p.phase || '—';
+      $('startElapsed').textContent = fmtS(p.elapsedMs);
+      $('startEta').textContent = p.done ? '0s' : (p.etaSeconds > 0 ? `≈${p.etaSeconds}s` : '—');
+      $('startNote').textContent = p.detail || '';
+
+      if (p.done) {
+        wrap.classList.add('done');
+        $('startNote').className = 'startup-note ok';
+        $('startEta').textContent = '0s';
+        stopPolling();
+        // 完成状态停留 12 秒再收起，给用户一个明确的「结束了」的落点
+        hideTimer = setTimeout(hide, 12000);
+        loadState().catch(() => {});
+      } else if (p.failed) {
+        wrap.classList.add('failed');
+        $('startNote').className = 'startup-note err';
+        stopPolling();                             // 失败不收起来：原因要留在屏幕上
+      } else {
+        $('startNote').className = 'startup-note';
+      }
+    }
+
+    async function poll() {
+      try {
+        const r = await fetch('/api/strata/progress', { cache: 'no-store' });
+        if (!r.ok) throw new Error(String(r.status));
+        const p = await r.json();
+        if (!p.active) { hide(); return; }
+        paint(p);
+        if (p.done || p.failed) return;
+      } catch {
+        // 单次拿不到就等下一轮：已显示的数字保持不动，比往回跳强
+      }
+      timer = setTimeout(poll, 500);
+    }
+
+    return {
+      begin() { reset(); poll(); },
+      /** 页面在启动过程中被刷新时，把还在跑的进度接回来（只接一次，不反复弹） */
+      resume() {
+        if (!wrap || !wrap.hidden) return;
+        fetch('/api/strata/progress', { cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((p) => { if (p && p.active) { reset(); paint(p); if (!p.done && !p.failed) timer = setTimeout(poll, 500); } })
+          .catch(() => {});
+      },
+      fail(message) {
+        if (!wrap) return;
+        wrap.hidden = false;
+        wrap.classList.remove('done');
+        wrap.classList.add('failed');
+        $('startTitle').textContent = '启动失败';
+        $('startPct').textContent = `${percent}%`;
+        $('startNote').textContent = message || '';
+        $('startNote').className = 'startup-note err';
+        stopPolling();
+      },
+    };
+  })();
+
   /*
    * 设置页的「启动工作台 / 停止服务」要按当前部署分流：
    * Strata 部署下 /api/service 会被后端挡掉（409「服务启停请用服务页」），
@@ -4198,12 +4311,19 @@ function setupButtons() {
   $('btnStartSvc').addEventListener('click', async () => {
     const btn = $('btnStartSvc');
     btn.disabled = true;
+    // 先让进度条出现，再发请求：这个 POST 要等 PowerShell 跑完（最长 90 秒），
+    // 等它返回才显示进度的话，用户看到的就是「点了没反应」。
+    if (state && state.strata) startupBar.begin();
     try {
       const r = await post(svcApi(), svcPayload('workbench'));
       if (r && r.ok === false) throw new Error(r.error || '启动失败');
       $('svcHint').textContent = '已下发启动。首次启动引擎要加载模型，等十几秒后点「刷新状态」看结果。';
       setTimeout(() => loadState().catch(() => {}), 1500);
-    } catch (e) { toast(e.message); }
+    } catch (e) {
+      // 409（正在启动/停止）不是失败：另一个请求已经在推进，进度条接着跑就行
+      if (!/正在/.test(e.message || '')) startupBar.fail(e.message);
+      toast(e.message);
+    }
     btn.disabled = false;
   });
 
@@ -4214,6 +4334,9 @@ function setupButtons() {
       setTimeout(loadState, 800);
     } catch (e) { toast(e.message); }
   });
+
+  // 启动途中刷新过页面：把还在跑的进度接回来，别让用户以为白等了
+  if (state && state.strata) startupBar.resume();
 
   $('btnOpenInstall').addEventListener('click', async () => {
     try { await post('/api/open-folder', { which: 'install' }); } catch (e) { toast(e.message); }
