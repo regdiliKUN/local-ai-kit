@@ -102,8 +102,10 @@ if (-not $targetUp -and $cfg.action -ne 'engine') {
     }
 }
 
-if (-not $engineUp -and -not $engineStarting) {
+if (-not $engineUp -and -not $engineStarting -and $cfg.action -in @('engine', 'workbench')) {
     # Existing launcher retains the deployment's VRAM preflight and model configuration.
+    # 只有「启动引擎」和「启动工作台」才碰显卡：用 Ollama 时点的是 dsh
+    # （只开界面），这里必须跳过，否则 Strata 会把显存全占走。
     $env:STRATA_HOME = $cfg.strataHome
     $env:STRATA_PORT = [string]$cfg.enginePort
     $launcher = Join-Path $repo 'tools\run-strata.bat'
@@ -115,7 +117,7 @@ if ($cfg.action -eq 'webui' -and -not $targetUp) {
     $env:STRATA_WEB_PORT = [string]$cfg.webPort
     Launch $cfg.pythonExe ('"' + $webScript + '"') (Split-Path $webScript) 'kit-webui'
 }
-if ($cfg.action -eq 'workbench' -and -not $targetUp) {
+if ($cfg.action -in @('workbench', 'dsh') -and -not $targetUp) {
     if ($cfg.dshHome) { $env:DSH_HOME = $cfg.dshHome }
     Launch $cfg.nodeExe ('"' + $dshScript + '" web --host 127.0.0.1 --port ' + $cfg.dshPort) $cfg.dshDir 'kit-dsh'
 }

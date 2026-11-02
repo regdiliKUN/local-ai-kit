@@ -392,6 +392,8 @@ const DICT = {
   '启动工作台': 'Start workbench',
   '启动 Strata 模型': 'Start the Strata model',
   '启动 Ollama 模型': 'Start the Ollama model',
+  'Qwen3.8-Flash-Next · 125B MoE · 64K 上下文': 'Qwen3.8-Flash-Next · 125B MoE · 64K context',
+  'Qwen3.8 · 27B · 32K 上下文': 'Qwen3.8 · 27B · 32K context',
   'Ollama 启动入口只在 Strata 部署下可用': 'The Ollama entry is only available in a Strata deployment',
   '两个本地模型不能同时跑：启动一个会先把另一个请出显存。Ollama 那个会直接把模型热进显存，第一条消息不用再等。': 'The two local models cannot run at once: starting one makes room by shutting the other down. The Ollama one warms the model into VRAM, so the first message does not wait.',
   '「启动工作台」等于双击桌面上的「启动本地AI」。': '"Start workbench" is the same as double-clicking "Start local AI" on the desktop.',

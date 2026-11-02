@@ -22,7 +22,7 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
-import { strataState, runStrataAction, handleStrata } from './strata.mjs';
+import { strataState, runStrataAction, handleStrata, startupProgress, beginStartupJob, failStartupJob } from './strata.mjs';
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem, pidOnPort, detectGpu } from './detect.mjs';
 import { CONTEXT_OPTIONS, contextFit } from './models.mjs';
@@ -812,6 +812,82 @@ function startHealWatchdog() {
   if (typeof healTimer.unref === 'function') healTimer.unref();
 }
 
+/* ------------------------------------------------- 启动路径上的几个小探针 */
+
+async function ollamaUp() {
+  try {
+    const r = await fetch(`${OLLAMA_BASE}/api/version`, { signal: AbortSignal.timeout(1200) });
+    return r.ok;
+  } catch { return false; }
+}
+
+async function strataEngineUp(cfg) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${cfg.enginePort}/health`, { signal: AbortSignal.timeout(1500) });
+    return r.ok;
+  } catch { return false; }
+}
+
+/** 当前这个 Ollama 服务看不看得见指定模型（部署换了模型目录时它可能是个「睁眼瞎」） */
+async function ollamaHasModel(model) {
+  try {
+    const r = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(2500) });
+    if (!r.ok) return false;
+    const { models = [] } = await r.json();
+    return models.some((m) => m.name === model || m.name === `${model}:latest`);
+  } catch { return false; }
+}
+
+/**
+ * 让 Ollama 把显存里的模型卸掉（keep_alive:0），但不杀它的进程。
+ *
+ * 为什么不直接 kill：Ollama 托盘程序会看着服务，杀了立刻复活 ——
+ * 变成「杀-复活」的拉锯，还容易在复活那一刻又把模型读回去。卸载模型才是真正腾显存的那步。
+ */
+async function unloadOllamaModels() {
+  try {
+    const ps = await fetch(`${OLLAMA_BASE}/api/ps`, { signal: AbortSignal.timeout(1500) });
+    if (!ps.ok) return;
+    const { models = [] } = await ps.json();
+    await Promise.all(models.map((m) => fetch(`${OLLAMA_BASE}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: m.name || m.model, keep_alive: 0 }),
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => {})));
+  } catch { /* 没装 / 没起，都不影响后面的启动 */ }
+}
+
+/**
+ * 把模型读进显存再返回。
+ *
+ * 为什么要在这里等：模型没进显存时，工作台里发的第一条消息要等一分多钟才出字，
+ * 用户会以为又坏了。把这段时间挪到「启动」里，进度条就能如实显示「加载模型到显存」。
+ */
+async function warmOllamaModel(model, cfg) {
+  let response;
+  try {
+    response = await fetch(`${OLLAMA_BASE}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        prompt: 'hi',
+        stream: false,
+        options: { num_predict: 1, num_ctx: Number(cfg.contextWindow) || 8192 },
+      }),
+      signal: AbortSignal.timeout(300000),
+    });
+  } catch (e) {
+    throw new Error(`加载模型失败：${e.message}`);
+  }
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    if (response.status === 404) throw new Error(`Ollama 里没有模型「${model}」，请先下载`);
+    throw new Error(`加载模型失败：${detail.error || `HTTP ${response.status}`}`);
+  }
+}
+
 /* ------------------------------------------------------------------ 路由 */
 
 const server = createSafeServer(async (req, res) => {
@@ -938,19 +1014,63 @@ const server = createSafeServer(async (req, res) => {
     if (p === '/api/strata/state' && req.method === 'GET') {
       return json(res, 200, await strataState(cfg));
     }
+    // 启动进度：单独一条 lightweight 接口，页面 500ms 轮询它。
+    // 不塞进 /api/state 是因为后者要探三个端口还要读日志，两秒一次刚好，五百毫秒一次太重。
+    if (p === '/api/strata/progress' && req.method === 'GET') {
+      return json(res, 200, await startupProgress(cfg));
+    }
     if (p === '/api/strata/service' && req.method === 'POST') {
       // 必须自己加锁：strata.mjs 里那个 operation 互斥只存在于 handleStrata，
       // 线上走的是这里，双击按钮会真的同时跑两个外部进程去 Launch 引擎。
       if (strataBusy) return json(res, 409, { error: `正在${strataBusy}，请稍候` });
       const action = String((await readBody(req)).action || '').trim();
-      if (!['engine', 'webui', 'workbench', 'stop'].includes(action)) {
+      if (!['engine', 'webui', 'workbench', 'dsh', 'stop'].includes(action)) {
         return json(res, 400, { error: '未知操作' });
       }
       strataBusy = action === 'stop' ? '停止服务' : '启动服务';
       try {
+        // 「启动 Strata 模型」和 Ollama 抢的是同一块显存，先让 Ollama 把模型卸了
+        if (action === 'workbench' && await ollamaUp()) {
+          await unloadOllamaModels();
+        }
         const result = await runStrataAction(cfg, action);
         return json(res, result.ok ? 200 : 409, result);
       } catch (e) {
+        failStartupJob(e.message);
+        return json(res, 400, { error: String(e.message || e) });
+      } finally { strataBusy = null; }
+    }
+    // 启动 Ollama 那一路：停 Strata → 起 Ollama → 把模型热进显存 → 只开界面
+    if (p === '/api/service/ollama' && req.method === 'POST') {
+      if (strataBusy) return json(res, 409, { error: `正在${strataBusy}，请稍候` });
+      strataBusy = '启动 Ollama 工作台';
+      const model = String(cfg.ollamaModel || cfg.model || 'qwen3.8:27b').trim();
+      beginStartupJob({ action: 'workbench', backend: 'ollama', model });
+      try {
+        // 1) Strata 占着 22GB，不腾出来 27B 根本进不去
+        if (await strataEngineUp(cfg)) {
+          await runStrataAction(cfg, 'stop').catch(() => {});
+        }
+        // 2) Ollama 服务本身；如果它活着却看不见这个模型（模型目录被指到了别处），
+        //    就用正确的目录重启一次，否则后面会以「模型不存在」告终
+        if (!(await ollamaUp()) || !(await ollamaHasModel(model))) {
+          const exe = findOllama();
+          if (!exe) throw new Error('没找到 Ollama，请先安装或用安装向导修复');
+          try { killOllama(); } catch { /* 已经不在就算了 */ }
+          await new Promise((r) => setTimeout(r, 800));
+          spawnServe(exe, cfg, { detached: false });
+          if (!(await waitUp(40))) throw new Error('Ollama 启动超时（40 秒），请检查安装是否完整');
+          if (!(await ollamaHasModel(model))) {
+            throw new Error(`Ollama 里没有模型「${model}」，请先在控制台的模型管理里下载`);
+          }
+        }
+        // 3) 把模型读进显存 —— 这一步最慢，进度条会停在这里
+        await warmOllamaModel(model, cfg);
+        // 4) 只开界面，不碰 Strata 引擎
+        const result = await runStrataAction(cfg, 'dsh');
+        return json(res, 200, { ok: true, model, ...result });
+      } catch (e) {
+        failStartupJob(e.message);
         return json(res, 400, { error: String(e.message || e) });
       } finally { strataBusy = null; }
     }

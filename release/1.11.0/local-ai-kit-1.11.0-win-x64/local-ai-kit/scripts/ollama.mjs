@@ -26,14 +26,17 @@ export function findOllama() {
 }
 
 /** 本部署包推荐的 Ollama 运行参数 */
-export function ollamaVars({ modelDir, contextWindow } = {}) {
+export function ollamaVars({ modelDir, ollamaModelDir, contextWindow } = {}) {
   const vars = {
     OLLAMA_FLASH_ATTENTION: '1',
     OLLAMA_KV_CACHE_TYPE: 'q8_0',
     OLLAMA_CONTEXT_LENGTH: String(contextWindow || 8192),
     OLLAMA_KEEP_ALIVE: '30m',
   };
-  if (modelDir) vars.OLLAMA_MODELS = modelDir;
+  // Strata 部署下 modelDir 指的是 Strata 的数据目录（F:\Strata-data），
+  // 拿它当 OLLAMA_MODELS 会让 Ollama 一个模型都看不见 —— 所以 Ollama 自己的目录优先。
+  const dir = ollamaModelDir || modelDir;
+  if (dir) vars.OLLAMA_MODELS = dir;
   return vars;
 }
 

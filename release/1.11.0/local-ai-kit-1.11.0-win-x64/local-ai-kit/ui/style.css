@@ -314,6 +314,31 @@ html, body {
 .progress-stats .stat .k { color: var(--text-dim); }
 .progress-stats .stat .v { font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* ---- 启动工作台进度条 ----
+ * 比下载进度条高一点、过渡长一点：启动时进度是「一条平滑爬升的线」，
+ * 500ms 轮询 + 0.5s 线性过渡正好首尾相接，看起来是连续的而不是一格一格跳。
+ */
+.startup { transition: border-color .3s; }
+.startup .progress { height: 8px; border-radius: 4px; }
+.startup .progress .bar { transition: width .5s linear; }
+.startup .progress-pct { transition: color .3s; }
+.startup.done { border-color: var(--ok); }
+.startup.done .progress .bar { background: var(--ok); }
+.startup.done .progress-pct { color: var(--ok); }
+.startup.failed { border-color: var(--err); }
+.startup.failed .progress .bar { background: var(--err); }
+.startup.failed .progress-pct { color: var(--err); }
+.startup.warn { border-color: var(--warn); }
+.startup.warn .progress .bar { background: var(--warn); }
+.startup.warn .progress-pct { color: var(--warn); }
+.startup-note { margin: 10px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-dim); }
+.startup-note.ok { color: var(--ok); font-weight: 600; }
+.startup-note.err { color: var(--err); }
+
+@media (prefers-reduced-motion: reduce) {
+  .startup .progress .bar { transition: none; }
+}
+
 .tasklist { list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 
 .tasklist li { display: flex; align-items: center; gap: 11px; padding: 10px 0; font-size: 13.5px; }
@@ -398,6 +423,17 @@ html, body {
 .btn.primary:hover:not(:disabled) { background: #2a62d6; border-color: #2a62d6; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .btn.ghost { background: transparent; }
+
+/* 带模型说明的启动按钮：主标题一行，型号/规格一行小字 */
+.btn-model {
+  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  text-align: left; padding-top: 8px; padding-bottom: 8px;
+}
+.btn-model .btn-sub {
+  font-size: 11.5px; font-weight: 400; line-height: 1.2;
+  opacity: .78; letter-spacing: .2px;
+}
+.btn.primary .btn-sub { opacity: .88; }
 
 /* ------------------------------------------------------------- 弹窗 */
 

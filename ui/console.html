@@ -751,8 +751,14 @@
 
       <h2 class="sec-h">服务控制</h2>
       <div class="row-actions">
-        <button class="btn primary" id="btnStartSvc">启动 Strata 模型</button>
-        <button class="btn primary" id="btnStartOllama">启动 Ollama 模型</button>
+        <button class="btn primary btn-model" id="btnStartSvc">
+          <span class="btn-title">启动 Strata 模型</span>
+          <span class="btn-sub">Qwen3.8-Flash-Next · 125B MoE · 64K 上下文</span>
+        </button>
+        <button class="btn primary btn-model" id="btnStartOllama">
+          <span class="btn-title">启动 Ollama 模型</span>
+          <span class="btn-sub">Qwen3.8 · 27B · 32K 上下文</span>
+        </button>
         <button class="btn ghost" id="btnStopSvc">停止服务并释放显存</button>
       </div>
       <p class="row-hint" id="svcHint">两个本地模型不能同时跑：启动一个会先把另一个请出显存。Ollama 那个会直接把模型热进显存，第一条消息不用再等。</p>

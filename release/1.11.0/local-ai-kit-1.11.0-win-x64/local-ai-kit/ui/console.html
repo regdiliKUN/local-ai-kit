@@ -751,10 +751,34 @@
 
       <h2 class="sec-h">服务控制</h2>
       <div class="row-actions">
-        <button class="btn primary" id="btnStartSvc">启动工作台</button>
+        <button class="btn primary btn-model" id="btnStartSvc">
+          <span class="btn-title">启动 Strata 模型</span>
+          <span class="btn-sub">Qwen3.8-Flash-Next · 125B MoE · 64K 上下文</span>
+        </button>
+        <button class="btn primary btn-model" id="btnStartOllama">
+          <span class="btn-title">启动 Ollama 模型</span>
+          <span class="btn-sub">Qwen3.8 · 27B · 32K 上下文</span>
+        </button>
         <button class="btn ghost" id="btnStopSvc">停止服务并释放显存</button>
       </div>
-      <p class="row-hint" id="svcHint">「启动工作台」等于双击桌面上的「启动本地AI」。</p>
+      <p class="row-hint" id="svcHint">两个本地模型不能同时跑：启动一个会先把另一个请出显存。Ollama 那个会直接把模型热进显存，第一条消息不用再等。</p>
+
+      <div class="progress-wrap startup" id="startWrap" hidden>
+        <div class="progress-head">
+          <span class="progress-title" id="startTitle">启动工作台</span>
+          <span class="progress-pct" id="startPct">0%</span>
+        </div>
+        <div class="progress" id="startTrack" role="progressbar"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="startTitle">
+          <div class="bar" id="startBar"></div>
+        </div>
+        <div class="progress-stats">
+          <div class="stat"><span class="k">阶段</span><span class="v" id="startPhase">—</span></div>
+          <div class="stat"><span class="k">已用时</span><span class="v" id="startElapsed">0.0s</span></div>
+          <div class="stat"><span class="k">预计剩余</span><span class="v" id="startEta">—</span></div>
+        </div>
+        <p class="startup-note" id="startNote"></p>
+      </div>
 
       <h2 class="sec-h">快捷入口</h2>
       <div class="row-actions">

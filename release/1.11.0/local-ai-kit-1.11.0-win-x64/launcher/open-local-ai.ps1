@@ -18,14 +18,24 @@ function Find-Console {
     $listeners = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {
         $_.OwningProcess -in $owners -and $_.LocalPort -ge 7790 -and $_.LocalPort -lt 7800 -and $_.LocalAddress -eq '127.0.0.1'
     })
-    foreach ($listener in $listeners) {
-        $url = 'http://127.0.0.1:' + $listener.LocalPort + '/'
-        try {
-            $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 6
-            if ($response.StatusCode -eq 200 -and $response.Content -match 'console.js') {
-                return [pscustomobject]@{Url=$url; ProcessId=$listener.OwningProcess}
-            }
-        } catch { }
+    # Temporarily clear proxy env vars so Invoke-WebRequest can reach localhost
+    $prevHttp = $env:HTTP_PROXY; $prevHttps = $env:HTTPS_PROXY
+    $prevHttpL = $env:http_proxy; $prevHttpsL = $env:https_proxy
+    $env:HTTP_PROXY = $null; $env:HTTPS_PROXY = $null
+    $env:http_proxy = $null; $env:https_proxy = $null
+    try {
+        foreach ($listener in $listeners) {
+            $url = 'http://127.0.0.1:' + $listener.LocalPort + '/'
+            try {
+                $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 6
+                if ($response.StatusCode -eq 200 -and $response.Content -match 'console.js') {
+                    return [pscustomobject]@{Url=$url; ProcessId=$listener.OwningProcess}
+                }
+            } catch { }
+        }
+    } finally {
+        $env:HTTP_PROXY = $prevHttp; $env:HTTPS_PROXY = $prevHttps
+        $env:http_proxy = $prevHttpL; $env:https_proxy = $prevHttpsL
     }
 }
 
