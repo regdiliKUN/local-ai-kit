@@ -394,6 +394,7 @@ const DICT = {
   '阶段': 'Phase',
   '已用时': 'Elapsed',
   '预计剩余': 'Remaining',
+  '进度不可用': 'Progress unavailable',
   '服务已在运行，正在打开工作台…': 'Service is already running, opening the workbench…',
   '快捷入口': 'Shortcuts',
   '打开安装目录': 'Open install folder',

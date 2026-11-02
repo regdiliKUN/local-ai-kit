@@ -328,6 +328,9 @@ html, body {
 .startup.failed { border-color: var(--err); }
 .startup.failed .progress .bar { background: var(--err); }
 .startup.failed .progress-pct { color: var(--err); }
+.startup.warn { border-color: var(--warn); }
+.startup.warn .progress .bar { background: var(--warn); }
+.startup.warn .progress-pct { color: var(--warn); }
 .startup-note { margin: 10px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-dim); }
 .startup-note.ok { color: var(--ok); font-weight: 600; }
 .startup-note.err { color: var(--err); }

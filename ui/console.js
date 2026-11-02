@@ -4213,9 +4213,10 @@ function setupButtons() {
       clearTimeout(hideTimer);
       hideTimer = null;
       percent = 0;
+      missCount = 0;
       if (!wrap) return;
       wrap.hidden = false;
-      wrap.classList.remove('done', 'failed');
+      wrap.classList.remove('done', 'failed', 'warn');
       $('startBar').style.width = '0%';
       $('startPct').textContent = '0%';
       $('startTrack').setAttribute('aria-valuenow', '0');
@@ -4262,16 +4263,31 @@ function setupButtons() {
       }
     }
 
+    let missCount = 0;
+
     async function poll() {
       try {
         const r = await fetch('/api/strata/progress', { cache: 'no-store' });
+        // 404 = 这个控制台窗口是改动之前启动的，进程里没有这条路由。
+        // 页面是从磁盘现读的，所以新界面会显示出来，但后端根本没有数据源 ——
+        // 这时候必须说清楚，不能让进度条停在 0% 装作在等。
+        if (r.status === 404) {
+          warn('进度接口不存在：当前控制台进程还是改动前的版本，关掉这个窗口重新打开「本地 AI 控制台」即可。');
+          return;
+        }
         if (!r.ok) throw new Error(String(r.status));
+        missCount = 0;
         const p = await r.json();
         if (!p.active) { hide(); return; }
         paint(p);
         if (p.done || p.failed) return;
-      } catch {
-        // 单次拿不到就等下一轮：已显示的数字保持不动，比往回跳强
+      } catch (e) {
+        // 偶发失败（页面切后台、服务正忙）不改变已显示的数字，但连续失败要说出来
+        missCount += 1;
+        if (missCount >= 3) {
+          warn('读取启动进度失败：' + e.message);
+          return;
+        }
       }
       timer = setTimeout(poll, 500);
     }
@@ -4289,10 +4305,22 @@ function setupButtons() {
       fail(message) {
         if (!wrap) return;
         wrap.hidden = false;
-        wrap.classList.remove('done');
+        wrap.classList.remove('done', 'warn');
         wrap.classList.add('failed');
         $('startTitle').textContent = '启动失败';
         $('startPct').textContent = `${percent}%`;
+        $('startNote').textContent = message || '';
+        $('startNote').className = 'startup-note err';
+        stopPolling();
+      },
+      /** 拿不到进度（旧进程 / 接口异常）：用告警色说清楚原因，而不是停在 0% 让人干等 */
+      warn(message) {
+        if (!wrap) return;
+        wrap.hidden = false;
+        wrap.classList.remove('done', 'failed');
+        wrap.classList.add('warn');
+        $('startTitle').textContent = '进度不可用';
+        $('startPct').textContent = '—';
         $('startNote').textContent = message || '';
         $('startNote').className = 'startup-note err';
         stopPolling();
