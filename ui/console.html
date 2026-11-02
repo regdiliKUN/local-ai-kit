@@ -751,10 +751,11 @@
 
       <h2 class="sec-h">服务控制</h2>
       <div class="row-actions">
-        <button class="btn primary" id="btnStartSvc">启动工作台</button>
+        <button class="btn primary" id="btnStartSvc">启动 Strata 模型</button>
+        <button class="btn primary" id="btnStartOllama">启动 Ollama 模型</button>
         <button class="btn ghost" id="btnStopSvc">停止服务并释放显存</button>
       </div>
-      <p class="row-hint" id="svcHint">「启动工作台」等于双击桌面上的「启动本地AI」。</p>
+      <p class="row-hint" id="svcHint">两个本地模型不能同时跑：启动一个会先把另一个请出显存。Ollama 那个会直接把模型热进显存，第一条消息不用再等。</p>
 
       <div class="progress-wrap startup" id="startWrap" hidden>
         <div class="progress-head">

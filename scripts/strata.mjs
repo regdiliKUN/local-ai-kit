@@ -17,8 +17,30 @@ let lastStop = 0;
  *
  * startedAt 是唯一的真实时钟：进度条上的「已用时」、日志起点、阶段插值都以它为准，
  * 所以它必须在请求刚进来时就落下，而不是等 PowerShell 跑完。
+ *
+ * backend 决定进度条走哪张阶段表：'strata'（引擎 + 日志里程碑）或 'ollama'（服务 + 显存里的模型）。
  */
 let startupJob = null;
+
+/** 开一次启动任务。strata 的各个动作由 runStrataAction 自己调，ollama 由控制台调 */
+export function beginStartupJob({ action = 'workbench', backend = 'strata', model = '', logPath = '' } = {}) {
+  startupJob = {
+    action,
+    backend,
+    model,
+    startedAt: Date.now(),
+    logBytes: backend === 'strata' && logPath ? fileSizeSafe(logPath) : 0,
+    lastPercent: 0,
+    error: null,
+    doneAt: null,
+  };
+  return startupJob;
+}
+
+/** 失败原因写进当前任务：进度条要能说明白为什么停了 */
+export function failStartupJob(message) {
+  if (startupJob && !startupJob.error) startupJob.error = String(message || '启动失败');
+}
 
 export function validateStrataConfig(cfg) {
   for (const key of ['deploymentRoot', 'strataHome', 'dshDir']) {
@@ -105,19 +127,35 @@ function readStartupLog(cfg, sinceBytes) {
   }
 }
 
-/** 启动那一刻的日志长度，作为「本次启动」的起点 */
-function startupLogSize(cfg) {
+/** 取文件大小，取不到就当 0 */
+function fileSizeSafe(file) {
   try {
-    return fs.statSync(startupLogPath(cfg)).size;
+    return fs.statSync(file).size;
   } catch {
     return 0;
   }
 }
 
+/** Ollama 是否在线，以及指定模型是否已经在显存里 */
+async function ollamaState(model) {
+  const online = await probe('http://127.0.0.1:11434/api/version');
+  let loaded = false;
+  if (online.online && model) {
+    try {
+      const r = await fetch('http://127.0.0.1:11434/api/ps', { signal: AbortSignal.timeout(1500) });
+      if (r.ok) {
+        const j = await r.json();
+        loaded = (j.models || []).some((m) => m.name === model || m.model === model);
+      }
+    } catch { /* 拿不到就按「还没加载」算，进度只会慢不会假 */ }
+  }
+  return { online: online.online, loaded };
+}
+
 /**
  * 进度查询接口的实现。
  *
- * 三个信号并行取：引擎健康、界面端口、日志里程碑。任何一个慢都不该拖住整个响应 ——
+ * 信号并行取：两条路径各自探自己关心的那几个端口。任何一个慢都不该拖住整个响应 ——
  * 这个接口会被 500ms 轮询一次，它自己卡住就等于进度条卡住。
  */
 export async function startupProgress(cfg) {
@@ -128,25 +166,41 @@ export async function startupProgress(cfg) {
     startupJob = null;
     return { active: false };
   }
-  const [engine, dsh] = await Promise.all([
-    probe(`http://127.0.0.1:${cfg.enginePort}/health`),
-    probe(`http://127.0.0.1:${cfg.dshPort}/`),
-  ]);
-  const markers = parseStartupMarkers(readStartupLog(cfg, startupJob.logBytes));
+
+  const backend = startupJob.backend || 'strata';
+  const dshProbe = probe(`http://127.0.0.1:${cfg.dshPort}/`);
+  const engineProbe = backend === 'ollama' ? null : probe(`http://127.0.0.1:${cfg.enginePort}/health`);
+  const ollamaProbe = backend === 'ollama' ? ollamaState(startupJob.model) : null;
+
+  const [dsh, engine, ollama] = await Promise.all([dshProbe, engineProbe, ollamaProbe]);
+  const markers = backend === 'ollama'
+    ? {}
+    : parseStartupMarkers(readStartupLog(cfg, startupJob.logBytes));
+
+  const engineOnline = Boolean(engine && engine.online);
+  const ollamaOnline = Boolean(ollama && ollama.online);
+  const modelLoaded = Boolean(ollama && ollama.loaded);
+
+  const ready = backend === 'ollama'
+    ? ollamaOnline && modelLoaded && dsh.online
+    : engineOnline && dsh.online;
 
   // 超过 5 分钟还没就绪，就不再假装在启动了：卡住的进度条比明确的失败更让人抓狂
-  const stalled = now - startupJob.startedAt > 5 * 60 * 1000 && !(engine.online && dsh.online);
-  if (stalled && !startupJob.error) {
-    startupJob.error = '启动超时（5 分钟仍未就绪），请查看 logs/kit-engine.stdout.log';
+  if (!startupJob.error && now - startupJob.startedAt > 5 * 60 * 1000 && !ready) {
+    startupJob.error = backend === 'ollama'
+      ? '启动超时（5 分钟仍未就绪），请查看 Ollama 是否正常、模型是否已在本地'
+      : '启动超时（5 分钟仍未就绪），请查看 logs/kit-engine.stdout.log';
   }
 
   const progress = computeStartupProgress({
+    backend,
     startedAt: startupJob.startedAt,
     // 完成后用 doneAt 当「现在」：否则每次查询都会拿新时间重算用时，
     // 页面刷新一次就从「用时 48 秒」变成「用时 463 秒」
     now: startupJob.doneAt || now,
-    now,
-    engineOnline: engine.online,
+    engineOnline,
+    ollamaOnline,
+    modelLoaded,
     dshOnline: dsh.online,
     markers,
     error: startupJob.error,
@@ -157,7 +211,14 @@ export async function startupProgress(cfg) {
   startupJob.lastPercent = Math.max(startupJob.lastPercent, progress.percent);
   if (progress.done && !startupJob.doneAt) startupJob.doneAt = now;
 
-  return { active: true, action: startupJob.action, ...progress, startedAt: startupJob.startedAt };
+  return {
+    active: true,
+    action: startupJob.action,
+    backend,
+    model: startupJob.model || '',
+    ...progress,
+    startedAt: startupJob.startedAt,
+  };
 }
 
 /**
@@ -170,6 +231,11 @@ export async function startupProgress(cfg) {
  */
 async function quickProbe(cfg, action) {
   if (action === 'stop') return null; // 停服务不走快速路径
+  if (action === 'dsh') {
+    const r = await probe(`http://127.0.0.1:${cfg.dshPort}/`);
+    if (r.online) return { ok: true, accepted: true, alreadyRunning: true };
+    return null;
+  }
   if (action === 'engine') {
     const r = await probe(`http://127.0.0.1:${cfg.enginePort}/health`);
     if (r.online) return { ok: true, accepted: true, alreadyRunning: true };
@@ -198,21 +264,16 @@ async function quickProbe(cfg, action) {
 
 export async function runStrataAction(cfg, action, { dryRun = false } = {}) {
   validateStrataConfig(cfg);
-  if (!['engine', 'webui', 'workbench', 'stop'].includes(action)) throw new Error('未知操作');
+  if (!['engine', 'webui', 'workbench', 'dsh', 'stop'].includes(action)) throw new Error('未知操作');
 
   // 进度计时从这里开始 —— 不是等 PowerShell 跑完。用户点完按钮到进度条动起来之间
   // 的几百毫秒，正好用来把日志起点和开始时间钉住。
   if (action === 'stop') {
     startupJob = null;
-  } else if (!dryRun) {
-    startupJob = {
-      action,
-      startedAt: Date.now(),
-      logBytes: startupLogSize(cfg),
-      lastPercent: 0,
-      error: null,
-      doneAt: null,
-    };
+  } else if (!dryRun && action !== 'dsh') {
+    // dsh 是「启动 Ollama 工作台」流程的最后一步，不能覆盖那一轮的任务，
+    // 否则进度条会从 0 重来
+    beginStartupJob({ action, backend: 'strata', logPath: startupLogPath(cfg) });
   }
 
   // 快速路径：服务已在线时跳过 PowerShell，省 5-8 秒 WMI 开销

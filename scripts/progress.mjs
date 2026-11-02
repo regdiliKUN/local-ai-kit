@@ -26,6 +26,20 @@ export const STARTUP_STEPS = [
   { id: 'dsh', from: 90, to: 98, label: '启动工作台界面', expect: 9 },
 ];
 
+/**
+ * Ollama 这条启动路径的阶段。
+ *
+ * 和 Strata 最大的不同：Ollama 的服务通常已经在托盘里跑着，慢的是「把 27B 读进显存」
+ * 这一步；而且它要先等 Strata 让出显存，所以单独排一段 vram 阶段。
+ */
+export const OLLAMA_STEPS = [
+  { id: 'submit', from: 0, to: 4, label: '已提交启动', expect: 1 },
+  { id: 'vram', from: 4, to: 14, label: '让出显存', expect: 6 },
+  { id: 'ollama', from: 14, to: 32, label: '启动 Ollama 服务', expect: 8 },
+  { id: 'load', from: 32, to: 84, label: '加载模型到显存', expect: 55 },
+  { id: 'dsh', from: 84, to: 98, label: '启动工作台界面', expect: 9 },
+];
+
 /** 引擎启动日志里的里程碑。顺序有意义：后面的出现意味着前面的都已经过 */
 const MARKERS = [
   ['weights', /reading the model's weights|loading the model/i],
@@ -57,8 +71,8 @@ export function parseStartupMarkers(logText) {
   return found;
 }
 
-function stepOf(id) {
-  return STARTUP_STEPS.find((s) => s.id === id) || STARTUP_STEPS[0];
+function stepOf(steps, id) {
+  return steps.find((s) => s.id === id) || steps[0];
 }
 
 function clamp(value, min, max) {
@@ -66,23 +80,80 @@ function clamp(value, min, max) {
 }
 
 /**
+ * 阶段内插值 —— 两条启动路径共用。
+ *
+ * 只负责「在当前阶段里按时间往前走」，最多到该区间的 85%：留在下一阶段门口等真信号，
+ * 绝不自己推门。percent 还受 lastPercent 约束，保证只进不退。
+ */
+function stepProgress(steps, stepId, elapsedS, lastPercent) {
+  const step = stepOf(steps, stepId);
+  const index = steps.indexOf(step);
+  const beforeS = steps.slice(0, index).reduce((sum, s) => sum + s.expect, 0);
+  const phaseElapsedS = Math.max(0, elapsedS - beforeS);
+  const ratio = clamp(phaseElapsedS / Math.max(step.expect, 0.5), 0, 0.85);
+  const percent = clamp(Math.round(Math.max(step.from + (step.to - step.from) * ratio, lastPercent)), 0, 99);
+  const remainingS = steps.slice(index).reduce((sum, s) => sum + s.expect, 0) - phaseElapsedS;
+  return {
+    step,
+    percent,
+    // 没完成就至少留 1 秒：显示「预计剩余 0s」却还停在 88% 最容易被当成卡死
+    etaSeconds: Math.max(1, Math.round(remainingS)),
+  };
+}
+
+function readyResult(elapsedMs) {
+  return {
+    percent: 100,
+    step: 'ready',
+    title: '工作台已就绪',
+    phase: '工作台已就绪',
+    detail: `用时 ${(elapsedMs / 1000).toFixed(1)} 秒`,
+    elapsedMs,
+    etaSeconds: 0,
+    done: true,
+    failed: false,
+  };
+}
+
+function failedResult(elapsedMs, percent, error) {
+  return {
+    percent,
+    step: 'failed',
+    title: '启动失败',
+    phase: '启动失败',
+    detail: String(error),
+    elapsedMs,
+    etaSeconds: 0,
+    done: false,
+    failed: true,
+  };
+}
+
+/**
  * 算出此刻的启动进度。
  *
+ * backend 决定走哪张阶段表：strata（引擎日志里程碑）或 ollama（服务 + 显存里有没有模型）。
+ * 其余参数两边通用。
+ *
  * @param {object} input
- * @param {number} input.startedAt   本次启动的起点（毫秒时间戳）
- * @param {number} [input.now]       当前时间，默认 Date.now()，测试可注入
- * @param {boolean} [input.engineOnline] 引擎 /health 是否通过
- * @param {boolean} [input.dshOnline]    工作台界面端口是否在监听
- * @param {object} [input.markers]   parseStartupMarkers 的结果
- * @param {string|null} [input.error] 启动失败原因
- * @param {number} [input.lastPercent] 上一次返回的百分比，用来保证单调不减
- * @returns {{percent:number, step:string, phase:string, detail:string, elapsedMs:number,
- *            etaSeconds:number, done:boolean, failed:boolean}}
+ * @param {'strata'|'ollama'} [input.backend]     走哪条启动路径
+ * @param {number} input.startedAt                本次启动的起点（毫秒时间戳）
+ * @param {number} [input.now]                    当前时间，默认 Date.now()，测试可注入
+ * @param {boolean} [input.engineOnline]          Strata 引擎 /health 是否通过
+ * @param {boolean} [input.ollamaOnline]          Ollama 服务是否在线
+ * @param {boolean} [input.modelLoaded]           Ollama 是否已把模型加载进显存
+ * @param {boolean} [input.dshOnline]             工作台界面端口是否在监听
+ * @param {object} [input.markers]                parseStartupMarkers 的结果（仅 strata）
+ * @param {string|null} [input.error]             启动失败原因
+ * @param {number} [input.lastPercent]            上一次返回的百分比，用来保证单调不减
  */
 export function computeStartupProgress({
+  backend = 'strata',
   startedAt,
   now = Date.now(),
   engineOnline = false,
+  ollamaOnline = false,
+  modelLoaded = false,
   dshOnline = false,
   markers = {},
   error = null,
@@ -91,22 +162,30 @@ export function computeStartupProgress({
   const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
   const elapsedS = elapsedMs / 1000;
 
-  // 两个服务都在线：唯一的完成状态，别的路径都不许给 100
-  if (engineOnline && dshOnline) {
+  if (backend === 'ollama') {
+    // 服务在、模型进了显存、界面也起来了 —— 三个都齐才算就绪
+    if (ollamaOnline && modelLoaded && dshOnline) return readyResult(elapsedMs);
+
+    let stepId = 'submit';
+    if (ollamaOnline && modelLoaded) stepId = 'dsh';
+    else if (ollamaOnline) stepId = 'load';
+    else if (engineOnline) stepId = 'vram';       // Strata 还占着显存，正在让它退场
+    else if (elapsedS > 1.2) stepId = 'ollama';
+
+    const { step, percent, etaSeconds } = stepProgress(OLLAMA_STEPS, stepId, elapsedS, lastPercent);
+    if (error) {
+      return failedResult(elapsedMs, clamp(Math.round(Math.max(lastPercent, step.from)), 0, 99), error);
+    }
     return {
-      percent: 100,
-      step: 'ready',
-      title: '工作台已就绪',
-      phase: '工作台已就绪',
-      detail: `用时 ${elapsedS.toFixed(1)} 秒`,
-      elapsedMs,
-      etaSeconds: 0,
-      done: true,
-      failed: false,
+      percent, step: step.id, title: '正在启动 Ollama 工作台', phase: step.label,
+      detail: ollamaNote(step.id), elapsedMs, etaSeconds, done: false, failed: false,
     };
   }
 
-  // 引擎起来了，就只剩界面没起
+  // ---- Strata ----
+  // 两个服务都在线：唯一的完成状态，别的路径都不许给 100
+  if (engineOnline && dshOnline) return readyResult(elapsedMs);
+
   let stepId = 'submit';
   if (engineOnline) stepId = 'dsh';
   else if (markers.ready || markers.almostReady) stepId = 'serving';
@@ -114,49 +193,25 @@ export function computeStartupProgress({
   else if (markers.weights) stepId = 'weights';
   else if (elapsedS > 1.5) stepId = 'spawn';
 
-  const step = stepOf(stepId);
-
-  // 当前阶段已经走了多久：总耗时减去此前各阶段的预期，负数按 0 算
-  const index = STARTUP_STEPS.indexOf(step);
-  const beforeS = STARTUP_STEPS.slice(0, index).reduce((sum, s) => sum + s.expect, 0);
-  const phaseElapsedS = Math.max(0, elapsedS - beforeS);
-
-  // 阶段内插值最多走到该区间的 85%：留在门口，等真信号来推门
-  const ratio = clamp(phaseElapsedS / Math.max(step.expect, 0.5), 0, 0.85);
-  let percent = step.from + (step.to - step.from) * ratio;
-
+  const { step, percent, etaSeconds } = stepProgress(STARTUP_STEPS, stepId, elapsedS, lastPercent);
   if (error) {
-    // 失败时冻结在「已经走到的地方」，不再往前爬
-    percent = Math.max(lastPercent, step.from);
-    return {
-      percent: clamp(Math.round(percent), 0, 99),
-      step: 'failed',
-      title: '启动失败',
-      phase: '启动失败',
-      detail: String(error),
-      elapsedMs,
-      etaSeconds: 0,
-      done: false,
-      failed: true,
-    };
+    return failedResult(elapsedMs, clamp(Math.round(Math.max(lastPercent, step.from)), 0, 99), error);
   }
-
-  // 尚未真正就绪，永远不给 100
-  percent = clamp(Math.round(Math.max(percent, lastPercent)), 0, 99);
-
-  const remainingS = STARTUP_STEPS.slice(index).reduce((sum, s) => sum + s.expect, 0) - phaseElapsedS;
   return {
-    percent,
-    step: step.id,
-    title: '正在启动工作台',
-    phase: step.label,
-    detail: phaseNote(step.id),
-    elapsedMs,
-    // 没完成就至少留 1 秒：显示「预计剩余 0s」却还在 88% 最容易被当成卡死
-    etaSeconds: Math.max(1, Math.round(remainingS)),
-    done: false,
-    failed: false,
+    percent, step: step.id, title: '正在启动工作台', phase: step.label,
+    detail: phaseNote(step.id), elapsedMs, etaSeconds, done: false, failed: false,
   };
+}
+
+function ollamaNote(id) {
+  switch (id) {
+    case 'submit': return '正在下发给服务控制器';
+    case 'vram': return '先让 Strata 退场，把显存腾出来';
+    case 'ollama': return 'Ollama 服务还没起来，正在启动';
+    case 'load': return '把模型权重读进显存，这一步最慢';
+    case 'dsh': return '模型已就位，正在打开工作台界面';
+    default: return '';
+  }
 }
 
 function phaseNote(id) {

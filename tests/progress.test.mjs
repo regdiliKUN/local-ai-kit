@@ -80,3 +80,47 @@ test('ETA 随阶段推进而下降', () => {
   assert.ok(start.etaSeconds > later.etaSeconds, `${start.etaSeconds} 应大于 ${later.etaSeconds}`);
   assert.ok(later.etaSeconds >= 0);
 });
+
+/* ------------------------------- Ollama 那条启动路径 ------------------------------- */
+
+test('Ollama 路径要三样齐了才算完成', () => {
+  const base = { backend: 'ollama', startedAt: T0, now: T0 + 60000 };
+
+  const onlyService = computeStartupProgress({ ...base, ollamaOnline: true });
+  assert.equal(onlyService.done, false, '服务在但模型没进显存，不算就绪');
+  assert.equal(onlyService.step, 'load');
+
+  const noUi = computeStartupProgress({ ...base, ollamaOnline: true, modelLoaded: true });
+  assert.equal(noUi.done, false, '模型进了显存但界面没起，不算就绪');
+  assert.equal(noUi.step, 'dsh');
+
+  const all = computeStartupProgress({ ...base, ollamaOnline: true, modelLoaded: true, dshOnline: true });
+  assert.equal(all.done, true);
+  assert.equal(all.percent, 100);
+  assert.match(all.title, /就绪/);
+});
+
+test('Strata 还占着显存时，Ollama 进度先停在「让出显存」', () => {
+  const p = computeStartupProgress({
+    backend: 'ollama', startedAt: T0, now: T0 + 4000, engineOnline: true, ollamaOnline: false,
+  });
+  assert.equal(p.step, 'vram');
+  assert.ok(p.percent < 32, `不该越过 Ollama 服务启动段，实际 ${p.percent}`);
+});
+
+test('Ollama 路径同样不会假装完成，也不会回退', () => {
+  const slow = computeStartupProgress({ backend: 'ollama', startedAt: T0, now: T0 + 20 * 60 * 1000, ollamaOnline: true });
+  assert.ok(slow.percent <= 99);
+  assert.equal(slow.done, false);
+
+  const back = computeStartupProgress({
+    backend: 'ollama', startedAt: T0, now: T0 + 2000, ollamaOnline: true, lastPercent: slow.percent,
+  });
+  assert.ok(back.percent >= slow.percent, '时间回退也不许掉百分比');
+});
+
+test('不传 backend 时仍走 Strata 老路径', () => {
+  const p = computeStartupProgress({ startedAt: T0, now: T0 + 5000, engineOnline: true, dshOnline: true });
+  assert.equal(p.done, true);
+  assert.match(p.title, /工作台已就绪/);
+});

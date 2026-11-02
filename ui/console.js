@@ -4336,24 +4336,39 @@ function setupButtons() {
   const svcApi = () => (state && state.strata ? '/api/strata/service' : '/api/service');
   const svcPayload = (action) => (state && state.strata ? { action } : { action });
 
-  $('btnStartSvc').addEventListener('click', async () => {
-    const btn = $('btnStartSvc');
-    btn.disabled = true;
-    // 先让进度条出现，再发请求：这个 POST 要等 PowerShell 跑完（最长 90 秒），
-    // 等它返回才显示进度的话，用户看到的就是「点了没反应」。
+  /**
+   * 两个启动按钮共用一条路径：先点亮进度条，再发请求。
+   *
+   * 为什么不等请求回来再显示进度：这两个 POST 都要等外部进程跑完（启动脚本 / 模型加载），
+   * 最长能到几分钟。等它返回才画进度条，用户看到的就是「点了没反应」。
+   */
+  const startWorkbench = async (button, endpoint, body) => {
+    if (!button || button.disabled) return;
+    if (endpoint === '/api/service/ollama' && !(state && state.strata)) {
+      toast('Ollama 启动入口只在 Strata 部署下可用');
+      return;
+    }
+    const buttons = [$('btnStartSvc'), $('btnStartOllama')].filter(Boolean);
+    buttons.forEach((b) => { b.disabled = true; });
     if (state && state.strata) startupBar.begin();
     try {
-      const r = await post(svcApi(), svcPayload('workbench'));
+      const r = await post(endpoint, body);
       if (r && r.ok === false) throw new Error(r.error || '启动失败');
-      $('svcHint').textContent = '已下发启动。首次启动引擎要加载模型，等十几秒后点「刷新状态」看结果。';
+      $('svcHint').textContent = '已下发启动，进度见下方。';
       setTimeout(() => loadState().catch(() => {}), 1500);
     } catch (e) {
       // 409（正在启动/停止）不是失败：另一个请求已经在推进，进度条接着跑就行
       if (!/正在/.test(e.message || '')) startupBar.fail(e.message);
       toast(e.message);
+    } finally {
+      buttons.forEach((b) => { b.disabled = false; });
     }
-    btn.disabled = false;
-  });
+  };
+
+  $('btnStartSvc').addEventListener('click', () => startWorkbench($('btnStartSvc'), svcApi(), svcPayload('workbench')));
+  if ($('btnStartOllama')) {
+    $('btnStartOllama').addEventListener('click', () => startWorkbench($('btnStartOllama'), '/api/service/ollama', {}));
+  }
 
   $('btnStopSvc').addEventListener('click', async () => {
     try {
