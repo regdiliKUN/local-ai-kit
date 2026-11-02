@@ -142,6 +142,9 @@ export async function startupProgress(cfg) {
 
   const progress = computeStartupProgress({
     startedAt: startupJob.startedAt,
+    // 完成后用 doneAt 当「现在」：否则每次查询都会拿新时间重算用时，
+    // 页面刷新一次就从「用时 48 秒」变成「用时 463 秒」
+    now: startupJob.doneAt || now,
     now,
     engineOnline: engine.online,
     dshOnline: dsh.online,
