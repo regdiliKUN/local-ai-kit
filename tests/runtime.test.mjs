@@ -70,6 +70,14 @@ test('newly installed flat runtime has a working console, presets and healthchec
     assert.equal((await fetch(url + 'api/config', { method: 'POST', headers: { 'X-LocalAI-Token': token }, body: '{' })).status, 400);
     assert.equal((await fetch(url)).status, 200);
     assert.equal(errors, '');
+    // 版本一致性探测：/api/info 给出进程启动时刻与代码文件最新 mtime，
+    // 首屏 HTML 把这两个值注入页面，前端据此揪出「旧进程跑新页面」。
+    const info = await (await fetch(url + 'api/info')).json();
+    assert.equal(typeof info.processStart, 'number');
+    assert.equal(typeof info.uiMtime, 'number');
+    assert.ok(typeof info.kitVersion === 'string' && info.kitVersion.length > 0);
+    assert.match(html, /window\.__PROC_START__=\d+/);
+    assert.match(html, /window\.__UI_MTIME__=\d+/);
   } finally {
     if (child && child.exitCode === null) { const closed = once(child, 'close'); child.kill(); await closed; }
     fs.rmSync(root, { recursive: true, force: true });

@@ -65,6 +65,30 @@ const ROOT = resolveRoot();
 const UI = path.join(ROOT, 'ui');
 const AUTOSTART_LNK = '启动本地AI.lnk';
 
+/**
+ * 界面 / 服务端代码文件的最新修改时间（取多种布局下可能存在的文件的最大 mtime）。
+ *
+ * 与 PROCESS_START 配合：只要有一个代码文件比进程启动晚，就说明「磁盘上是新代码、
+ * 跑着的是旧进程」——这时就该提醒用户重启黑窗口，而不是继续用会缺接口的旧进程。
+ */
+function uiBuildStamp() {
+  const cands = [
+    path.join(ROOT, 'console.mjs'),
+    path.join(ROOT, 'ui', 'console.js'),
+    path.join(ROOT, 'scripts', 'progress.mjs'),
+    path.join(ROOT, 'scripts', 'strata.mjs'),
+    path.join(ROOT, 'scripts', 'ollama.mjs'),
+    path.join(ROOT, 'progress.mjs'),
+    path.join(ROOT, 'strata.mjs'),
+    path.join(ROOT, 'ollama.mjs'),
+  ];
+  let max = 0;
+  for (const f of cands) {
+    try { const s = fs.statSync(f); if (s.mtimeMs > max) max = s.mtimeMs; } catch { /* 当前布局下不存在这个文件 */ }
+  }
+  return max;
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -78,6 +102,16 @@ const MIME = {
 
 const TOKEN = crypto.randomBytes(24).toString('hex');
 let PORT = 0;
+
+/**
+ * 进程启动时刻（ms）。
+ *
+ * 用来和界面/服务端代码文件的修改时间比，揪出这一类坑：用户没关掉老的黑色窗口，
+ * 我们（或安装向导）把代码更新到磁盘上，老进程还在跑、却把新的页面文件喂给浏览器——
+ * 结果新页面调的接口老进程没有，进度条之类就静默卡死。
+ * 页面据此显示一条明确的「请关掉黑色窗口重新打开」提示，而不是让用户一脸懵。
+ */
+const PROCESS_START = Date.now();
 
 const clients = new Set();
 let busy = null;            // 当前在忙什么（'pull:模型名' 之类），避免并发操作
@@ -909,6 +943,18 @@ const server = createSafeServer(async (req, res) => {
   // 只读接口，放在 Strata 适配器之前 —— 两种部署模式都要能看机器状态。
   if (p === '/api/metrics') {
     return json(res, 200, await buildMetrics());
+  }
+
+  /* -------------------------------------------------------- 进程/版本信息 */
+  // 页面靠它判断「黑窗口是不是旧版本」：processStart 是进程启动时刻，
+  // uiMtime 是磁盘上代码文件的最新修改时间。前者早于后者 = 旧进程跑新页面。
+  if (p === '/api/info' && req.method === 'GET') {
+    return json(res, 200, {
+      processStart: PROCESS_START,
+      uptime: Date.now() - PROCESS_START,
+      kitVersion: KIT_VERSION,
+      uiMtime: uiBuildStamp(),
+    });
   }
 
   /* ---------------------------------------------------------------- 日志 */
@@ -1845,7 +1891,8 @@ const server = createSafeServer(async (req, res) => {
       metrics: await buildMetrics({ fast: true }),
     };
     const inject = `<script>window.__BOOT__=${JSON.stringify(boot).replace(/</g, '\\u003c')};</script>`
-      + `<script>window.__TOKEN__='${TOKEN}';</script>`;
+      + `<script>window.__TOKEN__='${TOKEN}';</script>`
+      + `<script>window.__PROC_START__=${PROCESS_START};window.__UI_MTIME__=${uiBuildStamp()};</script>`;
     const html = fs.readFileSync(full, 'utf8').replace('<script src="console.js"></script>', `${inject}\n<script src="console.js"></script>`);
     applySecurityHeaders(res);
     res.writeHead(200, { 'Content-Type': MIME['.html'], 'Cache-Control': 'no-store' });

@@ -187,6 +187,24 @@ if ($('langSelect')) {
   document.documentElement.lang = I18n.currentLang() === 'en' ? 'en' : 'zh-CN';
 })();
 
+/* -------------------------------------------------- 版本一致性提示 */
+/**
+ * 和后端 PROCESS_START / uiMtime 配合，揪出「旧进程跑新页面」。
+ *
+ * 容忍 3 秒：刚双击打开时，文件 mtime 和进程启动时刻可能只差几百毫秒，
+ * 那是正常的「我刚更新完、现在重启」而不是「旧进程还在跑」，不该误报。
+ */
+(function initVersionWarn() {
+  const proc = Number(window.__PROC_START__);
+  const ui = Number(window.__UI_MTIME__);
+  const banner = document.getElementById('versionWarn');
+  if (!banner) return;
+  const mismatch = Number.isFinite(proc) && Number.isFinite(ui) && (ui - proc) > 3000;
+  banner.hidden = !mismatch;
+  const close = document.getElementById('versionWarnClose');
+  if (close) close.addEventListener('click', () => { banner.hidden = true; });
+})();
+
 /* ------------------------------------------------------------------ 主题 */
 
 /**

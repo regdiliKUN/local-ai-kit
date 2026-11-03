@@ -1849,3 +1849,19 @@ html[data-theme="dark"] {
   .bl-bar, .sb-seg, .fn-seg, .mx-cell, .tl-bar, .sl-line { animation: none !important; transition: none !important; }
   * { scroll-behavior: auto !important; }
 }
+
+/* 版本不一致提示：黑窗口是旧进程、却在服务新页面时，顶部常驻一条告警 */
+.version-warn {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: #b45309; color: #fff7ed;
+  padding: 11px 16px; font-size: 13.5px; line-height: 1.55;
+  border-bottom: 2px solid #7c3f0a;
+}
+.version-warn[hidden] { display: none; }
+.version-warn strong { color: #fff; }
+.version-warn .vw-text { flex: 1; }
+.version-warn .btn.ghost {
+  flex: none; background: rgba(0, 0, 0, .22);
+  border-color: rgba(255, 255, 255, .45); color: #fff;
+}
+.version-warn .btn.ghost:hover { background: rgba(0, 0, 0, .34); }

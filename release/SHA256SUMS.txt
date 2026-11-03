@@ -1,7 +1,7 @@
-3ab20abddc1a79a90edbdb0a94b0cea02e0bc344cd49f576c9fc8f30ea0eabee  release/1.11.0/local-ai-kit-1.11.0-win-x64/dist/local-ai-kit-offline-1.11.0.zip
+d294f39f45b604be118fd8f20b726fc166e9a7ce84db4a08f7e51dca714a8c2a  release/1.11.0/local-ai-kit-1.11.0-win-x64/dist/local-ai-kit-offline-1.11.0.zip
 1c37ecc5e4ecb838cd99b0fd70b77c7589fe76d97505767d8a4a3a52b0d413f3  release/1.11.0/local-ai-kit-1.11.0-win-x64/launcher/open-local-ai.ps1
 ae8a3075dc4c003d9ce99ebff62f403975f43a61cd35865ee2ca53e09cc37791  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/.github/workflows/ci.yml
-ac675a010cae5ba8da268044eaa3750c62c624e4cb651388fe5fab0ac7c41302  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/CHANGELOG.md
+70bdf9528b2815e2aa10623085e68a2f967368b7181a22761c059bfd1d6a2adf  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/CHANGELOG.md
 bb1360fd9639e863cc232e76650a205b884c9803f6eb0c3f444d931f3187d7ee  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/CONTRIBUTING.md
 5ca2920d4f56954100c8f365461aba7b6c6154da49734f7b2703d9275ad49d11  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/LICENSE
 f6dcc5c2da7b8df24c9a1b3b2751031d740a5335b9b1d74a5c87bb4fe1a51e06  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/README.md
@@ -62,7 +62,7 @@ b8469f4b791202ec0e36414eac2627dae0b974af8c6f6305321b7d8c89ee4fc0  release/1.11.0
 d50d95aa83b5dd3f1e3b7d0a2c5428f09b9c2cf54f61c215f2c7971ae283b1c4  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/config.mjs
 a2a08e80da29010519d30b88e40751a91500c25189686ba0c3acf132f090282a  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/configdiff.mjs
 436d619e0ab5d7f901fba20cf4f14cf89cd12d428326324b43f42bba1e852292  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/connect-strata.mjs
-1021f8292e9304d6d5c261739d6446418b6434aecb5d5567d9020e29e3579dd9  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/console.mjs
+655bb4dbef54f16b4fa7c78ace24b7f44d9435717e2a1bdc0b3a31b7d496f223  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/console.mjs
 4fa0d83a47c53e8d1c192ef5ec722d16c8c9e055ad59fd4196c6a0026e6a9a76  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/conversation-tree.mjs
 8d46900de1fa1887ddc9af48f6176a040d6abb87a8658bae24f07c4bfadad54f  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/detect.mjs
 aeb3cc4e116a0512c6dc3f7b8c82a86b40180d29d04df8c38167385d4fc5f593  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/diskhealth.mjs
@@ -102,15 +102,15 @@ d163f43635671cca3d4e9c79426588cd6fca84b1788dc7adfe20511f97c35ec8  release/1.11.0
 2f897fd99e059dfa050094d9a4a897118241f08875838612478b7c88dca7ccce  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/scripts/zip.mjs
 43596ee3c36a6fdd610399c766c9419a7fc75d5e8a30f9ee7f729a62260b8165  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/app.js
 ed6b3362647a7318ae38ff020ab633d2d44e2facb457be94bfa77f41166d01aa  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/charts.js
-de2d9819e0c9ce4a076f3a93af7757c1df412d8f906056ab9aa5e1878a700614  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/console.html
-a7eacb19733ce5e744910fe1c6fc4fd93ddd58f10aa2472466426a45269d696b  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/console.js
+258a5ae79b8b031a9d4bf3538369425927ca9b426e7e8dbb84252002092eb46f  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/console.html
+e59f3e61eb974f753893efd27d629b141592c8767c732a7d3f149203d9a078d2  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/console.js
 175d60e401b960c44d81e900dcc77eb4cbf555215806523de79f243e50608b82  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/conversation-tree.js
 d2028000b430b382142bc4e31231a49993dc251a28da25816f0a470fce55c59c  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/guidance.js
-15f54a585513c03e4aea1a232fc0384236db81c7ced28d00aa44fc9be647d68c  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/i18n.js
+d5964249da30f6d5ef1a1fc8ebdf41a8dd0a28c10d1cd480605e0c806c84f13a  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/i18n.js
 82a4cc7b6e925ad285e66930283eaefa9487383578506ae7cfba83aa054a61e2  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/index.html
 f0c2c56fc217d78f6df25a79c4a5c6ed67fe342506ca039d44a9d3f1a727ca9b  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/strata.html
 df283ad4e8e47c180e2ac81936bc2a9f154870ddec99a311a3bb7a542fb2f210  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/strata.js
-843b739ec0e5060f483a3677629fc35b700ad48e4de5092f35817ccafca35951  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/style.css
+6c1fc889a3c2b188ddfb307f17ae040b5e869a45863d0a7ae7669e0785ec86c2  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/ui/style.css
 eff348dd75931d8cc6b177c24e41c3536335c10d1fa01407a9f47ae760ae5403  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/① 双击这里开始安装.cmd
 1841056dc695afb59081b78e168636021a79de4dce063e6c29ee2cfbf413b8b4  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/使用说明.html
 163b0eaa8733a319e859992395387878b4474d2e2100a6d6f13d528d4f1fb586  release/1.11.0/local-ai-kit-1.11.0-win-x64/local-ai-kit/使用说明（纯文本版）.md
