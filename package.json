@@ -9,9 +9,11 @@
   },
   "scripts": {
     "test": "node --test",
-    "lint": "node --check scripts/console.mjs && node --check scripts/installer.mjs && node --check scripts/probe.mjs && node --check scripts/build-release.mjs && node --check ui/app.js && node --check ui/console.js && node --check ui/charts.js && node --check ui/strata.js",
+    "lint": "node --check scripts/console.mjs && node --check scripts/installer.mjs && node --check scripts/probe.mjs && node --check scripts/build-release.mjs && node --check scripts/dsh-preset-sync.mjs && node --check scripts/strata.mjs && node --check scripts/start-local-ai.mjs && node --check ui/app.js && node --check ui/console.js && node --check ui/charts.js && node --check ui/strata.js",
     "console": "node scripts/console.mjs",
     "installer": "node scripts/installer.mjs",
+    "dsh-sync": "node scripts/dsh-preset-sync.mjs",
+    "dsh-sync:check": "node scripts/dsh-preset-sync.mjs --check",
     "release": "node scripts/build-release.mjs",
     "release:verify": "node scripts/build-release.mjs --verify"
   },

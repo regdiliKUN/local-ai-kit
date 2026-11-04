@@ -20,6 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { loadConfig, deploymentRoot } from './config.mjs';
 import { runStrataAction } from './strata.mjs';
+import { syncDshPresets } from './dsh-preset-sync.mjs';
 import { OLLAMA_BASE, findOllama, isUp, killOllama, spawnServe, waitUp } from './ollama.mjs';
 // 工作台带 token 保护，匿名请求回 401 —— 那是在守门，不是没起来。
 // isUp() 只认 2xx，拿它判断 dsh 会把活着的服务当成挂了（详见 local-http.mjs 的说明）。
@@ -220,6 +221,11 @@ export async function warmUp() {
 export function runDsh() {
   log('[4/4] 启动 DeepSeek Harness');
   log('      正在启动（约 10 秒）...');
+
+  // dsh 升级会换掉官方预设，压缩配置是整段重述的 —— 启动前校正一次，失败不挡启动。
+  try {
+    syncDshPresets({ quiet: true });
+  } catch { /* 自愈失败不挡启动 */ }
 
   const bin = path.join(ROOT, 'dsh-runtime', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
   const child = spawn(process.execPath, [bin, 'web', '--no-open'], {

@@ -282,6 +282,15 @@ export async function runStrataAction(cfg, action, { dryRun = false } = {}) {
     if (quick) return quick;
   }
 
+  // 拉起工作台之前先校正 dsh 预设里的压缩参数：dsh 升级会换掉官方预设，
+  // 压缩配置是整段重述的，不校正就会静默失效。失败不影响启动。
+  if (!dryRun && (action === 'dsh' || action === 'workbench')) {
+    try {
+      const { syncDshPresets } = await import('./dsh-preset-sync.mjs');
+      syncDshPresets({ quiet: true });
+    } catch { /* 自愈失败不挡启动 */ }
+  }
+
   const payload = Buffer.from(JSON.stringify({ ...cfg, action, dryRun, nodeExe: process.execPath })).toString('base64');
   const task = new Promise((resolve, reject) => {
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
