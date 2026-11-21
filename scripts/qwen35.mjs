@@ -9,6 +9,8 @@
  * 配置（配置.json，可选）：
  *   qwen35Home   模型部署目录（里面放 model\ 和 runtime\ 两个子目录）
  *   qwen35ModelFile  model\ 里的 .gguf 文件名，换别的量化版本时改它
+ *   qwen35Mmproj     看图用的视觉投影文件（mmproj-*.gguf）。不写就自动找 model\ 里的 mmproj*.gguf；
+ *                    设成 false 关闭看图（省约 1 GB 显存）
  *   qwen35Port   端口，默认 8123（避开 Strata 8080/8090 和 DSH 3080）
  *   qwen35NCpuMoe / qwen35Ctx / qwen35Threads   同 .cmd 里的可调参数
  */
@@ -25,10 +27,28 @@ export const QWEN35_MODEL_PAGE = 'https://huggingface.co/HauhauCS/Qwen3.5-35B-A3
 export const LLAMA_CPP_RELEASES = 'https://github.com/ggml-org/llama.cpp/releases';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * 视觉投影文件：显式配置优先；否则在 model\ 里找 mmproj*.gguf；配置成 false 就不开看图。
+ * 没有它 llama-server 也能跑，只是只认文字。
+ */
+export function findMmproj(cfg = {}, modelDir) {
+  if (cfg.qwen35Mmproj === false) return null;
+  if (cfg.qwen35Mmproj) {
+    const f = path.join(modelDir, path.basename(String(cfg.qwen35Mmproj)));
+    return fs.existsSync(f) ? f : null;
+  }
+  try {
+    const hit = fs.readdirSync(modelDir).find((n) => /^mmproj.*\.gguf$/i.test(n));
+    return hit ? path.join(modelDir, hit) : null;
+  } catch { return null; }
+}
+
 export function qwenSettings(cfg = {}) {
   const home = cfg.qwen35Home || 'F:\\Qwen3.5-35B-A3B-Uncensored';
+  const modelDir = path.join(home, 'model');
   return {
     home,
+    mmproj: findMmproj(cfg, modelDir),
     exe: path.join(home, 'runtime', 'llama-server.exe'),
     model: path.join(home, 'model', path.basename(String(cfg.qwen35ModelFile || DEFAULT_MODEL_FILE))),
     port: Number(cfg.qwen35Port) || 8123,
@@ -82,6 +102,8 @@ export function spawnQwen(cfg) {
     '-c', String(s.ctx), '-fa', 'on', '--jinja',
     '-t', String(s.threads), '-np', '1',
   ];
+  // 有视觉投影文件就开看图（工作台那边也要把 input 标成 [text, image]）
+  if (s.mmproj) args.push('--mmproj', s.mmproj);
   const child = spawn(s.exe, args, {
     cwd: path.dirname(s.exe), detached: true, windowsHide: true, stdio: ['ignore', out, err],
   });
