@@ -27,6 +27,13 @@ export const SCRIPT_FILES = [
   'cmd-entries.mjs',
   // v1.11.1 新增（启动进度模型，strata.mjs 直接 import 它）
   'progress.mjs',
+  // 新增：Qwen3.5-35B-A3B（llama.cpp）服务控制，console.mjs 直接 import 它
+  'qwen35.mjs',
+  // 新增：语音输入（本地 faster-whisper），console.mjs 直接 import voice.mjs，它再拉起 voice-worker.py
+  'voice.mjs',
+  'voice-worker.py',
+  // 新增：工作台闲置自动释放显存
+  'idle-release.mjs',
 ];
 
 /**

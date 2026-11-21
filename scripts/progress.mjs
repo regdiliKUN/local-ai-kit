@@ -40,6 +40,15 @@ export const OLLAMA_STEPS = [
   { id: 'dsh', from: 84, to: 98, label: '启动工作台界面', expect: 9 },
 ];
 
+/** Qwen3.5-35B-A3B（llama.cpp）启动路径：结构同 Ollama，加载约十几秒 */
+export const QWEN35_STEPS = [
+  { id: 'submit', from: 0, to: 4, label: '已提交启动', expect: 1 },
+  { id: 'vram', from: 4, to: 14, label: '让出显存', expect: 6 },
+  { id: 'ollama', from: 14, to: 28, label: '启动 llama.cpp 服务', expect: 4 },
+  { id: 'load', from: 28, to: 84, label: '加载模型到显存', expect: 20 },
+  { id: 'dsh', from: 84, to: 98, label: '启动工作台界面', expect: 9 },
+];
+
 /** 引擎启动日志里的里程碑。顺序有意义：后面的出现意味着前面的都已经过 */
 const MARKERS = [
   ['weights', /reading the model's weights|loading the model/i],
@@ -162,6 +171,25 @@ export function computeStartupProgress({
   const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
   const elapsedS = elapsedMs / 1000;
 
+  // Qwen3.5（llama.cpp）和 Ollama 的启动形状一样：让显存 → 起服务 → 读权重 → 开界面。
+  // ollamaOnline = llama-server 进程在听端口，modelLoaded = /health 回 200。
+  if (backend === 'qwen35') {
+    if (ollamaOnline && modelLoaded && dshOnline) return readyResult(elapsedMs);
+    let stepId = 'submit';
+    if (ollamaOnline && modelLoaded) stepId = 'dsh';
+    else if (ollamaOnline) stepId = 'load';
+    else if (engineOnline) stepId = 'vram';
+    else if (elapsedS > 1.2) stepId = 'ollama';
+    const { step, percent, etaSeconds } = stepProgress(QWEN35_STEPS, stepId, elapsedS, lastPercent);
+    if (error) {
+      return failedResult(elapsedMs, clamp(Math.round(Math.max(lastPercent, step.from)), 0, 99), error);
+    }
+    return {
+      percent, step: step.id, title: '正在启动 Qwen3.5 工作台', phase: step.label,
+      detail: qwenNote(step.id), elapsedMs, etaSeconds, done: false, failed: false,
+    };
+  }
+
   if (backend === 'ollama') {
     // 服务在、模型进了显存、界面也起来了 —— 三个都齐才算就绪
     if (ollamaOnline && modelLoaded && dshOnline) return readyResult(elapsedMs);
@@ -201,6 +229,17 @@ export function computeStartupProgress({
     percent, step: step.id, title: '正在启动工作台', phase: step.label,
     detail: phaseNote(step.id), elapsedMs, etaSeconds, done: false, failed: false,
   };
+}
+
+function qwenNote(id) {
+  switch (id) {
+    case 'submit': return '正在下发给服务控制器';
+    case 'vram': return '先让 Strata / Ollama 退场，把显存腾出来';
+    case 'ollama': return 'llama.cpp 服务还没起来，正在启动';
+    case 'load': return '把 20GB 权重读进显存，这一步最慢';
+    case 'dsh': return '模型已就位，正在打开工作台界面';
+    default: return '';
+  }
 }
 
 function ollamaNote(id) {

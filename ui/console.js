@@ -1217,6 +1217,51 @@ function renderSettings() {
   $('swAutostart').checked = !!state.settings.autostart;
   $('swLan').checked = !!state.settings.lanShare;
   if ($('swSelfHeal')) $('swSelfHeal').checked = !!(state && state.selfHeal);
+  const idle = state && state.idleRelease;
+  if (idle && $('swIdleRelease')) {
+    $('swIdleRelease').checked = !!idle.enabled;
+    if ($('swCloseRelease')) $('swCloseRelease').checked = !!idle.onClose;
+    // 正在输入时不要被 5 秒一次的刷新覆盖
+    if (document.activeElement !== $('idleMinutes')) $('idleMinutes').value = idle.minutes;
+  }
+}
+
+async function saveIdleRelease(patch) {
+  const r = await post('/api/settings', { idleRelease: patch });
+  if (r.idleRelease && state) state.idleRelease = r.idleRelease;
+  return r.idleRelease;
+}
+
+if ($('swCloseRelease')) {
+  $('swCloseRelease').addEventListener('change', async (e) => {
+    const on = e.target.checked;
+    try {
+      await saveIdleRelease({ onClose: on });
+      toast(on ? '已开启：关掉工作台页面后自动释放显存' : '已关闭：关掉工作台页面后不再自动释放');
+    } catch (err) {
+      toast(err.message);
+      e.target.checked = !on;
+    }
+  });
+}
+
+if ($('swIdleRelease')) {
+  $('swIdleRelease').addEventListener('change', async (e) => {
+    const on = e.target.checked;
+    try {
+      const s = await saveIdleRelease({ enabled: on });
+      toast(on ? `已开启：工作台闲置 ${s ? s.minutes : 30} 分钟后自动释放显存` : '已关闭闲置自动释放');
+    } catch (err) {
+      toast(err.message);
+      e.target.checked = !on;
+    }
+  });
+  $('idleMinutes').addEventListener('change', async (e) => {
+    try {
+      const s = await saveIdleRelease({ minutes: Number(e.target.value) });
+      if (s) { e.target.value = s.minutes; toast(`已改为闲置 ${s.minutes} 分钟后释放`); }
+    } catch (err) { toast(err.message); }
+  });
 }
 
 if ($('swSelfHeal')) {
@@ -2313,6 +2358,118 @@ if ($('playInput')) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); playSend(); }
   });
 }
+
+/*
+ * 语音输入：浏览器录音 → POST 给控制台 → 本地 faster-whisper 转文字 → 插到输入框光标处。
+ * 音频不出本机。点一下开始，再点一下结束；Alt+M 同效。
+ */
+const voiceInput = (() => {
+  const btn = $('btnMic');
+  if (!btn) return null;
+  let rec = null;
+  let stream = null;
+  let chunks = [];
+  let busy = false;
+  let warmed = false;
+
+  const setIdle = () => { btn.classList.remove('recording', 'busy'); btn.textContent = '🎤 语音'; btn.disabled = false; };
+
+  function insertText(text) {
+    const ta = $('playInput');
+    if (!ta || !text) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? ta.value.length;
+    ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+    const pos = start + text.length;
+    ta.focus();
+    ta.setSelectionRange(pos, pos);
+  }
+
+  /** 进入「试用」页时预热模型，免得第一句话要多等几秒加载 */
+  function warm() {
+    if (warmed) return;
+    warmed = true;
+    post('/api/voice/warm', {}).catch(() => { warmed = false; });
+  }
+
+  async function start() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      toast('这个浏览器不支持录音，请用新版 Edge / Chrome');
+      return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (e) {
+      toast(e && e.name === 'NotAllowedError' ? '麦克风权限被拒绝了：点地址栏左边的图标允许麦克风' : '打不开麦克风：' + (e.message || e));
+      return;
+    }
+    warm();
+    chunks = [];
+    const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
+    rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    rec.onstop = finish;
+    rec.start();
+    btn.classList.add('recording');
+    btn.textContent = '■ 说完了';
+    btn.title = '正在听…再点一下结束';
+  }
+
+  async function finish() {
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+    const type = (rec && rec.mimeType) || 'audio/webm';
+    rec = null;
+    const blob = new Blob(chunks, { type });
+    chunks = [];
+    if (blob.size < 1000) { setIdle(); toast('没录到声音'); return; }
+    busy = true;
+    btn.classList.remove('recording');
+    btn.classList.add('busy');
+    btn.textContent = '识别中…';
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/voice/transcribe?lang=zh', {
+        method: 'POST',
+        headers: { 'Content-Type': type.split(';')[0], 'X-LocalAI-Token': window.__TOKEN__ || '' },
+        body: blob,
+      });
+      let data = {};
+      try { data = await r.json(); } catch { /* 无内容 */ }
+      if (r.status === 404) throw new Error('控制台进程是旧版本，请关掉后重新打开「本地AI」');
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      if (!data.text) toast('没听清，再说一遍试试');
+      else insertText(data.text);
+    } catch (e) {
+      toast('语音识别失败：' + (e.message || e));
+    } finally {
+      busy = false;
+      btn.title = '语音输入（本地识别，音频不出本机）。点一下开始说话，再点一下结束（快捷键 Alt+M）';
+      setIdle();
+    }
+  }
+
+  function toggle() {
+    if (busy) return;
+    if (rec && rec.state === 'recording') rec.stop();
+    else start();
+  }
+
+  btn.addEventListener('click', toggle);
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'm' || e.key === 'M')) {
+      const view = $('view-play');
+      if (view && !view.hidden) { e.preventDefault(); toggle(); }
+    }
+  });
+  // 「试用」页一露面就预热
+  const view = $('view-play');
+  if (view) {
+    new MutationObserver(() => { if (!view.hidden) warm(); }).observe(view, { attributes: true, attributeFilter: ['hidden'] });
+    if (!view.hidden) warm();
+  }
+  return { toggle, warm };
+})();
 
 /* 对话导出为独立 HTML（自包含、可双击打开） */
 async function exportChatHtml() {
@@ -4267,6 +4424,10 @@ function setupButtons() {
       if (p.done) {
         wrap.classList.add('done');
         $('startNote').className = 'startup-note ok';
+        // 后端就绪时会自动打开工作台；浏览器没弹出来时，这里给一个手动入口
+        if (p.workbenchUrl) {
+          $('startNote').innerHTML = `${esc(p.detail || '')} <a href="${esc(p.workbenchUrl)}" target="_blank" rel="noopener">打开工作台 →</a>`;
+        }
         $('startEta').textContent = '0s';
         stopPolling();
         // 完成状态停留 12 秒再收起，给用户一个明确的「结束了」的落点
@@ -4282,6 +4443,7 @@ function setupButtons() {
     }
 
     let missCount = 0;
+    let begunAt = 0;
 
     async function poll() {
       try {
@@ -4296,7 +4458,12 @@ function setupButtons() {
         if (!r.ok) throw new Error(String(r.status));
         missCount = 0;
         const p = await r.json();
-        if (!p.active) { hide(); return; }
+        // 刚点完按钮时，这次查询可能比启动请求先到后端 —— 那时任务还没登记，
+        // 不能当成「没有任务」就收起不查了（以前就是这样卡片一闪不见、工作台也不弹）
+        if (!p.active) {
+          if (Date.now() - begunAt < 8000) { timer = setTimeout(poll, 500); return; }
+          hide(); return;
+        }
         paint(p);
         if (p.done || p.failed) return;
       } catch (e) {
@@ -4311,7 +4478,7 @@ function setupButtons() {
     }
 
     return {
-      begin() { reset(); poll(); },
+      begin() { reset(); begunAt = Date.now(); poll(); },
       /** 页面在启动过程中被刷新时，把还在跑的进度接回来（只接一次，不反复弹） */
       resume() {
         if (!wrap || !wrap.hidden) return;
@@ -4362,17 +4529,20 @@ function setupButtons() {
    */
   const startWorkbench = async (button, endpoint, body) => {
     if (!button || button.disabled) return;
-    if (endpoint === '/api/service/ollama' && !(state && state.strata)) {
-      toast('Ollama 启动入口只在 Strata 部署下可用');
+    if ((endpoint === '/api/service/ollama' || endpoint === '/api/service/qwen35') && !(state && state.strata)) {
+      toast('这个启动入口只在 Strata 部署下可用');
       return;
     }
-    const buttons = [$('btnStartSvc'), $('btnStartOllama')].filter(Boolean);
+    const buttons = [$('btnStartSvc'), $('btnStartOllama'), $('btnStartQwen35')].filter(Boolean);
     buttons.forEach((b) => { b.disabled = true; });
     if (state && state.strata) startupBar.begin();
     try {
       const r = await post(endpoint, body);
       if (r && r.ok === false) throw new Error(r.error || '启动失败');
-      $('svcHint').textContent = '已下发启动，进度见下方。';
+      // 已经在跑的时候后端瞬间就绪，进度卡片一闪而过 —— 这里直接说清楚，免得以为没反应
+      $('svcHint').textContent = r && r.alreadyRunning
+        ? '已经在运行，工作台已为你打开（没弹出来就点进度卡片里的「打开工作台」）。'
+        : '已下发启动，进度见下方。';
       setTimeout(() => loadState().catch(() => {}), 1500);
     } catch (e) {
       // 409（正在启动/停止）不是失败：另一个请求已经在推进，进度条接着跑就行
@@ -4386,6 +4556,9 @@ function setupButtons() {
   $('btnStartSvc').addEventListener('click', () => startWorkbench($('btnStartSvc'), svcApi(), svcPayload('workbench')));
   if ($('btnStartOllama')) {
     $('btnStartOllama').addEventListener('click', () => startWorkbench($('btnStartOllama'), '/api/service/ollama', {}));
+  }
+  if ($('btnStartQwen35')) {
+    $('btnStartQwen35').addEventListener('click', () => startWorkbench($('btnStartQwen35'), '/api/service/qwen35', {}));
   }
 
   $('btnStopSvc').addEventListener('click', async () => {

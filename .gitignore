@@ -37,3 +37,7 @@ desktop.ini
 
 # 打包的 Node.js 运行时（避免 90MB 进 git 历史）
 node/
+
+# 模型权重太大，永远不进仓库（Qwen3.5 等请按 docs/qwen35.md 自行下载）
+*.gguf
+*.safetensors

@@ -22,7 +22,12 @@ import { spawn, spawnSync, execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig, saveConfig, sanitizeConfig, listBackups, backupConfig } from './config.mjs';
-import { strataState, runStrataAction, handleStrata, startupProgress, beginStartupJob, failStartupJob } from './strata.mjs';
+import { strataState, runStrataAction, handleStrata, startupProgress, beginStartupJob, failStartupJob, dshWorkbenchUrl, setWorkbenchShellUrl, startStartupWatcher } from './strata.mjs';
+import { qwenState, qwenInstalled, qwenMissingHint, spawnQwen, waitQwenReady, stopQwen, QWEN35_ALIAS } from './qwen35.mjs';
+import { voiceState, warmVoice, transcribe, readAudioBody, stopVoice } from './voice.mjs';
+import { createIdleReleaser, createPresence } from './idle-release.mjs';
+// 控制台退出时把常驻的语音转写进程一起带走
+process.on('exit', stopVoice);
 import { OLLAMA_BASE, findOllama, isUp, isValidModelName, killOllama, spawnServe, waitUp, ollamaEnv, resolveModelDir } from './ollama.mjs';
 import { readSettings, startupDir, freeSpaceGB, detectDisks, detectSystem, pidOnPort, detectGpu } from './detect.mjs';
 import { CONTEXT_OPTIONS, contextFit } from './models.mjs';
@@ -787,8 +792,10 @@ async function buildState() {
     health: lastHealth,
     logPath: path.join(os.tmpdir(), 'localai-console.log'),
     selfHeal: healStore.enabled,
+    idleRelease: { ...idleStore, openPages: workbenchPresence.count },
     // Strata 部署时把三个服务的信息一并带出来（并入同一个界面）
     strata: cfg.backend === 'strata' ? await strataState(cfg) : null,
+    qwen35: qwenInstalled(cfg) ? await qwenState(cfg) : null,
   };
 }
 
@@ -844,6 +851,128 @@ function startHealWatchdog() {
   lastOllamaUp = null;
   healTimer = setInterval(() => { healTick().catch(() => {}); }, 15000);
   if (typeof healTimer.unref === 'function') healTimer.unref();
+}
+
+/* -------------------------------------------- 工作台闲置自动释放显存 */
+/**
+ * 两种自动释放：
+ *   onClose  关掉工作台页面就释放（默认开）。工作台由控制台的 /workbench 外壳页打开，
+ *            外壳页开着就和控制台保持一条长连接，人走开多久都不释放；页面一关连接断开，
+ *            等 45 秒没重连（排除刷新）就「停止服务并释放显存」。
+ *   enabled  闲置 N 分钟释放（默认关）：工作台和模型端口 N 分钟都没连接就释放。
+ */
+const idleStore = { onClose: true, enabled: false, minutes: 30 };
+
+function loadIdleSetting() {
+  try {
+    const item = readList('notes').find((n) => n && n.kind === 'idlerelease');
+    if (item) {
+      if (typeof item.onClose === 'boolean') idleStore.onClose = item.onClose;
+      idleStore.enabled = !!item.enabled;
+      idleStore.minutes = clampIdleMinutes(item.minutes);
+    }
+  } catch { /* ignore */ }
+}
+
+function clampIdleMinutes(v) {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.max(1, Math.min(240, n)) : 30;
+}
+
+function saveIdleSetting({ onClose, enabled, minutes }) {
+  if (typeof onClose === 'boolean') idleStore.onClose = onClose;
+  if (typeof enabled === 'boolean') idleStore.enabled = enabled;
+  if (minutes !== undefined) idleStore.minutes = clampIdleMinutes(minutes);
+  try {
+    const list = readList('notes').filter((n) => !(n && n.kind === 'idlerelease'));
+    list.push({ kind: 'idlerelease', onClose: idleStore.onClose, enabled: idleStore.enabled, minutes: idleStore.minutes, at: Date.now() });
+    writeList('notes', list);
+  } catch { /* ignore */ }
+}
+
+async function ollamaHasLoadedModel() {
+  try {
+    const r = await fetch(`${OLLAMA_BASE}/api/ps`, { signal: AbortSignal.timeout(1500) });
+    if (!r.ok) return false;
+    const { models = [] } = await r.json();
+    return models.length > 0;
+  } catch { return false; }
+}
+
+/** 和「停止服务并释放显存」按钮做同样的事 */
+async function releaseAllVram(why = `工作台闲置 ${idleStore.minutes} 分钟`) {
+  if (strataBusy) return;
+  strataBusy = '自动释放显存';
+  try {
+    await stopQwen(cfg).catch(() => {});
+    await unloadOllamaModels();
+    if (cfg.backend === 'strata') await runStrataAction(cfg, 'stop').catch(() => {});
+    logLine('[闲置释放] 已停止服务，显存已释放');
+    broadcast({ type: 'notice', text: `${why}，已自动停止服务并释放显存`, tone: 'info' });
+  } finally { strataBusy = null; }
+}
+
+const idleReleaser = createIdleReleaser({
+  getSetting: () => idleStore,
+  ports: () => [cfg.dshPort, cfg.enginePort, Number(cfg.qwen35Port) || 8123, 11434],
+  modelLoaded: async () => {
+    const [strata, qwen, ollama] = await Promise.all([
+      cfg.backend === 'strata' ? strataEngineUp(cfg) : false,
+      qwenInstalled(cfg) ? qwenState(cfg).then((s) => s.online).catch(() => false) : false,
+      ollamaHasLoadedModel(),
+    ]);
+    return strata || qwen || ollama;
+  },
+  busy: () => Boolean(strataBusy),
+  release: () => releaseAllVram(),
+  log: logLine,
+});
+
+async function anyModelLoaded() {
+  const [strata, qwen, ollama] = await Promise.all([
+    cfg.backend === 'strata' ? strataEngineUp(cfg) : false,
+    qwenInstalled(cfg) ? qwenState(cfg).then((s) => s.online).catch(() => false) : false,
+    ollamaHasLoadedModel(),
+  ]);
+  return strata || qwen || ollama;
+}
+
+const workbenchPresence = createPresence({
+  graceMs: 45000,
+  onEmpty: async () => {
+    if (!idleStore.onClose || strataBusy) return;
+    if (!(await anyModelLoaded())) return;
+    logLine('[关闭释放] 工作台页面已全部关闭，正在停止服务并释放显存');
+    await releaseAllVram('工作台页面已关闭');
+  },
+});
+
+/** 工作台外壳页：整页嵌入 dsh，同时用一条 SSE 告诉控制台「我还开着」 */
+function workbenchShell(dshUrl) {
+  const src = JSON.stringify(dshUrl).replace(/</g, '\\u003c');
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本地 AI 工作台</title>
+<style>
+  html,body{margin:0;height:100%;background:#0f1115;overflow:hidden}
+  iframe{border:0;width:100%;height:100%;display:block}
+  #bar{position:fixed;right:10px;bottom:10px;font:12px system-ui,sans-serif;color:#9aa3af;
+    background:rgba(20,22,28,.85);padding:4px 9px;border-radius:7px;pointer-events:none;opacity:0;transition:opacity .3s}
+  #bar.show{opacity:1}
+</style></head>
+<body>
+<iframe id="wb" allow="clipboard-read; clipboard-write; microphone; fullscreen"></iframe>
+<div id="bar"></div>
+<script>
+  document.getElementById('wb').src = ${src};
+  // 这条连接就是「工作台还开着」的信号：页面关掉它就断，控制台据此释放显存
+  var bar = document.getElementById('bar');
+  var es = new EventSource('/api/workbench/presence');
+  es.onopen = function () { bar.classList.remove('show'); };
+  es.onerror = function () { bar.textContent = '与控制台的连接断开，正在重连…'; bar.classList.add('show'); };
+</script>
+</body></html>`;
 }
 
 /* ------------------------------------------------- 启动路径上的几个小探针 */
@@ -955,6 +1084,47 @@ const server = createSafeServer(async (req, res) => {
       kitVersion: KIT_VERSION,
       uiMtime: uiBuildStamp(),
     });
+  }
+
+  /* ------------------------------------------------- 工作台外壳 + 在线信号 */
+  if (p === '/workbench' && req.method === 'GET' && cfg.backend === 'strata') {
+    const dshUrl = dshWorkbenchUrl(cfg);
+    applySecurityHeaders(res);
+    // 外壳页要嵌入另一个端口上的工作台，CSP 单独放开 frame-src
+    res.setHeader('Content-Security-Policy',
+      `default-src 'self'; frame-src http://127.0.0.1:${Number(cfg.dshPort)}; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'`);
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(workbenchShell(dshUrl));
+  }
+  if (p === '/api/workbench/presence' && req.method === 'GET') {
+    let left = false;
+    const leave = () => { if (!left) { left = true; workbenchPresence.leave(); } };
+    workbenchPresence.join();
+    openEventStream(res, { heartbeatMs: 15000, onDead: leave });
+    req.on('close', leave);
+    return;
+  }
+
+  /* ------------------------------------------------------------ 语音输入 */
+  // 本地 faster-whisper 转写，两种部署模式都能用，所以放在 Strata 适配器之前
+  if (p === '/api/voice/state' && req.method === 'GET') {
+    return json(res, 200, voiceState(cfg));
+  }
+  if (p === '/api/voice/warm' && req.method === 'POST') {
+    try {
+      const info = await warmVoice(cfg);
+      return json(res, 200, { ok: true, ...info });
+    } catch (e) { return json(res, 400, { error: String(e.message || e) }); }
+  }
+  if (p === '/api/voice/transcribe' && req.method === 'POST') {
+    try {
+      const audio = await readAudioBody(req);
+      const type = String(req.headers['content-type'] || '');
+      const ext = /ogg/.test(type) ? 'ogg' : /mp4|m4a|aac/.test(type) ? 'm4a' : /wav/.test(type) ? 'wav' : 'webm';
+      const lang = /^[a-z]{2}$/.test(url.searchParams.get('lang') || '') ? url.searchParams.get('lang') : 'zh';
+      const r = await transcribe(cfg, audio, { lang, ext });
+      return json(res, 200, { ok: true, ...r });
+    } catch (e) { return json(res, e.statusCode || 400, { error: String(e.message || e) }); }
   }
 
   /* ---------------------------------------------------------------- 日志 */
@@ -1075,9 +1245,12 @@ const server = createSafeServer(async (req, res) => {
       }
       strataBusy = action === 'stop' ? '停止服务' : '启动服务';
       try {
-        // 「启动 Strata 模型」和 Ollama 抢的是同一块显存，先让 Ollama 把模型卸了
+        // 「启动 Strata 模型」和 Ollama / Qwen3.5 抢的是同一块显存，先让它们退场
         if (action === 'workbench' && await ollamaUp()) {
           await unloadOllamaModels();
+        }
+        if (action === 'workbench' || action === 'engine' || action === 'stop') {
+          await stopQwen(cfg).catch(() => {});
         }
         const result = await runStrataAction(cfg, action);
         return json(res, result.ok ? 200 : 409, result);
@@ -1093,10 +1266,11 @@ const server = createSafeServer(async (req, res) => {
       const model = String(cfg.ollamaModel || cfg.model || 'qwen3.8:27b').trim();
       beginStartupJob({ action: 'workbench', backend: 'ollama', model });
       try {
-        // 1) Strata 占着 22GB，不腾出来 27B 根本进不去
+        // 1) Strata 占着 22GB，不腾出来 27B 根本进不去；Qwen3.5 同理
         if (await strataEngineUp(cfg)) {
           await runStrataAction(cfg, 'stop').catch(() => {});
         }
+        await stopQwen(cfg).catch(() => {});
         // 2) Ollama 服务本身；如果它活着却看不见这个模型（模型目录被指到了别处），
         //    就用正确的目录重启一次，否则后面会以「模型不存在」告终
         if (!(await ollamaUp()) || !(await ollamaHasModel(model))) {
@@ -1114,7 +1288,31 @@ const server = createSafeServer(async (req, res) => {
         await warmOllamaModel(model, cfg);
         // 4) 只开界面，不碰 Strata 引擎
         const result = await runStrataAction(cfg, 'dsh');
-        return json(res, 200, { ok: true, model, ...result });
+        // 模型刚热进显存，就算工作台界面早开着也不算「已经在运行」
+        return json(res, 200, { ok: true, model, ...result, alreadyRunning: false });
+      } catch (e) {
+        failStartupJob(e.message);
+        return json(res, 400, { error: String(e.message || e) });
+      } finally { strataBusy = null; }
+    }
+    // 启动 Qwen3.5 那一路：停 Strata、卸 Ollama → 起 llama-server → 等模型就绪 → 只开界面
+    if (p === '/api/service/qwen35' && req.method === 'POST') {
+      if (strataBusy) return json(res, 409, { error: `正在${strataBusy}，请稍候` });
+      strataBusy = '启动 Qwen3.5 工作台';
+      beginStartupJob({ action: 'workbench', backend: 'qwen35', model: QWEN35_ALIAS });
+      try {
+        if (!qwenInstalled(cfg)) throw new Error(qwenMissingHint(cfg));
+        const wasLoaded = (await qwenState(cfg)).loaded;
+        if (!wasLoaded) {
+          if (await strataEngineUp(cfg)) await runStrataAction(cfg, 'stop').catch(() => {});
+          if (await ollamaUp()) await unloadOllamaModels();
+          await stopQwen(cfg).catch(() => {}); // 半死不活的旧进程先清掉
+          spawnQwen(cfg);
+          await waitQwenReady(cfg);
+        }
+        const result = await runStrataAction(cfg, 'dsh');
+        // 「已经在运行」只在模型本来就在显存里时才算 —— 工作台界面早就开着不代表模型没重新加载
+        return json(res, 200, { ok: true, model: QWEN35_ALIAS, ...result, alreadyRunning: wasLoaded && !!result.alreadyRunning });
       } catch (e) {
         failStartupJob(e.message);
         return json(res, 400, { error: String(e.message || e) });
@@ -1846,6 +2044,11 @@ const server = createSafeServer(async (req, res) => {
       startHealWatchdog();
       out.selfHeal = { enabled: healStore.enabled };
     }
+    if (body.idleRelease && typeof body.idleRelease === 'object') {
+      saveIdleSetting(body.idleRelease);
+      idleReleaser.touch();
+      out.idleRelease = { ...idleStore };
+    }
     return json(res, 200, { ok: true, ...out, settings: readSettings(), selfHeal: healStore.enabled });
   }
 
@@ -1931,6 +2134,8 @@ function listen(port) {
   initLog();
   loadHealSetting();
   startHealWatchdog();
+  loadIdleSetting();
+  idleReleaser.start();
   let port = 7790;
   for (; port < 7800; port++) {
     try { await listen(port); break; } catch { /* 换一个 */ }
@@ -1942,6 +2147,8 @@ function listen(port) {
     return;
   }
   PORT = port;
+  setWorkbenchShellUrl(`http://127.0.0.1:${port}/workbench`);
+  if (cfg.backend === 'strata') startStartupWatcher(cfg);
   const url = `http://127.0.0.1:${port}/`;
   console.log('');
   console.log('==================================================');

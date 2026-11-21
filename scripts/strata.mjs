@@ -37,6 +37,24 @@ export function beginStartupJob({ action = 'workbench', backend = 'strata', mode
   return startupJob;
 }
 
+/**
+ * 后台盯着启动任务，就绪时由它负责打开工作台。
+ *
+ * 以前「就绪 → 打开浏览器」只发生在页面来查进度的那一下：页面一旦不查了
+ * （卡片提前收起、标签页切走、控制台页面根本没开），模型加载完也没人去开工作台。
+ */
+let startupWatcher = null;
+export function startStartupWatcher(cfg) {
+  if (startupWatcher) return;
+  let running = false;
+  startupWatcher = setInterval(async () => {
+    if (running || !startupJob || startupJob.doneAt || startupJob.error) return;
+    running = true;
+    try { await startupProgress(cfg); } catch { /* 下一轮再看 */ } finally { running = false; }
+  }, 1500);
+  if (typeof startupWatcher.unref === 'function') startupWatcher.unref();
+}
+
 /** 失败原因写进当前任务：进度条要能说明白为什么停了 */
 export function failStartupJob(message) {
   if (startupJob && !startupJob.error) startupJob.error = String(message || '启动失败');
@@ -170,10 +188,13 @@ export async function startupProgress(cfg) {
   const backend = startupJob.backend || 'strata';
   const dshProbe = probe(`http://127.0.0.1:${cfg.dshPort}/`);
   const engineProbe = backend === 'ollama' ? null : probe(`http://127.0.0.1:${cfg.enginePort}/health`);
-  const ollamaProbe = backend === 'ollama' ? ollamaState(startupJob.model) : null;
+  // qwen35 复用 ollamaOnline / modelLoaded 两个信号：llama-server 在听 / 模型已就绪
+  const ollamaProbe = backend === 'ollama'
+    ? ollamaState(startupJob.model)
+    : backend === 'qwen35' ? import('./qwen35.mjs').then((m) => m.qwenState(cfg)) : null;
 
   const [dsh, engine, ollama] = await Promise.all([dshProbe, engineProbe, ollamaProbe]);
-  const markers = backend === 'ollama'
+  const markers = backend !== 'strata'
     ? {}
     : parseStartupMarkers(readStartupLog(cfg, startupJob.logBytes));
 
@@ -181,15 +202,17 @@ export async function startupProgress(cfg) {
   const ollamaOnline = Boolean(ollama && ollama.online);
   const modelLoaded = Boolean(ollama && ollama.loaded);
 
-  const ready = backend === 'ollama'
-    ? ollamaOnline && modelLoaded && dsh.online
-    : engineOnline && dsh.online;
+  const ready = backend === 'strata'
+    ? engineOnline && dsh.online
+    : ollamaOnline && modelLoaded && dsh.online;
 
   // 超过 5 分钟还没就绪，就不再假装在启动了：卡住的进度条比明确的失败更让人抓狂
   if (!startupJob.error && now - startupJob.startedAt > 5 * 60 * 1000 && !ready) {
     startupJob.error = backend === 'ollama'
       ? '启动超时（5 分钟仍未就绪），请查看 Ollama 是否正常、模型是否已在本地'
-      : '启动超时（5 分钟仍未就绪），请查看 logs/kit-engine.stdout.log';
+      : backend === 'qwen35'
+        ? '启动超时（5 分钟仍未就绪），请查看 logs/kit-qwen35.stderr.log'
+        : '启动超时（5 分钟仍未就绪），请查看 logs/kit-engine.stdout.log';
   }
 
   const progress = computeStartupProgress({
@@ -209,7 +232,17 @@ export async function startupProgress(cfg) {
 
   // 记住最高水位：轮询间隔内算出的值只能往前走
   startupJob.lastPercent = Math.max(startupJob.lastPercent, progress.percent);
-  if (progress.done && !startupJob.doneAt) startupJob.doneAt = now;
+  if (progress.done && !startupJob.doneAt) {
+    startupJob.doneAt = now;
+    // 就绪那一刻把工作台网页打开（每轮启动只开一次）。
+    // 以前进度条走到 100% 就停了 —— 打开浏览器这一步只存在于旧的命令行启动器里，
+    // 统一控制台从来没做，用户看到「已就绪」却等不到工作台弹出来。
+    startupJob.workbenchUrl = workbenchShellUrl || dshWorkbenchUrl(cfg);
+    if (startupJob.action === 'workbench' && !startupJob.opened) {
+      startupJob.opened = true;
+      openInBrowser(startupJob.workbenchUrl);
+    }
+  }
 
   return {
     active: true,
@@ -218,7 +251,38 @@ export async function startupProgress(cfg) {
     model: startupJob.model || '',
     ...progress,
     startedAt: startupJob.startedAt,
+    workbenchUrl: startupJob.workbenchUrl || null,
   };
+}
+
+/**
+ * 工作台（dsh）的访问地址。dsh 带 token 保护，裸地址会回 401，
+ * 带 token 的完整地址只在它启动时打印到 stdout，这里从日志里取最后一条。
+ */
+export function dshWorkbenchUrl(cfg) {
+  const fallback = `http://127.0.0.1:${cfg.dshPort}/`;
+  try {
+    const text = tailBytes(path.join(cfg.deploymentRoot, 'logs', 'kit-dsh.stdout.log'), 64 * 1024);
+    const all = text.match(/http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9._~-]+/g);
+    return all && all.length ? all[all.length - 1] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * 控制台的工作台外壳页地址（/workbench）。设置后，就绪时打开的是外壳页而不是裸 dsh：
+ * 外壳页开着时和控制台保持连接，关掉就能据此释放显存。
+ */
+let workbenchShellUrl = null;
+export function setWorkbenchShellUrl(url) { workbenchShellUrl = url; }
+
+/** 用系统默认浏览器打开。url.dll 不经过 cmd，不用操心 & 之类的转义 */
+function openInBrowser(url) {
+  if (!/^http:\/\/127\.0\.0\.1:\d+\//.test(url)) return;
+  try {
+    spawn('rundll32.exe', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  } catch { /* 打不开就让页面上的「打开工作台」按钮兜底 */ }
 }
 
 /**

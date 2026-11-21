@@ -1,0 +1,120 @@
+/**
+ * Qwen3.5-35B-A3B-Uncensored（llama.cpp llama-server）服务控制。
+ *
+ * 模型和引擎都在独立目录里（默认 F:\Qwen3.5-35B-A3B-Uncensored），这里只负责：
+ *   起服务 / 探活 / 停服务。参数与该目录里的「启动 Qwen3.5（仅 API）.cmd」保持一致。
+ *
+ * 模型和引擎都**不在仓库里**（21 GB + 1.4 GB），需要自己下载，见 docs/qwen35.md。
+ *
+ * 配置（配置.json，可选）：
+ *   qwen35Home   模型部署目录（里面放 model\ 和 runtime\ 两个子目录）
+ *   qwen35ModelFile  model\ 里的 .gguf 文件名，换别的量化版本时改它
+ *   qwen35Port   端口，默认 8123（避开 Strata 8080/8090 和 DSH 3080）
+ *   qwen35NCpuMoe / qwen35Ctx / qwen35Threads   同 .cmd 里的可调参数
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn, execSync } from 'node:child_process';
+import { pidOnPort } from './detect.mjs';
+
+export const QWEN35_ALIAS = 'Qwen3.5-35B-A3B-Uncensored';
+const DEFAULT_MODEL_FILE = 'Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf';
+/** 模型下载页（国内可把 huggingface.co 换成 hf-mirror.com） */
+export const QWEN35_MODEL_PAGE = 'https://huggingface.co/HauhauCS/Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive';
+/** llama.cpp Windows CUDA 版下载页 */
+export const LLAMA_CPP_RELEASES = 'https://github.com/ggml-org/llama.cpp/releases';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export function qwenSettings(cfg = {}) {
+  const home = cfg.qwen35Home || 'F:\\Qwen3.5-35B-A3B-Uncensored';
+  return {
+    home,
+    exe: path.join(home, 'runtime', 'llama-server.exe'),
+    model: path.join(home, 'model', path.basename(String(cfg.qwen35ModelFile || DEFAULT_MODEL_FILE))),
+    port: Number(cfg.qwen35Port) || 8123,
+    nCpuMoe: Number(cfg.qwen35NCpuMoe) || 10,
+    ctx: Number(cfg.qwen35Ctx) || 32768,
+    threads: Number(cfg.qwen35Threads) || 16,
+    logDir: path.join(cfg.deploymentRoot || home, 'logs'),
+  };
+}
+
+/** 缺了什么、去哪下 —— 给启动失败时的报错用 */
+export function qwenMissingHint(cfg) {
+  const s = qwenSettings(cfg);
+  const missing = [];
+  if (!fs.existsSync(s.model)) missing.push(`模型文件 ${s.model}（下载：${QWEN35_MODEL_PAGE} ，Files 里选 .gguf）`);
+  if (!fs.existsSync(s.exe)) missing.push(`llama.cpp 引擎 ${s.exe}（下载：${LLAMA_CPP_RELEASES} ，选 win-cuda-12.4-x64 并解压到 runtime）`);
+  return missing.length ? `Qwen3.5 还没部署好，缺少：${missing.join('；')}。详见 docs/qwen35.md` : '';
+}
+
+export function qwenInstalled(cfg) {
+  const s = qwenSettings(cfg);
+  return fs.existsSync(s.exe) && fs.existsSync(s.model);
+}
+
+/**
+ * llama-server 的 /health：加载中回 503，就绪回 200。
+ * online = 进程在听端口；loaded = 模型已可用。
+ */
+export async function qwenState(cfg) {
+  const { port } = qwenSettings(cfg);
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1500) });
+    return { online: true, loaded: r.ok, port };
+  } catch {
+    return { online: false, loaded: false, port };
+  }
+}
+
+/** 拉起 llama-server（独立进程，不随控制台退出），日志写到 logs/kit-qwen35.*.log */
+export function spawnQwen(cfg) {
+  const s = qwenSettings(cfg);
+  if (!fs.existsSync(s.exe)) throw new Error(`没找到 llama.cpp 引擎：${s.exe}`);
+  if (!fs.existsSync(s.model)) throw new Error(`没找到模型文件：${s.model}`);
+  fs.mkdirSync(s.logDir, { recursive: true });
+  const out = fs.openSync(path.join(s.logDir, 'kit-qwen35.stdout.log'), 'a');
+  const err = fs.openSync(path.join(s.logDir, 'kit-qwen35.stderr.log'), 'a');
+  const args = [
+    '-m', s.model, '--alias', QWEN35_ALIAS,
+    '--host', '127.0.0.1', '--port', String(s.port),
+    '-ngl', '99', '--n-cpu-moe', String(s.nCpuMoe),
+    '-c', String(s.ctx), '-fa', 'on', '--jinja',
+    '-t', String(s.threads), '-np', '1',
+  ];
+  const child = spawn(s.exe, args, {
+    cwd: path.dirname(s.exe), detached: true, windowsHide: true, stdio: ['ignore', out, err],
+  });
+  child.unref();
+  fs.closeSync(out); fs.closeSync(err);
+  return child.pid;
+}
+
+/** 等 /health 变 200；进程中途退出就立刻报错，不干等 */
+export async function waitQwenReady(cfg, timeoutSec = 240) {
+  const s = qwenSettings(cfg);
+  for (let i = 0; i < timeoutSec; i++) {
+    const st = await qwenState(cfg);
+    if (st.loaded) return true;
+    if (!st.online && i > 20) {
+      throw new Error(`Qwen3.5 服务没起来，请查看 ${path.join(s.logDir, 'kit-qwen35.stderr.log')}（常见原因：显存不够）`);
+    }
+    await sleep(1000);
+  }
+  throw new Error('Qwen3.5 加载超时，请查看 logs/kit-qwen35.stderr.log');
+}
+
+/** 停掉占着 Qwen 端口的 llama-server（只杀 llama-server，别的进程占了端口不动它） */
+export async function stopQwen(cfg) {
+  const { port } = qwenSettings(cfg);
+  const pid = pidOnPort(port);
+  if (!pid) return false;
+  let image = '';
+  try {
+    image = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { encoding: 'utf8', windowsHide: true });
+  } catch { /* ignore */ }
+  if (!/llama-server\.exe/i.test(image)) return false;
+  try { execSync(`taskkill /PID ${pid} /F /T`, { stdio: 'ignore', windowsHide: true }); } catch { /* 已退出 */ }
+  for (let i = 0; i < 20 && pidOnPort(port); i++) await sleep(250);
+  return true;
+}
