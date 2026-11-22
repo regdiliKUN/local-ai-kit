@@ -102,18 +102,7 @@ html, body {
 
 .brand { display: flex; align-items: center; gap: 11px; }
 
-.brand-mark {
-  width: 34px; height: 34px; border-radius: 9px;
-  background: linear-gradient(135deg, #3b82f6, #6d28d9);
-  position: relative;
-}
-.brand-mark::after {
-  content: ""; position: absolute; inset: 0;
-  background: #fff;
-  clip-path: polygon(38% 28%, 38% 72%, 70% 50%);
-  border-radius: 2px;
-  transform: scale(.5);
-}
+.brand-mark { flex: none; }
 
 .brand-title { font-weight: 600; font-size: 15px; }
 .brand-sub { font-size: 12px; color: var(--text-dim); }
