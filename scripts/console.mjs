@@ -914,7 +914,7 @@ async function releaseAllVram(why = `工作台闲置 ${idleStore.minutes} 分钟
 
 const idleReleaser = createIdleReleaser({
   getSetting: () => idleStore,
-  ports: () => [cfg.dshPort, cfg.enginePort, Number(cfg.qwen35Port) || 8123, 11434],
+  ports: () => [cfg.dshPort, cfg.enginePort, Number(cfg.qwen35Port) || 18123, 11434],
   modelLoaded: async () => {
     const [strata, qwen, ollama] = await Promise.all([
       cfg.backend === 'strata' ? strataEngineUp(cfg) : false,

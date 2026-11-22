@@ -14,7 +14,7 @@ function option(name, fallback) {
   return args[i + 1];
 }
 if (args.includes('--help')) {
-  console.log('node scripts/connect-strata.mjs --root F:\\本地AI --strata-home F:\\Strata --dsh-dir C:\\path\\dsh-runtime [--engine-port 8080] [--web-port 8090] [--dsh-port 3080] [--python EXE] [--model-dir DIR] [--dsh-home DIR]');
+  console.log('node scripts/connect-strata.mjs --root F:\\本地AI --strata-home F:\\Strata --dsh-dir C:\\path\\dsh-runtime [--engine-port 18080] [--web-port 18090] [--dsh-port 3080] [--python EXE] [--model-dir DIR] [--dsh-home DIR]');
 } else {
   try {
     const deploymentRoot = path.resolve(option('--root', '.'));
@@ -24,7 +24,7 @@ if (args.includes('--help')) {
       dshHome: path.resolve(option('--dsh-home', process.env.DSH_HOME || path.join(os.homedir(), '.dsh'))),
       pythonExe: path.resolve(option('--python', path.join(strataHome, '.venv', 'Scripts', 'python.exe'))),
       modelDir: path.resolve(option('--model-dir', path.join(path.dirname(deploymentRoot), 'Strata-data'))),
-      enginePort: Number(option('--engine-port', 8080)), webPort: Number(option('--web-port', 8090)),
+      enginePort: Number(option('--engine-port', 18080)), webPort: Number(option('--web-port', 18090)),
       dshPort: Number(option('--dsh-port', 3080)) });
     if (!fs.existsSync(cfg.pythonExe)) throw new Error(`Python 不存在：${cfg.pythonExe}`);
     const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));

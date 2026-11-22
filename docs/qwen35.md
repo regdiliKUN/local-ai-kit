@@ -37,7 +37,7 @@ D:\Qwen3.5-35B-A3B-Uncensored\          ← qwen35Home
 {
   "qwen35Home": "D:\\Qwen3.5-35B-A3B-Uncensored",
   "qwen35ModelFile": "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
-  "qwen35Port": 8123,
+  "qwen35Port": 18123,
   "qwen35NCpuMoe": 10,
   "qwen35Ctx": 32768,
   "qwen35Threads": 16
@@ -49,7 +49,7 @@ D:\Qwen3.5-35B-A3B-Uncensored\          ← qwen35Home
 | `qwen35Home` | `F:\Qwen3.5-35B-A3B-Uncensored` | 上面那个目录 |
 | `qwen35ModelFile` | Q4_K_M 那个文件名 | 换了别的量化版本就改成对应文件名 |
 | `qwen35Mmproj` | 自动 | 看图用的视觉文件名。不写就自动用 `model` 里的 `mmproj*.gguf`；写 `false` 关闭看图 |
-| `qwen35Port` | 8123 | 避开 Strata 的 8080/8090 和工作台的 3080 |
+| `qwen35Port` | 18123 | 必须在 15000 以上：本机动态端口范围是 1024–15000，Windows（Hyper-V/WinNAT）每次开机会在里面随机保留端口，8123 曾因此绑不上 |
 | `qwen35NCpuMoe` | 10 | 多少层 MoE 专家放内存：越小越快、越吃显存 |
 | `qwen35Ctx` | 32768 | 上下文长度 |
 | `qwen35Threads` | 16 | CPU 线程数 |
@@ -65,7 +65,7 @@ D:\Qwen3.5-35B-A3B-Uncensored\          ← qwen35Home
 input: [ text, image ]
 ```
 
-改完重启工作台。可以打开 `http://127.0.0.1:8123/props` 确认 `"vision": true`。
+改完重启工作台。可以打开 `http://127.0.0.1:18123/props` 确认 `"vision": true`。
 
 ## 4. 显存参考（RTX 4090 24 GB，32K 上下文）
 

@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let loading = false;
 let pending = false;
-let state_enginePort = 8080, state_webPort = 8090, state_dshPort = 3080;
+let state_enginePort = 18080, state_webPort = 18090, state_dshPort = 3080;
 
 async function refresh() {
   if (loading) return;

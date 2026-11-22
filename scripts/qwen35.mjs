@@ -11,7 +11,9 @@
  *   qwen35ModelFile  model\ 里的 .gguf 文件名，换别的量化版本时改它
  *   qwen35Mmproj     看图用的视觉投影文件（mmproj-*.gguf）。不写就自动找 model\ 里的 mmproj*.gguf；
  *                    设成 false 关闭看图（省约 1 GB 显存）
- *   qwen35Port   端口，默认 8123（避开 Strata 8080/8090 和 DSH 3080）
+ *   qwen35Port   端口，默认 18123。不要用 15000 以下的端口：这台机器的动态端口范围是
+ *                1024–15000，Hyper-V / WinNAT 每次开机会在里面随机保留几段（例如 8116–8215），
+ *                被保留的端口 llama-server 绑不上，直接退出。
  *   qwen35NCpuMoe / qwen35Ctx / qwen35Threads   同 .cmd 里的可调参数
  */
 import fs from 'node:fs';
@@ -51,7 +53,7 @@ export function qwenSettings(cfg = {}) {
     mmproj: findMmproj(cfg, modelDir),
     exe: path.join(home, 'runtime', 'llama-server.exe'),
     model: path.join(home, 'model', path.basename(String(cfg.qwen35ModelFile || DEFAULT_MODEL_FILE))),
-    port: Number(cfg.qwen35Port) || 8123,
+    port: Number(cfg.qwen35Port) || 18123,
     nCpuMoe: Number(cfg.qwen35NCpuMoe) || 10,
     ctx: Number(cfg.qwen35Ctx) || 32768,
     threads: Number(cfg.qwen35Threads) || 16,
@@ -118,12 +120,28 @@ export async function waitQwenReady(cfg, timeoutSec = 240) {
   for (let i = 0; i < timeoutSec; i++) {
     const st = await qwenState(cfg);
     if (st.loaded) return true;
-    if (!st.online && i > 20) {
-      throw new Error(`Qwen3.5 服务没起来，请查看 ${path.join(s.logDir, 'kit-qwen35.stderr.log')}（常见原因：显存不够）`);
-    }
+    if (!st.online && i > 20) throw new Error(explainQwenFailure(s));
     await sleep(1000);
   }
   throw new Error('Qwen3.5 加载超时，请查看 logs/kit-qwen35.stderr.log');
+}
+
+/** 读日志末尾，按真实原因给报错 —— 别一律说「显存不够」 */
+function explainQwenFailure(s) {
+  const log = path.join(s.logDir, 'kit-qwen35.stderr.log');
+  let tail = '';
+  try {
+    const buf = fs.readFileSync(log);
+    tail = buf.subarray(Math.max(0, buf.length - 4096)).toString('utf8');
+  } catch { /* 没日志 */ }
+  if (/couldn't bind HTTP server socket/i.test(tail)) {
+    return `Qwen3.5 绑不上端口 ${s.port}：被其他程序占用，或被 Windows（Hyper-V/WinNAT）保留了。`
+      + '在 配置.json 里把 qwen35Port 换成 15000 以上的端口，工作台配置里的 baseURL 也要一起改。';
+  }
+  if (/out of memory|cudaMalloc failed|failed to allocate/i.test(tail)) {
+    return `Qwen3.5 显存不够：关掉占显存的程序，或在 配置.json 里把 qwen35NCpuMoe 调大（如 16）。日志：${log}`;
+  }
+  return `Qwen3.5 服务没起来，请查看 ${log}`;
 }
 
 /** 停掉占着 Qwen 端口的 llama-server（只杀 llama-server，别的进程占了端口不动它） */
