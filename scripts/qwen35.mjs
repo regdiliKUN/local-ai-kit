@@ -55,7 +55,10 @@ export function qwenSettings(cfg = {}) {
     model: path.join(home, 'model', path.basename(String(cfg.qwen35ModelFile || DEFAULT_MODEL_FILE))),
     port: Number(cfg.qwen35Port) || 18123,
     nCpuMoe: Number(cfg.qwen35NCpuMoe) || 10,
-    ctx: Number(cfg.qwen35Ctx) || 32768,
+    // 64K：工作台每次请求自带 ~22K 的系统提示 + 工具清单，32K 窗口剩不下多少给对话，
+    // 压缩救不回来，回复会被截断（界面显示「已达到输出 token 上限」）。
+    // 这个模型只有 10/40 层有 KV 缓存，32K→64K 只多约 0.65GB 显存。
+    ctx: Number(cfg.qwen35Ctx) || 65536,
     threads: Number(cfg.qwen35Threads) || 16,
     logDir: path.join(cfg.deploymentRoot || home, 'logs'),
   };

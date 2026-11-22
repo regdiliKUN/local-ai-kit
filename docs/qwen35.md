@@ -39,7 +39,7 @@ D:\Qwen3.5-35B-A3B-Uncensored\          ← qwen35Home
   "qwen35ModelFile": "Qwen3.5-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf",
   "qwen35Port": 18123,
   "qwen35NCpuMoe": 10,
-  "qwen35Ctx": 32768,
+  "qwen35Ctx": 65536,
   "qwen35Threads": 16
 }
 ```
@@ -51,7 +51,7 @@ D:\Qwen3.5-35B-A3B-Uncensored\          ← qwen35Home
 | `qwen35Mmproj` | 自动 | 看图用的视觉文件名。不写就自动用 `model` 里的 `mmproj*.gguf`；写 `false` 关闭看图 |
 | `qwen35Port` | 18123 | 必须在 15000 以上：本机动态端口范围是 1024–15000，Windows（Hyper-V/WinNAT）每次开机会在里面随机保留端口，8123 曾因此绑不上 |
 | `qwen35NCpuMoe` | 10 | 多少层 MoE 专家放内存：越小越快、越吃显存 |
-| `qwen35Ctx` | 32768 | 上下文长度 |
+| `qwen35Ctx` | 65536 | 上下文长度。工作台每次请求自带约 22K 的系统提示和工具清单，32K 剩不下多少给对话，会频繁「达到输出 token 上限」 |
 | `qwen35Threads` | 16 | CPU 线程数 |
 
 改完重新打开控制台即可。

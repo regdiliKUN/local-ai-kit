@@ -26,13 +26,41 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const KIT_ROOT = path.resolve(HERE, '..');
 
-/** 本机压缩策略：窗口 49152 时，阈值落在 22118、逐字保留 12288 */
+/**
+ * 默认压缩策略（云端大窗口模型走这套）。maxTokens 是「摘要请求」自己的输出上限，
+ * 不是对话回复的上限：摘要也要思考，给 6144 才不会「思考吃光配额、摘要为空」。
+ */
 export const COMPACTION_POLICY = {
   thresholdRatio: '0.45',
   headroomTokens: '8192',
   retainRatio: '0.3',
   maxTokens: '6144',
 };
+
+/**
+ * 本地模型逐个定制的压缩策略（compaction-basic 的 modelPolicies）。
+ *
+ * 为什么本地模型不能用默认那套：工作台每次请求都自带约 21.7K token 的系统提示 + 工具清单，
+ * 这部分压缩不掉。按默认比例算出来的阈值（49152 窗口 → 22118）几乎就等于这块固定开销，
+ * 于是要么每一步都在压缩、压完还超（Strata：一次会话 253 次压缩、一半失败），
+ * 要么压缩根本救不回来，提示词一路涨到把窗口塞满，回复被截断 ——
+ * 界面上就是「已达到输出 token 上限」，「继续」也没用（Qwen3.5：32K 窗口被 32768 塞满）。
+ *
+ * 算法（插件源码 resolveCompactSpec）：
+ *   消息预算 = 窗口 − 回复上限(provider 的 maxTokens)
+ *   阈值     = min(窗口 × thresholdRatio, 消息预算 − headroomTokens)
+ *   逐字保留 = retainTokens（最近这么多 token 原样留着，更早的压成摘要）
+ * 约束：固定开销 + 摘要(≤6144) + 逐字保留 < 阈值，否则压完还超、反复压。
+ *
+ *   Qwen3.5  窗口 65536 / 回复 8192  → 阈值 49152，保留 12288；压完 ≈ 21.7K+摘要+12K ≈ 36-40K
+ *            阈值处再加 6144 的摘要输出 ≈ 55K，仍在 64K 窗口里。
+ *   Strata   窗口 49152 / 回复 12288 → 阈值 32768，保留 4096；压完 ≈ 21.7K+摘要+4K ≈ 28-32K
+ *            引擎真实窗口 131072，就算偶尔超过阈值也不会截断回复。
+ */
+export const MODEL_POLICIES = [
+  { provider: 'qwen35-local', model: 'Qwen3.5-35B-A3B-Uncensored', thresholdRatio: '0.75', headroomTokens: '6144', retainTokens: '12288' },
+  { provider: 'strata-local', model: 'qwen3.8-flash-next-iq2_xs', thresholdRatio: '0.75', headroomTokens: '4096', retainTokens: '4096' },
+];
 
 const BEGIN = '# >>> dsh-preset-sync:begin';
 const END = '# <<< dsh-preset-sync:end';
@@ -103,7 +131,7 @@ function dshVersion(manifest) {
 }
 
 /** 在缩进为 indent 的位置写入 / 覆盖 compaction-basic 的 config 块 */
-function applyCompactionConfig(lines, startIdx) {
+export function applyCompactionConfig(lines, startIdx) {
   const base = lines[startIdx].match(/^\s*/)[0];
   const nameIndent = base + '  ';
 
@@ -123,39 +151,57 @@ function applyCompactionConfig(lines, startIdx) {
   // 根层级那条只有 disabled 的同名条目：不碰
   if (nameIdx < 0) return false;
 
-  const kv = Object.entries(COMPACTION_POLICY).map(([k, v]) => `${nameIndent}  ${k}: ${v}`);
+  const managed = renderManagedConfig(nameIndent + '  ');
   const anchor = configIdx >= 0 ? configIdx : nameIdx;
 
   if (configIdx < 0) {
-    lines.splice(anchor + 1, 0, `${nameIndent}config:`, ...kv);
+    lines.splice(anchor + 1, 0, `${nameIndent}config:`, ...managed);
     return true;
   }
 
-  // 已有 config 块：只改块内键，其它键（如 modelPolicies）原样保留
+  // 已有 config 块：按「顶层键」整段替换我们管的键（含整个 modelPolicies 块），
+  // 其它顶层键和注释原样保留。不能按行匹配键名 —— modelPolicies 里每一项也有
+  // maxTokens / thresholdRatio，按行替换会把它们改成默认值。
+  const keyIndent = nameIndent + '  ';
   let end = configIdx + 1;
   while (end < entryEnd) {
     const l = lines[end];
     if (!l.trim()) { end++; continue; }
-    if (!l.startsWith(nameIndent + '  ')) break;
+    if (!l.startsWith(keyIndent)) break;
     end++;
   }
   const body = lines.slice(configIdx + 1, end);
-  const seen = new Set();
-  const kept = body.map((l) => {
-    const m = l.match(/^\s+([A-Za-z][\w]*):/);
-    if (m && COMPACTION_POLICY[m[1]] !== undefined) {
-      seen.add(m[1]);
-      return `${nameIndent}  ${m[1]}: ${COMPACTION_POLICY[m[1]]}`;
+  const ours = new Set([...Object.keys(COMPACTION_POLICY), 'modelPolicies']);
+  const kept = [];
+  let dropping = false;
+  for (const l of body) {
+    const top = l.startsWith(keyIndent) && !l.startsWith(keyIndent + ' ') ? l.slice(keyIndent.length) : null;
+    if (top !== null && !top.startsWith('#')) {
+      const m = top.match(/^([A-Za-z][\w]*):/);
+      dropping = Boolean(m && ours.has(m[1]));
+      if (!dropping) kept.push(l);
+      continue;
     }
-    return l;
-  });
-  const added = Object.keys(COMPACTION_POLICY)
-    .filter((k) => !seen.has(k))
-    .map((k) => `${nameIndent}  ${k}: ${COMPACTION_POLICY[k]}`);
-  const nextBody = [...added, ...kept];
+    // 顶层注释：不属于任何键，保留；更深的行跟着它所属的顶层键走
+    if (top !== null) { dropping = false; kept.push(l); continue; }
+    if (!dropping) kept.push(l);
+  }
+  const nextBody = [...kept, ...managed];
   const changed = nextBody.join('\n') !== body.join('\n');
   lines.splice(configIdx + 1, end - configIdx - 1, ...nextBody);
   return changed;
+}
+
+/** 我们负责的那部分 config：默认参数 + 本地模型逐个的 modelPolicies */
+export function renderManagedConfig(keyIndent) {
+  const out = Object.entries(COMPACTION_POLICY).map(([k, v]) => `${keyIndent}${k}: ${v}`);
+  out.push(`${keyIndent}modelPolicies:`);
+  for (const p of MODEL_POLICIES) {
+    const [first, ...rest] = Object.entries(p);
+    out.push(`${keyIndent}  - ${first[0]}: ${first[1]}`);
+    for (const [k, v] of rest) out.push(`${keyIndent}    ${k}: ${v}`);
+  }
+  return out;
 }
 
 function syncPatchFile(file, version, { dryRun }) {
