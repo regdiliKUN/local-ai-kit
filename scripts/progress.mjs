@@ -40,6 +40,12 @@ export const OLLAMA_STEPS = [
   { id: 'dsh', from: 84, to: 98, label: '启动工作台界面', expect: 9 },
 ];
 
+/** 只开工作台：不碰任何模型，只等界面端口起来 */
+export const DSH_ONLY_STEPS = [
+  { id: 'submit', from: 0, to: 10, label: '已提交启动', expect: 1 },
+  { id: 'dsh', from: 10, to: 98, label: '启动工作台界面', expect: 9 },
+];
+
 /** Qwen3.5-35B-A3B（llama.cpp）启动路径：结构同 Ollama，加载约十几秒 */
 export const QWEN35_STEPS = [
   { id: 'submit', from: 0, to: 4, label: '已提交启动', expect: 1 },
@@ -170,6 +176,21 @@ export function computeStartupProgress({
 } = {}) {
   const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
   const elapsedS = elapsedMs / 1000;
+
+  // 只开工作台（不加载任何模型，用来翻对话历史）：界面端口在听就算好了
+  if (backend === 'dshonly') {
+    if (dshOnline) return readyResult(elapsedMs);
+    const stepId = elapsedS > 1 ? 'dsh' : 'submit';
+    const { step, percent, etaSeconds } = stepProgress(DSH_ONLY_STEPS, stepId, elapsedS, lastPercent);
+    if (error) {
+      return failedResult(elapsedMs, clamp(Math.round(Math.max(lastPercent, step.from)), 0, 99), error);
+    }
+    return {
+      percent, step: step.id, title: '正在打开工作台（不加载模型）', phase: step.label,
+      detail: step.id === 'dsh' ? '只启动工作台界面，不占显存' : '正在下发给服务控制器',
+      elapsedMs, etaSeconds, done: false, failed: false,
+    };
+  }
 
   // Qwen3.5（llama.cpp）和 Ollama 的启动形状一样：让显存 → 起服务 → 读权重 → 开界面。
   // ollamaOnline = llama-server 进程在听端口，modelLoaded = /health 回 200。

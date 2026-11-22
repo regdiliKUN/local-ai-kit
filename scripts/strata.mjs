@@ -187,7 +187,8 @@ export async function startupProgress(cfg) {
 
   const backend = startupJob.backend || 'strata';
   const dshProbe = probe(`http://127.0.0.1:${cfg.dshPort}/`);
-  const engineProbe = backend === 'ollama' ? null : probe(`http://127.0.0.1:${cfg.enginePort}/health`);
+  const engineProbe = backend === 'ollama' || backend === 'dshonly'
+    ? null : probe(`http://127.0.0.1:${cfg.enginePort}/health`);
   // qwen35 复用 ollamaOnline / modelLoaded 两个信号：llama-server 在听 / 模型已就绪
   const ollamaProbe = backend === 'ollama'
     ? ollamaState(startupJob.model)
@@ -204,7 +205,9 @@ export async function startupProgress(cfg) {
 
   const ready = backend === 'strata'
     ? engineOnline && dsh.online
-    : ollamaOnline && modelLoaded && dsh.online;
+    : backend === 'dshonly'
+      ? dsh.online
+      : ollamaOnline && modelLoaded && dsh.online;
 
   // 超过 5 分钟还没就绪，就不再假装在启动了：卡住的进度条比明确的失败更让人抓狂
   if (!startupJob.error && now - startupJob.startedAt > 5 * 60 * 1000 && !ready) {
@@ -212,6 +215,8 @@ export async function startupProgress(cfg) {
       ? '启动超时（5 分钟仍未就绪），请查看 Ollama 是否正常、模型是否已在本地'
       : backend === 'qwen35'
         ? '启动超时（5 分钟仍未就绪），请查看 logs/kit-qwen35.stderr.log'
+        : backend === 'dshonly'
+        ? '工作台 5 分钟仍未就绪，请查看 logs/kit-dsh.stderr.log'
         : '启动超时（5 分钟仍未就绪），请查看 logs/kit-engine.stdout.log';
   }
 

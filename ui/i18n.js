@@ -398,6 +398,8 @@ const DICT = {
   '两个本地模型不能同时跑：启动一个会先把另一个请出显存。Ollama 那个会直接把模型热进显存，第一条消息不用再等。': 'The two local models cannot run at once: starting one makes room by shutting the other down. The Ollama one warms the model into VRAM, so the first message does not wait.',
   '本地模型不能同时跑：启动一个会先把其他的请出显存。Ollama 那个会直接把模型热进显存，第一条消息不用再等。': 'Local models cannot run at once: starting one makes room by shutting the others down. The Ollama one warms the model into VRAM, so the first message does not wait.',
   '启动 Qwen3.5 模型': 'Start the Qwen3.5 model',
+  '只打开工作台': 'Open workbench only',
+  '不加载模型 · 查看对话历史': 'No model loaded · browse chat history',
   'Qwen3.5-35B-A3B Uncensored · MoE · 32K 上下文': 'Qwen3.5-35B-A3B Uncensored · MoE · 32K context',
   '这个启动入口只在 Strata 部署下可用': 'This entry is only available in a Strata deployment',
   '控制台进程是旧版本，请关掉后重新打开「本地AI」': 'The console process is an older version. Close it and reopen "Local AI".',

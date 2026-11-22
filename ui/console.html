@@ -769,6 +769,10 @@
           <span class="btn-title">启动 Qwen3.5 模型</span>
           <span class="btn-sub">Qwen3.5-35B-A3B Uncensored · MoE · 32K 上下文</span>
         </button>
+        <button class="btn ghost btn-model" id="btnStartDshOnly">
+          <span class="btn-title">只打开工作台</span>
+          <span class="btn-sub">不加载模型 · 查看对话历史</span>
+        </button>
         <button class="btn ghost" id="btnStopSvc">停止服务并释放显存</button>
       </div>
       <p class="row-hint" id="svcHint">本地模型不能同时跑：启动一个会先把其他的请出显存。Ollama 那个会直接把模型热进显存，第一条消息不用再等。</p>

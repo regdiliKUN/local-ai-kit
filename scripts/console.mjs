@@ -1295,6 +1295,20 @@ const server = createSafeServer(async (req, res) => {
         return json(res, 400, { error: String(e.message || e) });
       } finally { strataBusy = null; }
     }
+    // 只打开工作台：不启动、也不停任何模型，用来翻对话历史。
+    // 正在跑的模型保持原样（要省显存请用「停止服务」）。
+    if (p === '/api/service/dsh-only' && req.method === 'POST') {
+      if (strataBusy) return json(res, 409, { error: `正在${strataBusy}，请稍候` });
+      strataBusy = '打开工作台';
+      beginStartupJob({ action: 'workbench', backend: 'dshonly' });
+      try {
+        const result = await runStrataAction(cfg, 'dsh');
+        return json(res, 200, { ok: true, ...result });
+      } catch (e) {
+        failStartupJob(e.message);
+        return json(res, 400, { error: String(e.message || e) });
+      } finally { strataBusy = null; }
+    }
     // 启动 Qwen3.5 那一路：停 Strata、卸 Ollama → 起 llama-server → 等模型就绪 → 只开界面
     if (p === '/api/service/qwen35' && req.method === 'POST') {
       if (strataBusy) return json(res, 409, { error: `正在${strataBusy}，请稍候` });

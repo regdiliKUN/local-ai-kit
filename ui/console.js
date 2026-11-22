@@ -4529,11 +4529,11 @@ function setupButtons() {
    */
   const startWorkbench = async (button, endpoint, body) => {
     if (!button || button.disabled) return;
-    if ((endpoint === '/api/service/ollama' || endpoint === '/api/service/qwen35') && !(state && state.strata)) {
+    if (/^\/api\/service\/(ollama|qwen35|dsh-only)$/.test(endpoint) && !(state && state.strata)) {
       toast('这个启动入口只在 Strata 部署下可用');
       return;
     }
-    const buttons = [$('btnStartSvc'), $('btnStartOllama'), $('btnStartQwen35')].filter(Boolean);
+    const buttons = [$('btnStartSvc'), $('btnStartOllama'), $('btnStartQwen35'), $('btnStartDshOnly')].filter(Boolean);
     buttons.forEach((b) => { b.disabled = true; });
     if (state && state.strata) startupBar.begin();
     try {
@@ -4559,6 +4559,9 @@ function setupButtons() {
   }
   if ($('btnStartQwen35')) {
     $('btnStartQwen35').addEventListener('click', () => startWorkbench($('btnStartQwen35'), '/api/service/qwen35', {}));
+  }
+  if ($('btnStartDshOnly')) {
+    $('btnStartDshOnly').addEventListener('click', () => startWorkbench($('btnStartDshOnly'), '/api/service/dsh-only', {}));
   }
 
   $('btnStopSvc').addEventListener('click', async () => {
